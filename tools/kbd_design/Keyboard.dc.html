@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>FS-A1GT 키보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+JP:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.k{position:absolute;box-sizing:border-box;border-radius:6px;font-family:'Share Tech Mono','Noto Sans JP',monospace;overflow:hidden;cursor:default;transition:transform .08s,filter .08s}
+.k:hover{filter:brightness(1.07);transform:translateY(1px)}
+.k .t{position:absolute;top:3px;left:6px;font-size:10px;line-height:12px;color:#5f5c4c}
+.k .m{position:absolute;left:6px;bottom:4px;font-size:16px;line-height:18px;font-weight:700;letter-spacing:0.02em}
+.k .j{position:absolute;right:6px;bottom:4px;font-size:11px;line-height:14px;font-family:'Noto Sans JP',sans-serif;font-weight:500;color:#5a574a}
+.k-lt{background:linear-gradient(#f4f1de,#e2dec6);color:#2b2a22;box-shadow:0 3px 0 #9d9a82,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.75)}
+.k-dk{background:linear-gradient(#bab7a2,#a29f8a);color:#1f1e18;box-shadow:0 3px 0 #6c6a59,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.45)}
+.k-fn{background:linear-gradient(#aaa793,#97947f);color:#17160f;box-shadow:0 3px 0 #66644f,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.4)}
+.k-nm{background:linear-gradient(#cdc9b2,#b6b29b);color:#1f1e18;box-shadow:0 3px 0 #7d7b67,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.55)}
+.k-lit{background:linear-gradient(#ffd96f,#f2b42a) !important;color:#2a1c00 !important;box-shadow:0 3px 0 #a87608,0 0 14px rgba(255,200,60,.65),inset 0 1px 0 rgba(255,255,255,.7) !important}
+.k.c .t{display:none}
+.k.c .m{left:0;right:0;bottom:auto;top:50%;transform:translateY(-50%);text-align:center;font-size:12px}
+.k.big .m{font-size:17px}
+.k.fnk .m{font-size:13px}
+.k.fnk .t{display:block;left:50%;transform:translateX(-50%);top:2px;color:#2f2d22}
+.k.fnk .m{top:62%}
+.k.arr .m{display:none}
+.k.arr::before{content:'';position:absolute;width:13px;height:13px;left:50%;top:50%;margin-left:-6.5px;margin-top:-6.5px}
+.k.cu::before{border-left:3px solid #26251d;border-top:3px solid #26251d;transform:rotate(45deg)}
+.k.cd::before{border-right:3px solid #26251d;border-bottom:3px solid #26251d;transform:rotate(45deg)}
+.k.cl::before{border-left:3px solid #26251d;border-bottom:3px solid #26251d;transform:rotate(45deg)}
+.k.cr::before{border-top:3px solid #26251d;border-right:3px solid #26251d;transform:rotate(45deg)}
+.k.pu{clip-path:polygon(0 0,100% 0,100% 37.5%,50% 100%,0 37.5%);box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.k.pd{clip-path:polygon(0 62.5%,50% 0,100% 62.5%,100% 100%,0 100%);box-shadow:inset 0 -3px 0 #6c6a59}
+.k.pl{clip-path:polygon(0 0,52% 0,100% 50%,52% 100%,0 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.k.pr{clip-path:polygon(48% 0,100% 0,100% 100%,48% 100%,0 50%);box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+.k.pu::before{top:32%}
+.k.pd::before{top:68%}
+.k.pl::before{left:32%}
+.k.pr::before{left:68%}
+</style>
+</helmet>
+<div style="width: 1020px; height: 414px; box-sizing: border-box; padding: 28px; background: #0d0f12;">
+  <div role="img" aria-label="Panasonic FS-A1GT 키보드 그림" style="position: relative; width: 964px; height: 358px; border-radius: 18px; background: linear-gradient(160deg, #a2b2bf, #7b8d9b); border: 1px solid #5f6e7a; box-shadow: inset 0 2px 0 rgba(255,255,255,0.28), 0 16px 34px rgba(0,0,0,0.55);">
+    <div style="position: absolute; left: 14px; top: 14px; right: 14px; bottom: 14px; border-radius: 10px; background: #5a6773; box-shadow: inset 0 3px 10px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.18);"></div>
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="90">
+      <div class="{{k.cls}}" style="{{k.pos}}">
+        <div class="t">{{k.top}}</div>
+        <div class="m">{{k.label}}</div>
+        <div class="j">{{k.kana}}</div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lit":{"editor":"text","default":""},"$preview":{"width":1020,"height":414}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lit = (this.props.lit ?? '').trim();
+    const Px = 43.24, Py = 44.74, ox = 28, oy = 28;
+    const keys = [];
+    const add = (id, x, y, w, h, label, o) => {
+      o = o || {};
+      keys.push({ id, x, y, w, h, label, top: o.top || '', kana: o.kana || '', type: o.type || 'lt', c: !!o.c, big: !!o.big, fnk: !!o.fnk, arr: o.arr || '', raw: !!o.raw });
+    };
+    // 함수키 줄
+    const fn = ['F6/F1', 'F7/F2', 'F8/F3', 'F9/F4', 'F10/F5'];
+    fn.forEach((l, i) => add(l, 0.8 + 1.5 * i, 0, 1.5, 0.8, l, { type: 'fn', c: true }));
+    add('STOP', 8.8, 0, 1.5, 0.8, 'STOP', { type: 'fn', c: true });
+    add('CLS', 10.3, 0, 1.5, 0.8, 'CLS/HOME', { type: 'fn', c: true });
+    add('SELECT', 12.0, 0, 1.6, 0.8, 'SELECT', { type: 'fn', c: true });
+    add('INS', 13.6, 0, 1.0, 0.8, 'INS', { type: 'fn', c: true });
+    add('DEL', 14.6, 0, 1.0, 0.8, 'DEL', { type: 'fn', c: true });
+    // 1줄
+    const r1 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '¥'];
+    const r1t = ['!', '"', '#', '$', '%', '&', "'", '(', ')', '', '=', '~', '|'];
+    const r1k = ['ぬ', 'ふ', 'あ', 'う', 'え', 'お', 'や', 'ゆ', 'よ', 'わ', 'ほ', 'へ', 'ー'];
+    add('ESC', 0, 0.95, 1.2, 1, 'ESC', { type: 'dk', c: true });
+    r1.forEach((l, i) => add(l, 1.2 + i, 0.95, 1, 1, l, { top: r1t[i], kana: r1k[i] }));
+    add('BS', 14.2, 0.95, 1.4, 1, 'BS', { type: 'dk', c: true });
+    // 2줄
+    const r2 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '@', '['];
+    const r2t = ['', '', '', '', '', '', '', '', '', '', '`', '{'];
+    const r2k = ['た', 'て', 'い', 'す', 'か', 'ん', 'な', 'に', 'ら', 'せ', '゛', '゜'];
+    add('TAB', 0, 1.95, 1.6, 1, 'TAB', { type: 'dk', c: true });
+    r2.forEach((l, i) => add(l, 1.6 + i, 1.95, 1, 1, l, { top: r2t[i], kana: r2k[i] }));
+    add('RETURN', 13.6, 1.95, 2.0, 2, 'RETURN', { type: 'dk', c: true });
+    // 3줄
+    const r3 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', ':', ']'];
+    const r3t = ['', '', '', '', '', '', '', '', '', '+', '*', '}'];
+    const r3k = ['ち', 'と', 'し', 'は', 'き', 'く', 'ま', 'の', 'り', 'れ', 'け', 'む'];
+    add('CTRL', 0, 2.95, 1.6, 1, 'CTRL', { type: 'dk', c: true });
+    r3.forEach((l, i) => add(l, 1.6 + i, 2.95, 1, 1, l, { top: r3t[i], kana: r3k[i] }));
+    // 4줄
+    const r4 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', '_'];
+    const r4t = ['', '', '', '', '', '', '', '<', '>', '?', ''];
+    const r4k = ['つ', 'さ', 'そ', 'ひ', 'こ', 'み', 'も', 'ね', 'る', 'め', 'ろ'];
+    add('SHIFTL', 0, 3.95, 2.1, 1, 'SHIFT', { type: 'dk', c: true });
+    r4.forEach((l, i) => add(l, 2.1 + i, 3.95, 1, 1, l, { top: r4t[i], kana: r4k[i] }));
+    add('SHIFTR', 13.1, 3.95, 2.5, 1, 'SHIFT', { type: 'dk', c: true });
+    // 5줄
+    add('CAPS', 1.0, 4.95, 1.3, 1, 'CAPS', { type: 'dk', c: true });
+    add('GRAPH', 2.3, 4.95, 1.3, 1, 'GRAPH', { type: 'dk', c: true });
+    add('MUHEN', 3.6, 4.95, 1.3, 1, '無変換', { type: 'dk', c: true });
+    add('SPACE', 4.9, 4.95, 6.0, 1, 'SPACE', { type: 'lt', c: true });
+    add('JIKKOU', 10.9, 4.95, 1.6, 1, '実行', { type: 'dk', c: true });
+    add('KANA', 12.5, 4.95, 1.3, 1, 'KANA', { type: 'dk', c: true });
+    add('PAUSE', 13.8, 4.95, 1.8, 1, 'PAUSE', { type: 'fn', c: true });
+    // 숫자 패드
+    const np = [['7', '8', '9', '/'], ['4', '5', '6', '*'], ['1', '2', '3', '-'], ['0', ',', '.', '+']];
+    np.forEach((row, r) => row.forEach((l, i) => add('N' + l + r, 17.0 + i, r, 1, 1, l, { type: 'nm', c: true, big: true })));
+    // 방향키
+    // 가운데가 뾰족하게 모이는 네 키 (중심 cx, cy, 틈 g=3px)
+    const cx = 19.0, cy = 5.2625, g = 3 / 48;
+    add('UP', cx - 38 / 48, cy - g - 48 / 48, 76 / 48, 48 / 48, '', { type: 'dk', c: true, arr: 'cu pu', raw: true });
+    add('DOWN', cx - 38 / 48, cy + g, 76 / 48, 48 / 48, '', { type: 'dk', c: true, arr: 'cd pd', raw: true });
+    add('LEFT', cx - g - 95 / 48, cy - 36 / 48, 95 / 48, 72 / 48, '', { type: 'dk', c: true, arr: 'cl pl', raw: true });
+    add('RIGHT', cx + g, cy - 36 / 48, 95 / 48, 72 / 48, '', { type: 'dk', c: true, arr: 'cr pr', raw: true });
+    const out = keys.map((k) => ({
+      cls: 'k k-' + k.type + (k.c ? ' c' : '') + (k.big ? ' big' : '') + (k.fnk ? ' fnk' : '') + (k.arr ? ' arr ' + k.arr : '') + (lit && (lit === k.id || lit === k.label) ? ' k-lit' : ''),
+      pos: 'left:' + Math.round(ox + k.x * Px) + 'px;top:' + Math.round(oy + k.y * Py) + 'px;width:' + Math.round(k.w * Px - (k.raw ? 0 : 4)) + 'px;height:' + Math.round(k.h * Py - (k.raw ? 0 : 4)) + 'px',
+      top: k.top, label: k.label, kana: k.kana
+    }));
+    return { keys: out };
+  }
+}
+</script>
+</body>
+</html>

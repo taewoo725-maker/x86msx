@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CF-2000 키보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+JP:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.k{position:absolute;box-sizing:border-box;border-radius:6px;font-family:'Share Tech Mono','Noto Sans JP',monospace;overflow:hidden;cursor:default;transition:transform .08s,filter .08s}
+.k:hover{filter:brightness(1.07);transform:translateY(1px)}
+.k .t{position:absolute;top:3px;left:6px;font-size:11px;line-height:12px;color:#3a382c}
+.k .m{position:absolute;left:6px;bottom:4px;font-size:16px;line-height:18px;font-weight:700}
+.k .j{position:absolute;right:5px;bottom:4px;font-size:12px;line-height:14px;font-family:'Noto Sans JP',sans-serif;font-weight:700;color:#3a382c}
+.k-cr{background:linear-gradient(#f3ead0,#dccf9a);color:#25241b;box-shadow:0 3px 0 #9b8f5d,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.85)}
+.k-dg{background:linear-gradient(#7c8179,#5f645d);color:#eceee6;box-shadow:0 3px 0 #31342f,0 5px 4px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.28)}
+.k-lit{background:linear-gradient(#ffd96f,#f2b42a) !important;color:#2a1c00 !important;box-shadow:0 3px 0 #a87608,0 0 14px rgba(255,200,60,.75),inset 0 1px 0 rgba(255,255,255,.7) !important}
+.k.c .t,.k.c .j{display:none}
+.k.c .m{left:0;right:0;bottom:auto;top:50%;transform:translateY(-50%);text-align:center;font-size:12px}
+.k.fn .m{left:0;right:0;top:3px;bottom:auto;text-align:center;font-size:13px;line-height:14px}
+.k.fn .j{display:block;left:0;right:0;bottom:2px;text-align:center;font-size:7px;line-height:8px;font-family:'Share Tech Mono',monospace;color:#c3c7bd;font-weight:500}
+.k.led::after{content:'';position:absolute;top:4px;left:6px;width:5px;height:5px;border-radius:50%;background:#d8281f;box-shadow:0 0 5px rgba(255,50,30,.7)}
+.k.led .m{top:58%}
+</style>
+</helmet>
+<div style="width: 1020px; height: 414px; box-sizing: border-box; padding: 28px; background: #0d0f12;">
+  <div role="img" aria-label="National CF-2000 키보드 그림" style="position: relative; width: 964px; height: 358px; border-radius: 16px; background: linear-gradient(170deg, #e0ddd2, #c3c0b2); border: 1px solid #a5a291; box-shadow: inset 0 2px 0 rgba(255,255,255,0.65), 0 16px 34px rgba(0,0,0,0.55);">
+    <div style="position: absolute; left: 30px; top: 31px; width: 40px; height: 30px; border-radius: 4px; background: linear-gradient(#ece9de, #cfccbf); border: 1px solid #a09d8d; box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);"><div style="position: absolute; left: 12px; top: 13px; width: 14px; height: 4px; border-radius: 2px; background: #45443b;"></div></div>
+    <div style="position: absolute; left: 74px; top: 28px; width: 291px; height: 36px; border-radius: 4px; background: #2b2d2a;"></div>
+    <div style="position: absolute; left: 623px; top: 28px; width: 121px; height: 36px; border-radius: 4px; background: #2b2d2a;"></div>
+    <div style="position: absolute; left: 767px; top: 28px; width: 181px; height: 36px; border-radius: 4px; background: #2b2d2a;"></div>
+    <div style="position: absolute; left: 29px; top: 79px; width: 713px; height: 218px; border-radius: 5px; background: #2b2d2a;"></div>
+    <div style="position: absolute; left: 139px; top: 288px; width: 502px; height: 58px; border-radius: 5px; background: #2b2d2a;"></div>
+    <div style="position: absolute; left: 764px; top: 91px; width: 183px; height: 204px; border-radius: 6px; background: linear-gradient(#cfccc0, #d9d6cb); border: 1px solid #a8a595; box-shadow: inset 0 2px 6px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.6);"></div>
+    <svg width="160" height="176" viewBox="0 0 160 176" aria-hidden="true" style="position: absolute; left: 776px; top: 105px; overflow: visible;">
+      <g transform="translate(80 44) scale(0.84) translate(-80 -44)" fill="{{cf.up}}" stroke="{{cf.up}}" stroke-width="7" stroke-linejoin="round"><polygon points="80,0 120,44 80,88 40,44"></polygon></g>
+      <g transform="translate(40 88) scale(0.84) translate(-40 -88)" fill="{{cf.left}}" stroke="{{cf.left}}" stroke-width="7" stroke-linejoin="round"><polygon points="40,44 80,88 40,132 0,88"></polygon></g>
+      <g transform="translate(120 88) scale(0.84) translate(-120 -88)" fill="{{cf.right}}" stroke="{{cf.right}}" stroke-width="7" stroke-linejoin="round"><polygon points="120,44 160,88 120,132 80,88"></polygon></g>
+      <g transform="translate(80 132) scale(0.84) translate(-80 -132)" fill="{{cf.down}}" stroke="{{cf.down}}" stroke-width="7" stroke-linejoin="round"><polygon points="80,88 120,132 80,176 40,132"></polygon></g>
+      <circle cx="80" cy="44" r="19" fill="#3aa6dd"></circle>
+      <circle cx="40" cy="88" r="19" fill="#3aa6dd"></circle>
+      <circle cx="120" cy="88" r="19" fill="#3aa6dd"></circle>
+      <circle cx="80" cy="132" r="19" fill="#3aa6dd"></circle>
+      <g fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="70,49 80,39 90,49"></polyline>
+        <polyline points="45,78 35,88 45,98"></polyline>
+        <polyline points="115,78 125,88 115,98"></polyline>
+        <polyline points="70,127 80,137 90,127"></polyline>
+      </g>
+    </svg>
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="90">
+      <div class="{{k.cls}}" style="{{k.pos}}">
+        <div class="t">{{k.top}}</div>
+        <div class="m">{{k.label}}</div>
+        <div class="j">{{k.kana}}</div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lit":{"editor":"text","default":""},"$preview":{"width":1020,"height":414}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lit = (this.props.lit ?? '').trim();
+    const Px = 45.2, Py = 51, ox = 33, oy = 92;
+    const keys = [];
+    const add = (id, x, y, w, h, label, o) => {
+      o = o || {};
+      keys.push({ id, x, y, w, h, label, top: o.top || '', sub: o.sub || '', type: o.type || 'cr', c: !!o.c, fn: !!o.fn, abs: !!o.abs, led: !!o.led });
+    };
+    // 윗줄 (F1~F5 / STOP HOME / SELECT INS DEL), 좌표는 본체 기준 px
+    const fs = ['F6', 'F7', 'F8', 'F9', 'F10'];
+    ['F1', 'F2', 'F3', 'F4', 'F5'].forEach((l, i) => add(l, 77 + 57.4 * i, 31, 56, 31, l, { type: 'dg', fn: true, abs: true, sub: fs[i] }));
+    add('STOP', 626, 31, 56, 31, 'STOP', { type: 'dg', c: true, abs: true });
+    add('HOME', 684, 31, 57, 31, 'HOME', { type: 'dg', fn: true, abs: true, sub: 'CLS' });
+    add('SELECT', 770, 31, 59, 31, 'SELECT', { type: 'dg', c: true, abs: true });
+    add('INS', 830, 31, 58, 31, 'INS', { type: 'dg', c: true, abs: true });
+    add('DEL', 889, 31, 57, 31, 'DEL', { type: 'dg', c: true, abs: true });
+    // 1줄
+    const r1 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '¥'];
+    const r1t = ['!', '"', '#', '$', '%', '&', "'", '(', ')', '', '=', '~', '|'];
+    const r1k = ['ア', 'イ', 'ウ', 'エ', 'オ', 'ナ', 'ニ', 'ヌ', 'ネ', 'ノ', 'ラ', 'リ', 'ル'];
+    add('ESC', 0, 0, 1.07, 1, 'ESC', { type: 'dg', c: true });
+    r1.forEach((l, i) => add(l, 1.12 + i, 0, 1, 1, l, { top: r1t[i], sub: r1k[i] }));
+    add('BS', 14.17, 0, 1.43, 1, 'BS', { type: 'dg', c: true });
+    // 2줄
+    const r2 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '@', '['];
+    const r2t = ['', '', '', '', '', '', '', '', '', '', '`', '{'];
+    const r2k = ['カ', 'キ', 'ク', 'ケ', 'コ', 'ハ', 'ヒ', 'フ', 'ヘ', 'ホ', 'レ', 'ロ'];
+    add('TAB', 0.12, 1, 1.45, 1, 'TAB', { type: 'dg', c: true });
+    r2.forEach((l, i) => add(l, 1.67 + i, 1, 1, 1, l, { top: r2t[i], sub: r2k[i] }));
+    add('RETURN', 13.7, 1, 1.9, 1, 'RETURN', { type: 'dg', c: true });
+    // 3줄
+    const r3 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', ':', ']'];
+    const r3t = ['', '', '', '', '', '', '', '', '', '+', '*', '}'];
+    const r3k = ['サ', 'シ', 'ス', 'セ', 'ソ', 'マ', 'ミ', 'ム', 'メ', 'モ', '゛', '゜'];
+    add('CTRL', 0.18, 2, 1.67, 1, 'CTRL', { type: 'dg', c: true });
+    r3.forEach((l, i) => add(l, 1.93 + i, 2, 1, 1, l, { top: r3t[i], sub: r3k[i] }));
+    add('KANA', 13.85, 2, 1.7, 1, 'かな', { type: 'dg', c: true, led: true });
+    // 4줄
+    const r4 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', '_'];
+    const r4t = ['', '', '', '', '', '', '', '<', '>', '?', ''];
+    const r4k = ['タ', 'チ', 'ツ', 'テ', 'ト', 'ヤ', 'ユ', 'ヨ', 'ワ', 'ヲ', 'ン'];
+    add('SHIFTL', 0.18, 3, 2.2, 1, 'SHIFT', { type: 'dg', c: true });
+    r4.forEach((l, i) => add(l, 2.46 + i, 3, 1, 1, l, { top: r4t[i], sub: r4k[i] }));
+    add('SHIFTR', 13.47, 3, 2.1, 1, 'SHIFT', { type: 'dg', c: true });
+    // 5줄
+    add('CAPS', 2.49, 4, 0.95, 1, 'CAPS', { type: 'dg', c: true, led: true });
+    add('GRAPH', 3.5, 4, 0.9, 1, 'GRAPH', { type: 'dg', c: true });
+    add('SPACE', 4.47, 4, 8.8, 1, '', { type: 'dg', c: true });
+    const out = keys.map((k) => ({
+      cls: 'k k-' + k.type + (k.c ? ' c' : '') + (k.fn ? ' fn' : '') + (k.led ? ' led' : '') + (lit && (lit === k.id || lit === k.label) ? ' k-lit' : ''),
+      pos: k.abs
+        ? 'left:' + Math.round(k.x) + 'px;top:' + k.y + 'px;width:' + Math.round(k.w) + 'px;height:' + k.h + 'px'
+        : 'left:' + Math.round(ox + k.x * Px) + 'px;top:' + Math.round(oy + k.y * Py) + 'px;width:' + Math.round(k.w * Px - 4) + 'px;height:' + (Py - 4) + 'px',
+      top: k.top, label: k.label, kana: k.sub
+    }));
+    const base = '#eee4bb', hi = '#ffd05a';
+    const cf = {
+      up: lit === 'UP' ? hi : base,
+      left: lit === 'LEFT' ? hi : base,
+      right: lit === 'RIGHT' ? hi : base,
+      down: lit === 'DOWN' ? hi : base
+    };
+    return { keys: out, cf };
+  }
+}
+</script>
+</body>
+</html>

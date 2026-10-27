@@ -1,0 +1,5 @@
+build/
+__pycache__/
+*.pyc
+# 상용 ROM·게임은 올리지 않음 (본인 PC에서만 사용)
+tests/regress/local/

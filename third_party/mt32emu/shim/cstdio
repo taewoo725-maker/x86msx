@@ -1,0 +1,7 @@
+#include <stdio.h>
+#include <stdarg.h>
+extern "C" int mt_vsnprintf(char *b, unsigned n, const char *f, va_list ap);
+extern "C" int sprintf(char *b, const char *f, ...);
+extern "C" int snprintf(char *b, unsigned n, const char *f, ...);
+extern "C" int vsnprintf(char *b, unsigned n, const char *f, va_list ap);
+extern "C" int vprintf(const char *f, va_list ap);

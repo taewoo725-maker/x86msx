@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CPC-300 키보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+KR:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.k{position:absolute;box-sizing:border-box;border-radius:6px;font-family:'Share Tech Mono','Noto Sans KR',monospace;overflow:hidden;cursor:default;transition:transform .08s,filter .08s}
+.k:hover{filter:brightness(1.06);transform:translateY(1px)}
+.k .t{position:absolute;top:3px;left:6px;font-size:11px;line-height:12px;color:#5a5747}
+.k .u{position:absolute;top:3px;right:5px;font-size:10px;line-height:12px;font-family:'Noto Sans KR',sans-serif;font-weight:500;color:#5a5747}
+.k .m{position:absolute;left:6px;bottom:4px;font-size:16px;line-height:18px;font-weight:700}
+.k .j{position:absolute;right:5px;bottom:4px;font-size:11px;line-height:14px;font-family:'Noto Sans KR',sans-serif;font-weight:500;color:#4a4838}
+.k-wh{background:linear-gradient(#fbfaf3,#e9e6d8);color:#26251d;box-shadow:0 3px 0 #a9a58f,0 5px 4px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.9)}
+.k-gy{background:linear-gradient(#a3a29a,#8a8982);color:#1b1b16;box-shadow:0 3px 0 #5f5e57,0 5px 4px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.4)}
+.k-bl{background:linear-gradient(#3f7cc0,#2b629f);color:#ffffff;box-shadow:0 3px 0 #1c4272,0 5px 4px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.35)}
+.k-lit{background:linear-gradient(#ffd96f,#f2b42a) !important;color:#2a1c00 !important;box-shadow:0 3px 0 #a87608,0 0 14px rgba(255,200,60,.7),inset 0 1px 0 rgba(255,255,255,.7) !important}
+.k.c .t,.k.c .u,.k.c .j{display:none}
+.k.c .m{left:0;right:0;bottom:auto;top:50%;transform:translateY(-50%);text-align:center;font-size:12px}
+.k.big .m{font-size:17px}
+.k.fs .m{left:7px;right:auto;text-align:left;font-size:12px}
+.k.fs .j{display:block;top:50%;bottom:auto;transform:translateY(-50%);font-size:9px;line-height:10px;font-family:'Share Tech Mono',monospace;color:#2f2e26}
+.k.led::after{content:'';position:absolute;top:5px;left:7px;width:6px;height:6px;border-radius:50%;background:#16160f}
+.k.ret .m{top:24%}
+</style>
+</helmet>
+<div style="width: 1020px; height: 414px; box-sizing: border-box; padding: 28px; background: #0d0f12;">
+  <div role="img" aria-label="Daewoo CPC-300 키보드 그림" style="position: relative; width: 964px; height: 358px; border-radius: 16px; background: linear-gradient(170deg, #e6e3d5, #c7c3b0); border: 1px solid #a19d8a; box-shadow: inset 0 2px 0 rgba(255,255,255,0.65), 0 16px 34px rgba(0,0,0,0.55);">
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 36px; border-radius: 16px 16px 0 0; background: linear-gradient(#efece0, #dcd8c7); border-bottom: 1px solid #b2ae9b;"></div>
+    <div style="position: absolute; left: 28px; top: 10px; width: 58px; height: 24px; border-radius: 4px; background: linear-gradient(#cfe0f0, #8fb2d6); border: 1px solid #5f7e9f; box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);"></div>
+    <div style="position: absolute; left: 14px; top: 106px; width: 714px; height: 244px; border-radius: 8px; background: #b3af9d; box-shadow: inset 0 3px 10px rgba(0,0,0,0.38), 0 1px 0 rgba(255,255,255,0.55);"></div>
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="90">
+      <div class="{{k.cls}}" style="{{k.pos}}">
+        <div class="t">{{k.top}}</div>
+        <div class="u">{{k.tj}}</div>
+        <div class="m">{{k.label}}</div>
+        <div class="j">{{k.kana}}</div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lit":{"editor":"text","default":""},"$preview":{"width":1020,"height":414}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lit = (this.props.lit ?? '').trim();
+    const Px = 45.7, Py = 44.06, ox = 28, oy = 56;
+    const keys = [];
+    const add = (id, x, y, w, h, label, o) => {
+      o = o || {};
+      keys.push({ id, x, y, w, h, label, top: o.top || '', tj: o.tj || '', sub: o.sub || '', type: o.type || 'wh', c: !!o.c, fs: !!o.fs, big: !!o.big, led: !!o.led });
+    };
+    // 윗줄 (함수키)
+    const fsub = ['F6', 'F7', 'F8', 'F9', 'F10'];
+    ['F1', 'F2', 'F3', 'F4', 'F5'].forEach((l, i) => add(l, 1.24 * i, 0, 1.2, 0.6, l, { type: 'gy', fs: true, sub: fsub[i] }));
+    add('STOP', 8.4, 0.02, 1.2, 0.58, 'STOP', { type: 'gy', c: true });
+    add('SELECT', 9.7, 0.02, 1.2, 0.58, 'SELECT', { type: 'gy', c: true });
+    add('HOME', 11.4, 0.0, 1.25, 0.6, 'HOME', { type: 'gy', fs: true, sub: 'CLS' });
+    add('INS', 12.7, 0.0, 1.15, 0.6, 'INS', { type: 'gy', c: true });
+    add('DEL', 13.9, 0.0, 1.1, 0.6, 'DEL', { type: 'gy', c: true });
+    // 1줄
+    const r1 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '₩'];
+    const r1t = ['!', '"', '#', '$', '%', '&', "'", '(', ')', '', '=', '~', '|'];
+    add('ESC', 0, 1.4, 1.0, 1, 'ESC', { type: 'gy', c: true });
+    r1.forEach((l, i) => add(l, 1.0 + i, 1.4, 1, 1, l, { top: r1t[i] }));
+    add('BS', 14.0, 1.4, 1.0, 1, 'BS', { type: 'gy', c: true });
+    // 2줄
+    const r2 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '@', '['];
+    const r2t = ['', '', '', '', '', '', '', '', '', '', '`', '{'];
+    const r2j = ['ㅂ', 'ㅈ', 'ㄷ', 'ㄱ', 'ㅅ', 'ㅛ', 'ㅕ', 'ㅑ', 'ㅐ', 'ㅔ', '', ''];
+    const r2u = ['ㅃ', 'ㅉ', 'ㄸ', 'ㄲ', 'ㅆ', '', '', '', 'ㅒ', 'ㅖ', '', ''];
+    add('TAB', 0, 2.4, 1.5, 1, 'TAB', { type: 'gy', c: true });
+    r2.forEach((l, i) => add(l, 1.5 + i, 2.4, 1, 1, l, { top: r2t[i], sub: r2j[i], tj: r2u[i] }));
+    add('RETURN', 13.5, 2.4, 1.5, 2, 'RETURN', { type: 'gy', c: true });
+    // 3줄
+    const r3 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', ':', ']'];
+    const r3t = ['', '', '', '', '', '', '', '', '', '+', '*', '}'];
+    const r3j = ['ㅁ', 'ㄴ', 'ㅇ', 'ㄹ', 'ㅎ', 'ㅗ', 'ㅓ', 'ㅏ', 'ㅣ', '', '', ''];
+    add('CTRL', 0, 3.4, 1.5, 1, 'CTRL', { type: 'gy', c: true });
+    r3.forEach((l, i) => add(l, 1.5 + i, 3.4, 1, 1, l, { top: r3t[i], sub: r3j[i] }));
+    // 4줄
+    const r4 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', '_'];
+    const r4t = ['', '', '', '', '', '', '', '<', '>', '?', ''];
+    const r4j = ['ㅋ', 'ㅌ', 'ㅊ', 'ㅍ', 'ㅠ', 'ㅜ', 'ㅡ', '', '', '', ''];
+    add('SHIFTL', 0, 4.4, 2.2, 1, 'SHIFT', { type: 'gy', c: true });
+    r4.forEach((l, i) => add(l, 2.2 + i, 4.4, 1, 1, l, { top: r4t[i], sub: r4j[i] }));
+    add('SHIFTR', 13.2, 4.4, 1.8, 1, 'SHIFT', { type: 'gy', c: true });
+    // 5줄
+    add('CAPS', 2.0, 5.4, 1.0, 1, 'CAPS', { type: 'gy', c: true, led: true });
+    add('GRAPH', 3.0, 5.4, 1.0, 1, 'GRAPH', { type: 'gy', c: true });
+    add('SPACE', 4.0, 5.4, 8.2, 1, '', { type: 'gy', c: true });
+    add('HANGUL', 12.3, 5.4, 1.0, 1, '한글', { type: 'gy', c: true, led: true });
+    // 숫자 패드
+    const np = [['7', '8', '9', '/'], ['4', '5', '6', '*'], ['1', '2', '3', '-'], ['0', ',', '.', '+']];
+    np.forEach((row, r) => row.forEach((l, i) => add('N' + l + r, 15.85 + i, 0 + r * 1.0, 1, 1, l, { c: true, big: true })));
+    // 방향키
+    add('UP', 17.1, 4.4, 1.4, 0.95, '▲', { type: 'bl', c: true, big: true });
+    add('LEFT', 15.85, 4.85, 1.25, 1.0, '◀', { type: 'bl', c: true, big: true });
+    add('RIGHT', 18.5, 4.85, 1.25, 1.0, '▶', { type: 'bl', c: true, big: true });
+    add('DOWN', 17.1, 5.35, 1.4, 0.95, '▼', { type: 'bl', c: true, big: true });
+    const out = keys.map((k) => ({
+      cls: 'k k-' + k.type + (k.c ? ' c' : '') + (k.fs ? ' fs' : '') + (k.big ? ' big' : '') + (k.led ? ' led' : '') + (lit && (lit === k.id || lit === k.label) ? ' k-lit' : ''),
+      pos: 'left:' + Math.round(ox + k.x * Px) + 'px;top:' + Math.round(oy + k.y * Py) + 'px;width:' + Math.round(k.w * Px - 4) + 'px;height:' + Math.round(k.h * Py - 4) + 'px',
+      top: k.top, tj: k.tj, label: k.label, kana: k.sub
+    }));
+    return { keys: out };
+  }
+}
+</script>
+</body>
+</html>

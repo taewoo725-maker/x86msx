@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>FS-A1 키보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+JP:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.k{position:absolute;box-sizing:border-box;border-radius:7px;font-family:'Share Tech Mono','Noto Sans JP',monospace;overflow:hidden;cursor:default;transition:transform .08s,filter .08s}
+.k:hover{filter:brightness(1.18);transform:translateY(1px)}
+.k .t{position:absolute;top:3px;left:6px;font-size:10px;line-height:12px;color:#eba06a}
+.k .m{position:absolute;left:6px;bottom:4px;font-size:16px;line-height:18px;font-weight:700;letter-spacing:0.02em}
+.k .j{position:absolute;right:6px;bottom:4px;font-size:12px;line-height:14px;font-family:'Noto Sans JP',sans-serif;font-weight:500;color:#f0a56d}
+.k-lt{background:linear-gradient(#5a5a60,#3e3e44);color:#f09a5c;box-shadow:0 3px 0 #131315,0 5px 4px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.2)}
+.k-dk{background:linear-gradient(#45454a,#2e2e33);color:#f09a5c;box-shadow:0 3px 0 #0e0e10,0 5px 4px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.16)}
+.k-fn{background:linear-gradient(#5f5f65,#48484e);color:#f09a5c;box-shadow:0 3px 0 #131315,0 5px 4px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.22)}
+.k-rd{background:radial-gradient(circle at 50% 35%,#4a4a50,#26262a);color:#f09a5c;box-shadow:0 2px 0 #09090b,0 4px 4px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.16)}
+.k-lit{background:linear-gradient(#ffd96f,#f2b42a) !important;color:#2a1c00 !important;box-shadow:0 3px 0 #a87608,0 0 14px rgba(255,200,60,.75),inset 0 1px 0 rgba(255,255,255,.7) !important}
+.k-lit .t,.k-lit .j{color:#4a3300}
+.k.c .t,.k.c .j{display:none}
+.k.c .m{left:0;right:0;bottom:auto;top:50%;transform:translateY(-50%);text-align:center;font-size:12px}
+.k.dim .m{color:#b7733f}
+.k.pill{border-radius:999px}
+.k.circ{border-radius:50%}
+.k.arr .m{display:none}
+.k.arr::before{content:'';position:absolute;width:11px;height:11px;left:50%;top:50%;margin-left:-5.5px;margin-top:-5.5px}
+.k.cu::before{border-left:3px solid #f09a5c;border-top:3px solid #f09a5c;transform:translateY(2px) rotate(45deg)}
+.k.cd::before{border-right:3px solid #f09a5c;border-bottom:3px solid #f09a5c;transform:translateY(-2px) rotate(45deg)}
+.k.cl::before{border-left:3px solid #f09a5c;border-bottom:3px solid #f09a5c;transform:translateX(2px) rotate(45deg)}
+.k.cr::before{border-top:3px solid #f09a5c;border-right:3px solid #f09a5c;transform:translateX(-2px) rotate(45deg)}
+.k-lit.arr::before{border-color:#2a1c00}
+</style>
+</helmet>
+<div style="width: 1020px; height: 414px; box-sizing: border-box; padding: 28px; background: #0d0f12;">
+  <div role="img" aria-label="Panasonic FS-A1 키보드 그림" style="position: relative; width: 964px; height: 358px; border-radius: 16px; background: linear-gradient(170deg, #26262b, #0f0f12); border: 1px solid #34343b; box-shadow: inset 0 2px 0 rgba(255,255,255,0.1), 0 16px 34px rgba(0,0,0,0.6);">
+    <div style="position: absolute; left: 14px; top: 66px; width: 786px; height: 276px; border-radius: 8px; background: #08080a; box-shadow: inset 0 3px 10px rgba(0,0,0,0.9), 0 1px 0 rgba(255,255,255,0.08);"></div>
+    <div style="position: absolute; left: 808px; top: 83px; width: 143px; height: 144px; border-radius: 10px; overflow: hidden; background: #1b1b1e; box-shadow: inset 0 2px 8px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.1);">
+      <svg width="143" height="144" viewBox="0 0 143 144" aria-hidden="true" style="display: block;">
+        <polygon points="0,0 143,0 71.5,72" fill="#2d2d31"></polygon>
+        <polygon points="0,144 143,144 71.5,72" fill="#2d2d31"></polygon>
+        <polygon points="0,0 0,144 71.5,72" fill="#232326"></polygon>
+        <polygon points="143,0 143,144 71.5,72" fill="#232326"></polygon>
+        <line x1="0" y1="0" x2="143" y2="144" stroke="#0a0a0c" stroke-width="4"></line>
+        <line x1="143" y1="0" x2="0" y2="144" stroke="#0a0a0c" stroke-width="4"></line>
+        <line x1="2" y1="-1" x2="145" y2="143" stroke="#4a4a50" stroke-width="1"></line>
+        <line x1="141" y1="-1" x2="-2" y2="143" stroke="#4a4a50" stroke-width="1"></line>
+      </svg>
+    </div>
+    <div style="position: absolute; left: 808px; top: 12px; width: 143px; padding: 3px 5px; box-sizing: border-box; border: 1px solid #5a5a60; border-radius: 3px; color: #c9c9ce; font-family: 'Noto Sans JP', sans-serif; font-size: 8px; line-height: 10px;">ご注意 カートリッジの抜き差しは電源切の状態で行なってください。</div>
+    <div style="position: absolute; left: 872px; top: 54px; width: 7px; height: 7px; border-radius: 50%; background: #e0352a; box-shadow: 0 0 8px rgba(255,60,40,0.8);"></div>
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="90">
+      <div class="{{k.cls}}" style="{{k.pos}}">
+        <div class="t">{{k.top}}</div>
+        <div class="m">{{k.label}}</div>
+        <div class="j">{{k.kana}}</div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lit":{"editor":"text","default":""},"$preview":{"width":1020,"height":414}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lit = (this.props.lit ?? '').trim();
+    const Px = 51.0, Py = 50.3, ox = 28, oy = 28;
+    const keys = [];
+    const add = (id, x, y, w, h, label, o) => {
+      o = o || {};
+      keys.push({ id, x, y, w, h, label, top: o.top || '', sub: o.sub || '', type: o.type || 'lt', c: !!o.c, shape: o.shape || '', arr: o.arr || '', abs: !!o.abs, dim: !!o.dim });
+    };
+    // 함수키 줄 (한 줄로 이어진 긴 줄)
+    const fl = ['F6/F1', 'F7/F2', 'F8/F3', 'F9/F4', 'F10/F5', 'STOP', 'CLS/HOME', 'SELECT', 'INS', 'DEL'];
+    fl.forEach((l, i) => add(l, 0.2 + 1.46 * i, 0, 1.42, 0.6, l, { type: 'fn', c: true }));
+    // 1줄
+    const r1 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '¥'];
+    const r1t = ['!', '"', '#', '$', '%', '&', "'", '(', ')', '', '=', '~', '|'];
+    const r1k = ['あ', 'い', 'う', 'え', 'お', 'な', 'に', 'ぬ', 'ね', 'の', 'ら', 'り', 'る'];
+    add('ESC', 0, 1.0, 1.0, 1, 'ESC', { type: 'dk', c: true });
+    r1.forEach((l, i) => add(l, 1.0 + i, 1.0, 1, 1, l, { top: r1t[i], sub: r1k[i] }));
+    add('BS', 14.0, 1.0, 1.0, 1, 'BS', { type: 'dk', c: true });
+    // 2줄
+    const r2 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '@', '['];
+    const r2t = ['', '', '', '', '', '', '', '', '', '', '`', '{'];
+    const r2k = ['か', 'き', 'く', 'け', 'こ', 'は', 'ひ', 'ふ', 'へ', 'ほ', 'れ', 'ろ'];
+    add('TAB', 0, 2.0, 1.4, 1, 'TAB', { type: 'dk', c: true });
+    r2.forEach((l, i) => add(l, 1.4 + i, 2.0, 1, 1, l, { top: r2t[i], sub: r2k[i] }));
+    add('RETURN', 13.8, 2.0, 1.2, 2, 'RETURN', { type: 'dk', c: true });
+    // 3줄
+    const r3 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', ':', ']'];
+    const r3t = ['', '', '', '', '', '', '', '', '', '+', '*', '}'];
+    const r3k = ['さ', 'し', 'す', 'せ', 'そ', 'ま', 'み', 'む', 'め', 'も', 'ゃ', '゜'];
+    add('CTRL', 0, 3.0, 1.7, 1, 'CTRL', { type: 'dk', c: true });
+    r3.forEach((l, i) => add(l, 1.7 + i, 3.0, 1, 1, l, { top: r3t[i], sub: r3k[i] }));
+    // 4줄
+    const r4 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', '_'];
+    const r4t = ['', '', '', '', '', '', '', '<', '>', '?', ''];
+    const r4k = ['た', 'ち', 'つ', 'て', 'と', 'や', 'ゆ', 'よ', 'わ', 'を', 'ん'];
+    add('SHIFTL', 0, 4.0, 2.2, 1, 'SHIFT', { type: 'dk', c: true });
+    r4.forEach((l, i) => add(l, 2.2 + i, 4.0, 1, 1, l, { top: r4t[i], sub: r4k[i] }));
+    add('SHIFTR', 13.2, 4.0, 1.8, 1, 'SHIFT', { type: 'dk', c: true });
+    // 5줄
+    add('CAPS', 2.2, 5.0, 1.0, 1, 'CAPS', { type: 'dk', c: true });
+    add('GRAPH', 3.2, 5.0, 1.0, 1, 'GRAPH', { type: 'dk', c: true });
+    add('SPACE', 4.2, 5.0, 7.8, 1, 'SPACE', { type: 'dk', c: true });
+    add('KANA', 12.2, 5.0, 1.0, 1, 'かな', { type: 'dk', c: true });
+    add('PAUSE', 13.4, 5.0, 1.6, 1, 'PAUSE', { type: 'dk', c: true, shape: 'pill', dim: true });
+    // 방향키 (X자 판 위의 둥근 키 네 개, 좌표는 본체 기준 px)
+    add('UP', 860, 92, 40, 40, '', { type: 'rd', c: true, arr: 'cu', abs: true, shape: 'circ' });
+    add('LEFT', 811, 135, 40, 40, '', { type: 'rd', c: true, arr: 'cl', abs: true, shape: 'circ' });
+    add('RIGHT', 909, 135, 40, 40, '', { type: 'rd', c: true, arr: 'cr', abs: true, shape: 'circ' });
+    add('DOWN', 860, 178, 40, 40, '', { type: 'rd', c: true, arr: 'cd', abs: true, shape: 'circ' });
+    const out = keys.map((k) => ({
+      cls: 'k k-' + k.type + (k.c ? ' c' : '') + (k.shape ? ' ' + k.shape : '') + (k.dim ? ' dim' : '') + (k.arr ? ' arr ' + k.arr : '') + (lit && (lit === k.id || lit === k.label) ? ' k-lit' : ''),
+      pos: k.abs
+        ? 'left:' + k.x + 'px;top:' + k.y + 'px;width:' + k.w + 'px;height:' + k.h + 'px'
+        : 'left:' + Math.round(ox + k.x * Px) + 'px;top:' + Math.round(oy + k.y * Py) + 'px;width:' + Math.round(k.w * Px - 4) + 'px;height:' + Math.round(k.h * Py - 4) + 'px',
+      top: k.top, label: k.label, kana: k.sub
+    }));
+    return { keys: out };
+  }
+}
+</script>
+</body>
+</html>

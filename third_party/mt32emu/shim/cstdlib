@@ -1,0 +1,6 @@
+#include <stdlib.h>
+/* 5.0.180: 본체(운영체제 없음)용 최소 C 표준 라이브러리 흉내 */
+typedef struct { int quot, rem; } mt_div_t;
+extern "C" int abs(int x);
+extern "C" int rand(void);
+namespace std { typedef mt_div_t div_t; static inline div_t div(int a, int b) { div_t r; r.quot = a / b; r.rem = a % b; return r; } using ::abs; using ::rand; }

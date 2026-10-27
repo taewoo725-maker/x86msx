@@ -1,0 +1,26 @@
+# X86MSX 회귀 시험 목록 (tests/regress.py). 한 줄 = 시험 하나. 칸은 | 로 나눔
+# 이름 | 기종 폴더 | 프레임 수 | 화면 찍을 프레임(쉼표) | 환경 변수(공백) | 카트리지 | msxrun 추가 인자
+# 카트리지·기종 롬이 없으면 SKIP (local/ 아래 파일은 배포하지 않는 개인 시험용)
+cb1_boot     | machines/C-BIOS        | 400  | 200,399 |                | |
+cb2_boot     | tests/machines/cbios2  | 400  | 200,399 |                | |
+cb2p_boot    | tests/machines/cbios2p | 400  | 200,399 |                | |
+cb1_konami   | machines/C-BIOS        | 600  | 599     |                | tests/carts/konami.rom    |
+cb1_konscc   | machines/C-BIOS        | 600  | 599     | AUDIO=1        | tests/carts/konamiscc.rom |
+cb1_ascii8   | machines/C-BIOS        | 600  | 599     |                | tests/carts/ascii8.rom    |
+cb1_ascii16  | machines/C-BIOS        | 600  | 599     |                | tests/carts/ascii16.rom   |
+cb1_plain16  | machines/C-BIOS        | 600  | 599     |                | tests/carts/plain16.rom   |
+cb1_plain32  | machines/C-BIOS        | 600  | 599     |                | tests/carts/plain32.rom   |
+cb2p_konscc  | tests/machines/cbios2p | 600  | 599     | AUDIO=1        | tests/carts/konamiscc.rom |
+cb2p_ascii16 | tests/machines/cbios2p | 600  | 599     |                | tests/carts/ascii16.rom   |
+cb1_sound    | machines/C-BIOS        | 300  | 299     | CARTMAP=2      | tests/carts/soundtest.rom |
+cb2p_sound   | tests/machines/cbios2p | 300  | 299     | CARTMAP=2 AUDIO=1 MOON=1 | tests/carts/soundtest.rom |
+v9_b1        | tests/machines/cbios2p | 400  | 399     | V9990=1        | tests/carts/v9test.rom    |
+v9_bp4       | tests/machines/cbios2p | 400  | 399     | V9990=1        | tests/carts/v9pal.rom     |
+gofigure     | tests/machines/cbios2p | 2301 | 1300,1700,2100,2300 | MOON=1 | tests/regress/local/gofigure.rom | --key 1150 8 0 5 --key 1190 8 0 5 --key 1230 8 0 5 --key 1270 8 0 5 --key 1310 8 0 5 --key 1350 8 0 5 --key 1390 8 0 5 --key 1430 8 0 5 --key 1470 8 0 5
+# 실기 롬 기종 (tests/regress/local/machines — 사용자 롬, 배포 안 함): 부팅 + BASIC 그림·소리
+real_dpc200  | tests/regress/local/machines/dpc200  | 2000 | 450,1999 | | | --type 500 '10 screen 2:line(0,0)-(255,191),15:circle(128,96),60,8:play"cdefgab"\n20 goto 20\nrun\n'
+real_cpc400s | tests/regress/local/machines/cpc400s | 2000 | 450,1999 | | | --type 500 '10 screen 5:line(0,0)-(255,211),8,bf:circle(128,100),60,15:play"cdefgab"\n20 goto 20\nrun\n'
+real_a1wsx   | tests/regress/local/machines/a1wsx   | 2900 | 1200,2899 | | | --type 1300 '10 call music:screen 8:line(0,0)-(255,211),28,bf:circle(128,100),60,255:play#2,"cdefgab"\n20 goto 20\nrun\n'
+real_a1gt    | tests/regress/local/machines/a1gt    | 2900 | 1200,2899 | | | --type 1300 '10 call music:screen 7:line(0,0)-(511,211),4,bf:circle(256,100),90,15:play#2,"cdefgab"\n20 goto 20\nrun\n'
+real_a1wsx_dsk | tests/regress/local/machines/a1wsx | 1200 | 1199 | DISKA=$ROOT/tests/carts/boot.dsk | |
+real_a1gt_dsk  | tests/regress/local/machines/a1gt  | 1200 | 1199 | DISKA=$ROOT/tests/carts/boot.dsk | |

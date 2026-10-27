@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>DPC-200 키보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+KR:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.k{position:absolute;box-sizing:border-box;border-radius:6px;font-family:'Share Tech Mono','Noto Sans KR',monospace;overflow:hidden;cursor:default;transition:transform .08s,filter .08s}
+.k:hover{filter:brightness(1.07);transform:translateY(1px)}
+.k .t{position:absolute;top:4px;left:0;right:0;text-align:center;font-size:11px;line-height:12px;color:#5f5c4c}
+.k .m{position:absolute;left:0;right:0;bottom:4px;text-align:center;font-size:16px;line-height:18px;font-weight:700}
+.k .j{display:none}
+.k-lt{background:linear-gradient(#f6f3e6,#e4e0cc);color:#2b2a22;box-shadow:0 3px 0 #a09c86,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.8)}
+.k-tn{background:linear-gradient(#d3cfba,#bfbba5);color:#25241d;box-shadow:0 3px 0 #85826d,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.55)}
+.k-fn{background:linear-gradient(#c9c5ae,#b3af98);color:#1d1c15;box-shadow:0 3px 0 #77745f,0 5px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.5)}
+.k-lit{background:linear-gradient(#ffd96f,#f2b42a) !important;color:#2a1c00 !important;box-shadow:0 3px 0 #a87608,0 0 14px rgba(255,200,60,.65),inset 0 1px 0 rgba(255,255,255,.7) !important}
+.k.c .t{display:none}
+.k.c .m{bottom:auto;top:50%;transform:translateY(-50%);font-size:12px}
+.k.fs .m{left:7px;right:auto;text-align:left;font-size:12px}
+.k.fs .j{display:block;position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;line-height:10px;color:#4f4c3f}
+.k.ret{clip-path:polygon(0 0,100% 0,100% 100%,33.3% 100%,33.3% 50%,0 50%);box-shadow:inset 0 -3px 0 #85826d,inset 0 1px 0 rgba(255,255,255,.55)}
+.k.ret .m{top:24%}
+</style>
+</helmet>
+<div style="width: 1020px; height: 414px; box-sizing: border-box; padding: 28px; background: #0d0f12;">
+  <div role="img" aria-label="Daewoo DPC-200 키보드 그림" style="position: relative; width: 964px; height: 358px; border-radius: 16px; background: linear-gradient(165deg, #a3aebb, #7c889a); border: 1px solid #5d6877; box-shadow: inset 0 2px 0 rgba(255,255,255,0.3), 0 16px 34px rgba(0,0,0,0.55);">
+    <div style="position: absolute; left: 14px; top: 76px; width: 760px; height: 272px; border-radius: 8px; background: #566170; box-shadow: inset 0 3px 10px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.2);"></div>
+    <div style="position: absolute; left: 14px; top: 90px; width: 20px; height: 1px;"></div>
+    <div style="position: absolute; left: 30px; top: 28px; width: 40px; height: 31px; border-radius: 5px; background: linear-gradient(#aab3bf,#8a94a2); box-shadow: 0 2px 0 #5b6573, inset 0 1px 0 rgba(255,255,255,0.5);">
+      <div style="position: absolute; left: 12px; top: 13px; width: 16px; height: 4px; border-radius: 1px; background: #c0392b; box-shadow: 0 0 6px rgba(220,60,40,0.7);"></div>
+    </div>
+    <div style="position: absolute; left: 772px; top: 90px; width: 163px; height: 192px; border-radius: 8px; background: #8b97a8; border: 2px solid #5f6b7b; box-sizing: border-box; box-shadow: inset 0 2px 6px rgba(0,0,0,0.35);">
+      <svg width="135" height="140" viewBox="0 0 270 280" aria-hidden="true" style="position: absolute; left: 12px; top: 24px;">
+        <defs>
+          <clipPath id="padclip"><rect x="4" y="4" width="262" height="272" rx="26"></rect></clipPath>
+        </defs>
+        <g clip-path="url(#padclip)">
+          <rect x="0" y="0" width="270" height="280" fill="#86a6de"></rect>
+          <polygon points="4,4 266,4 135,140" fill="#a3c0ee"></polygon>
+          <polygon points="4,4 4,276 135,140" fill="#86a6de"></polygon>
+          <polygon points="266,4 266,276 135,140" fill="#86a6de"></polygon>
+          <polygon points="4,276 266,276 135,140" fill="#9ab8ea"></polygon>
+          <line x1="4" y1="4" x2="266" y2="276" stroke="#3f64a8" stroke-width="12"></line>
+          <line x1="266" y1="4" x2="4" y2="276" stroke="#3f64a8" stroke-width="12"></line>
+          <line x1="8" y1="2" x2="270" y2="274" stroke="#7798d6" stroke-width="3"></line>
+          <line x1="262" y1="2" x2="0" y2="274" stroke="#7798d6" stroke-width="3"></line>
+        </g>
+        <rect x="4" y="4" width="262" height="272" rx="26" fill="none" stroke="#3f5f9f" stroke-width="3"></rect>
+        <polyline points="113,62 135,44 157,62" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+        <polyline points="113,218 135,236 157,218" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+        <polyline points="62,118 44,140 62,162" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+        <polyline points="208,118 226,140 208,162" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+      </svg>
+    </div>
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="80">
+      <div class="{{k.cls}}" style="{{k.pos}}">
+        <div class="t">{{k.top}}</div>
+        <div class="m">{{k.label}}</div>
+        <div class="j">{{k.kana}}</div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lit":{"editor":"text","default":""},"$preview":{"width":1020,"height":414}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lit = (this.props.lit ?? '').trim();
+    const P = 48, ox = 28, oy = 28;
+    const keys = [];
+    const add = (id, x, y, w, h, label, o) => {
+      o = o || {};
+      keys.push({ id, x, y, w, h, label, top: o.top || '', sub: o.sub || '', type: o.type || 'lt', c: !!o.c, fs: !!o.fs, ret: !!o.ret });
+    };
+    // 윗줄
+    const fkeys = ['F1', 'F2', 'F3', 'F4', 'F5'];
+    const fsub = ['F6', 'F7', 'F8', 'F9', 'F10'];
+    fkeys.forEach((l, i) => add(l, 1.45 + 1.22 * i, 0, 1.18, 0.65, l, { type: 'fn', fs: true, sub: fsub[i] }));
+    add('STOP', 12.25, 0.02, 1.2, 0.63, 'STOP', { type: 'fn', c: true });
+    add('SELECT', 13.5, 0.02, 1.2, 0.63, 'SELECT', { type: 'fn', c: true });
+    add('HOME', 15.2, 0.05, 1.25, 0.65, 'HOME', { type: 'fn', fs: true, sub: 'CLS' });
+    add('INS', 16.5, 0.05, 1.15, 0.65, 'INS', { type: 'fn', c: true });
+    add('DEL', 17.7, 0.05, 1.2, 0.65, 'DEL', { type: 'fn', c: true });
+    // 1줄
+    const r1 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\\'];
+    const r1t = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '|'];
+    add('ESC', 0, 1.2, 1.0, 1, 'ESC', { type: 'tn', c: true });
+    r1.forEach((l, i) => add(l, 1.0 + i, 1.2, 1, 1, l, { top: r1t[i] }));
+    add('BS', 14.0, 1.2, 1.0, 1, 'BS', { type: 'tn', c: true });
+    // 2줄
+    const r2 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '[', ']'];
+    const r2t = ['', '', '', '', '', '', '', '', '', '', '{', '}'];
+    add('TAB', 0, 2.2, 1.5, 1, 'TAB', { type: 'tn', c: true });
+    r2.forEach((l, i) => add(l, 1.5 + i, 2.2, 1, 1, l, { top: r2t[i] }));
+    add('RETURN', 13.5, 2.2, 1.5, 2, 'RETURN', { type: 'tn', c: true, ret: true });
+    // 3줄
+    const r3 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', "'", '`'];
+    const r3t = ['', '', '', '', '', '', '', '', '', ':', '"', '~'];
+    add('CTRL', 0, 3.2, 1.7, 1, 'CTRL', { type: 'tn', c: true });
+    r3.forEach((l, i) => add(l, 1.7 + i, 3.2, 1, 1, l, { top: r3t[i] }));
+    // 4줄
+    const r4 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', '₩'];
+    const r4t = ['', '', '', '', '', '', '', '<', '>', '?', '_'];
+    add('SHIFTL', 0, 4.2, 2.2, 1, 'SHIFT', { type: 'tn', c: true });
+    r4.forEach((l, i) => add(l, 2.2 + i, 4.2, 1, 1, l, { top: r4t[i] }));
+    add('SHIFTR', 13.2, 4.2, 1.8, 1, 'SHIFT', { type: 'tn', c: true });
+    // 5줄
+    add('CAPS', 1.9, 5.2, 1.0, 1, 'CAPS', { type: 'tn', c: true });
+    add('GRAPH', 2.9, 5.2, 1.0, 1, 'GRAPH', { type: 'tn', c: true });
+    add('SPACE', 3.9, 5.2, 8.0, 1, '', { type: 'tn', c: true });
+    add('HANGUL', 11.9, 5.2, 1.0, 1, '한글', { type: 'tn', c: true });
+    const out = keys.map((k) => ({
+      cls: 'k k-' + k.type + (k.c ? ' c' : '') + (k.fs ? ' fs' : '') + (k.ret ? ' ret' : '') + (lit && (lit === k.id || lit === k.label) ? ' k-lit' : ''),
+      pos: 'left:' + Math.round(ox + k.x * P) + 'px;top:' + Math.round(oy + k.y * P) + 'px;width:' + Math.round(k.w * P - 4) + 'px;height:' + Math.round(k.h * P - 4) + 'px',
+      top: k.top, label: k.label, kana: k.sub
+    }));
+    return { keys: out };
+  }
+}
+</script>
+</body>
+</html>

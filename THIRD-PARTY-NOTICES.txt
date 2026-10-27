@@ -1,0 +1,190 @@
+; 만든이: KimTaeWoo
+; 도와준이: Lee.J.H
+x86MSX - THIRD-PARTY NOTICES
+================================================================================
+
+x86MSX is an MSX emulator (MSX TURBO GT / MSX TURBO ST machines).
+
+x86MSX's own code is licensed under the GNU GPL v3 or later (see LICENSE).
+It bundles or builds on the third-party components listed in section 0.
+
+The notices below also concern trademarks, hardware specifications, and
+user-supplied content.
+
+
+--------------------------------------------------------------------------------
+0. THIRD-PARTY COMPONENTS
+--------------------------------------------------------------------------------
+
+  * emu2413 (YM2413 / VRC7)        MIT        third_party/emu2413/LICENSE
+  * emu8950 (Y8950 / MSX-AUDIO)    MIT        third_party/emu8950/LICENSE
+  * tinf (inflate)                 zlib       third_party/tinf/LICENSE
+  * lwIP (TCP/IP stack, legacy-BIOS network, 5.0.94~)
+                                   BSD-3      third_party/lwip/COPYING
+  * Galmuri fonts (Lee Minseo)     OFL 1.1    third_party/galmuri/LICENSE.txt
+  * DejaVu Sans                    Bitstream Vera / public domain parts
+                                              third_party/dejavu/LICENSE.txt
+  * C-BIOS (MSX compatible BIOS)   BSD        Machines/MSX - C-BIOS/LICENSE-C-BIOS.txt
+  * TimGM6mb SoundFont             GPL-2.0    third_party/timgm6mb/ (data)
+  * Munt mt32emu (MT-32 / CM-32L, UEFI build, 5.0.180~)
+                                   LGPL-2.1+  third_party/mt32emu/COPYING.LESSER.txt
+  * Nuked-SC55 (Roland SC-55 / SC-55mkII, UEFI build, 5.2.60~), nukeykt
+                                   GPL-2.0-or-later
+                                              third_party/nukedsc55/LICENSE
+    (MT-32 / SC-55 ROMs are NOT included; the user supplies them in
+    USB\MidiSound\MT32 and USB\MidiSound\SC55.)
+  * Nextor                         own terms  LICENSE-Nextor.txt (free distribution,
+                                              no sale; not covered by the GPL)
+  * Data derived from blueMSX and openMSX (ROM databases, keyboard/unicode
+    maps, machine profiles): GPL-2.0-or-later, third_party/databases/ and
+    third_party/unicodemaps/.
+  * V9990 (Yamaha E-VDP-III / Gfx9000) emulation, src/v9990.c: written anew for
+    x86MSX; register access rules, VRAM layout, command behaviour and screen
+    timing follow the behaviour of openMSX's V9990 implementation
+    (GPL-2.0-or-later, https://openmsx.org) and the Yamaha V9990 data sheet.
+    x86MSX itself is GPL-3.0-or-later, which is compatible.
+
+
+--------------------------------------------------------------------------------
+1. TRADEMARKS
+--------------------------------------------------------------------------------
+
+"MSX" and "MSX TURBO" are trademarks of their respective owners. Other product,
+company and chip names mentioned in x86MSX and its documentation (including
+Zilog Z80, ASCII R800, General Instrument AY-3-8910, Yamaha YM2149 / YM2413)
+are trademarks or registered trademarks of their respective owners.
+
+x86MSX is an independent project and is not affiliated with, endorsed by, or
+sponsored by any of these owners. Names are used for identification and
+compatibility description only.
+
+
+--------------------------------------------------------------------------------
+2. HARDWARE SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+The emulation of the following hardware was implemented independently, based on
+publicly available documentation and technical specifications. No third-party
+source code is included.
+
+  * Yamaha V9990 video processor (Gfx9000 cartridge)
+  * Zilog Z80 CPU
+  * ASCII R800 CPU
+  * PSG (AY-3-8910 / YM2149 compatible)
+  * MSX-MUSIC (YM2413 compatible FM sound)
+  * PCM
+  * MSX-MIDI interface
+  * MSX slot / memory-mapper architecture
+
+
+--------------------------------------------------------------------------------
+3. SYSTEM ROMS AND SOFTWARE
+--------------------------------------------------------------------------------
+
+MSX BIOS, MSX-BASIC, sub-ROM, Kanji ROM and other firmware images, as well as
+MSX games and application software, are copyrighted works of their respective
+owners. x86MSX does not include them (except the free C-BIOS). Users are responsible for
+ensuring that they have the legal right to use any ROM or disk image they load
+into the emulator.
+
+
+--------------------------------------------------------------------------------
+4. DISCLAIMER
+--------------------------------------------------------------------------------
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+5. LINUX KERNEL AMDGPU / RTW88 REGISTER DEFINITIONS (MIT)
+--------------------------------------------------------------------------------
+
+Register offsets and bit positions used in uefi/main.c (HPD/DDC diagnostics),
+uefi/amdedid.c (DDC EDID read), uefi/amddisp.c (display state) and uefi/rtwdet.c (RTL8822CE identification)
+were taken from the Linux kernel sources (torvalds/linux):
+  drivers/gpu/drm/amd/include/asic_reg/dcn/dcn_2_1_0_offset.h
+  drivers/gpu/drm/amd/include/asic_reg/dcn/dcn_2_1_0_sh_mask.h
+  drivers/net/wireless/realtek/rtw88/reg.h
+Copyright (c) Advanced Micro Devices, Inc. / Realtek Corporation. Licensed under
+the MIT License (AMD headers) or as stated in the respective source files.
+Only numeric register addresses/bit masks are used; no kernel code is copied.
+
+------------------------------------------------------------------------
+Linux kernel drivers/gpu/drm/amd/amdgpu/atom.c (ATOM BIOS interpreter) - semantics ported in uefi/atomrun.inc
+Copyright 2008 Advanced Micro Devices, Inc.   Author: Stanislaw Skowronek
+License: MIT
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+
+================================================================================
+Linux rtw88 (Realtek RTL8822C 전원 켜기 순서·레지스터 값 참고) — BSD-3-Clause 로 사용
+  uefi/rtwdet.c 의 rtwdet_power() 는 rtw88 드라이버(drivers/net/wireless/realtek/rtw88, SPDX: GPL-2.0 OR BSD-3-Clause)의
+  카드 켜기 표(rtw8822c.c)와 파서(mac.c)의 순서·값을 참고해 다시 쓴 것이다. 원문 소스는 포함하지 않는다.
+  Copyright(c) 2018-2019 Realtek Corporation
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
+  following conditions are met:
+  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+     disclaimer.
+  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+     following disclaimer in the documentation and/or other materials provided with the distribution.
+  3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote
+     products derived from this software without specific prior written permission.
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+Realtek RTL8822C 무선랜 펌웨어 (DRV\rtw8822c_fw.bin) — 수정 없이 그대로 배포 (바이너리 재배포 허용)
+  출처: linux-firmware (rtw88/rtw8822c_fw.bin, WHENCE: "Redistributable. See LICENCE.rtlwifi_firmware.txt").
+  SHA-256 3deecb31210986d98cdbfb000391e08d602a6eee4ffc883969faa2b907ab03ba
+  라이선스 전문은 DRV\LICENCE.rtlwifi_firmware.txt 에 있다. 요지: 수정 없는 바이너리 재배포 허용, 저작권·면책 고지 유지,
+  Realtek 이름을 홍보에 쓰지 않음, 역공학·디컴파일·역어셈블 금지.
+  Copyright (c) 2010, Realtek Semiconductor Corporation. All rights reserved.
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING,
+  BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+  SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+[5.0.144] DRV\rtw8822c_phy.bin: Linux rtw88 의 rtw8822c_table.c (GPL-2.0 OR BSD-3-Clause, Copyright(c) 2018-2019 Realtek Corporation) 의 MAC/BB/AGC/RF 표에서 컷 D·RFE 1·PCIe 조건에 맞는 항목만 골라 바이너리로 옮긴 것. BSD-3-Clause 조건으로 배포하며 위 rtw88 고지문이 그대로 적용된다.
+
+[5.0.146] uefi/rtwrfk.inc : Linux rtw88 rtw8822c.c 의 RF 초기화 함수(DAC 보정·열 보정·전력 보정·PA 바이어스)를 tools/genrfk_rtw8822c.py 로 그대로 옮긴 것.
+  원본: SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause, Copyright(c) 2018-2019 Realtek Corporation. 본 프로젝트는 BSD-3-Clause 조건으로 사용한다.
+[5.0.147] uefi/rtwchan.inc : Linux rtw88 rtw8822c.c / mac.c 의 채널 설정 함수(rtw8822c_set_channel 계열, rtw_set_channel_mac)와 그 매크로를 tools/genchan_rtw8822c.py 로 그대로 옮긴 것. 라이선스 조건은 위와 같음(BSD-3-Clause 로 사용).
+[5.0.148] uefi/rtwdet.c rtw_scan : rtw88 pci.c 의 수신 링 설정(rtw_pci_reset_buf_desc)·수신 처리(rtw_pci_rx_napi)·수신 서술자 필드 정의를 참고해 직접 작성(코드 복사 없음).
+[5.0.149] uefi/rtwdet.c rtw_txpwr2g/tx_mgmt : rtw8822c.c(송신 전력 기준값 레지스터)·tx.c/pci.c(송신 서술자·BD 필드)를 참고해 직접 작성(코드 복사 없음).
+[5.0.150] uefi/wpa.c : SHA-1·HMAC·PBKDF2·PRF·AES·AES키풀기(RFC3394)·CCM/CCMP 를 표준 문서(FIPS 180-4, RFC 2104/2898/3394/3610, IEEE 802.11)에 따라 직접 작성(외부 코드 복사 없음). 시험: tests/wpatest.c 와 파이썬 hashlib/cryptography 결과 일치 확인.
+[5.0.150] uefi/rtwdet.c rtw_connect : 인증·결합·EAPOL 4-way·DHCP·ARP·ICMP 를 IEEE 802.11 / RFC 2131 / RFC 826 / RFC 792 에 따라 직접 작성(코드 복사 없음). 송신 서술자 필드는 rtw88 tx.h 를 참고.
+[5.0.151] uefi/rtwdet.c rtw_coexfix : rtw88 rtw8822c.c 의 coex 초기화·DPK GNT 고정 순서를 참고해 직접 작성(코드 복사 없음).
+[5.0.152] uefi/wpa.c tkip_decrypt : IEEE 802.11i 의 TKIP 키 혼합(1·2단계)·RC4·CRC32 를 표준에 따라 직접 작성(코드 복사 없음).
+
+uefi/usbnic_r8152.c (5.2.110): Realtek RTL8152/8153 USB Ethernet register sequences follow U-Boot drivers/usb/eth/r8152.c
+(SPDX GPL-2.0, Copyright (c) 2015 Realtek Semiconductor Corp.), rewritten for UEFI USB_IO.
+
+ASIX USB Ethernet (uefi/usbnic_asix.c, 5.2.117)
+  Register sequences and values follow U-Boot drivers/usb/eth/asix.c (Copyright (c) 2011 The Chromium OS Authors; patched for AX88772B by Antmicro Ltd)
+  and drivers/usb/eth/asix88179.c (Copyright (c) 2014 Rene Griessl), both GPL-2.0+, rewritten for the UEFI USB_IO protocol.

@@ -1,0 +1,1 @@
+memchain machines=4 states=12000 hash=dafdb4fa931112bb

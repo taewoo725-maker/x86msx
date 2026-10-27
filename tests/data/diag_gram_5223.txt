@@ -1,0 +1,82 @@
+X86MSX 5.2.23 GPU_DIAG
+== video outputs ==
+== system ==
+X86MSX 5.2.23 (2026-10-12)
+== system ==
+machine: MSX2 - Daewoo CPC-400
+speed 1 %  busy 99 %  frame gap max 642 ms
+video WC: on (PAT), vsync: off
+sound snd: on
+usb usb: kbd 1
+ROM DB msxromdb OK msxsysromdb OK
+vsync off (timer pacing)
+volume 6 %
+diag draw ms: info 63  sound_diag 1256
+== sound (codec) ==
+stream RUN 1  FIFORDY 1  LPIB 00B90  est 0
+write pos 3713  peak 0  re-init 0
+codec 0 AFG 01 pwr 00  GPIO en 00 dir 00 data 00
+pin 17 ctl 00 eapd 02 pwr 00 sense 0 amp 00/00
+  path 0C:p0 i00 o00 02:p0 s10 f0011 o7F
+pin 21 ctl C0 eapd 02 pwr 00 sense 1 amp 00/00
+  path 0C:p0 i00 o00 02:p0 s10 f0011 o7F
+GPIO n 8  cfg: 12=411111F0 13=40000000 14=411111F0
+   17=90170110 18=03A11030 19=411111F0
+   1A=411111F0 1D=4066826D 1E=411111F0
+   1F=411111F0 21=03211020
+amp: bit7 = mute. pwr 0 = D0(on). eapd bit1 = amp on
+(sound_diag 1178 ms)
+> 1: 2560x1600  - LGD
+    modes 9 fmt 1 fb 7080xxxx 7MB edid 256
+== info ==
+USB timer events: 46212 (firmware timer OK)
+file create/write status: 00000000/00000000
+file I/O: 89/s  total 522
+W 0:\LOG\TRACE.TXT
+boot mode: UEFI, 64-bit (firmware services kept)
+screen 1920x1080 scale x5
+screen update: Blt 1.4 ms, copy 0.4 ms -> Blt
+screen gpu 8086:7D55 bar 1800000C
+screen reg 070000 000113/00023B 000000/000000
+8042 keyboard: present, firmware driver detached
+8042 cfg 67 -> 67  kbd F6/F4 ack Y/Y
+HDA 00:1F.3 8086:7E28 codec 10EC:0298 pins 17,21 corb <- used
+VT-d: no ACPI 2
+HDA DMA map: 00:1F.3 bm ok
+gpu 00:02.0 8086:7D55 cls030000
+ BAR0=1800000C 1=00000050 2=0000000C 3=00000040 CMD=0007
+ BAR4=00000000 5=00000000
+note: no AMD display (1022)
+wifi 0 00:14.3 8086:7E40 rev 20
+wifi 0 name Intel Wi-Fi
+wifi 0 CMD=0000 BAR0=192C4004 BAR2=00000000
+wifi 0 subsys 8086:0094 PCIe Gen0 x0
+wifi rtw: C822 not found
+
+USB keyboard: interface 0, endpoint 0x81, OK
+USB keyboards: 1  (firmware USB stack, hubs OK)
+USB gamepads: 0
+USB MIDI in: none
+USB MIDI out: none
+USB mouse via firmware pointer res 8
+  packets 0, mouse reports 0
+HID 046D:C52B iface 0 1/1 -> keyboard (Logitech)
+HID 046D:C52B iface 2 0/0 -> not a mouse (Logitech)
+USB mice: 1
+HID CPU: GenuineIntel fam 6 model AA
+HID I2C PCI (class 0C80): 8086:7E78 8086:7E79 8086:7E23 
+HID PCI devices: 25, ACPI tables: 28
+HID I2C ctl ACPI: INTC1048 INTC1046 INTC10B0 INTC1092 
+HID      INTC1077 INTC1073 INTC109B 
+HID touchpad ACPI: MSFT0001 PNP0C500 
+HID I2C probe: skipped: not AMD CPU
+USB 046D:C52B if0 HID keyboard 03/01/01 Logitech
+USB 046D:C52B if1 HID mouse 03/01/02 Logitech
+USB 046D:C52B if2 HID 03/00/00 Logitech
+USB 04F2:B772 if0 camera 0E/01/01
+USB 04F2:B772 if1 camera 0E/02/01
+USB 04F2:B772 if2 camera 0E/01/01
+USB 04F2:B772 if3 camera 0E/02/01
+USB 0781:55A3 if0 storage 08/06/50
+PS/2 mouse: none
+== steps (history) ==

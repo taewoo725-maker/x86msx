@@ -1,0 +1,1360 @@
+== kind 0 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=d08bc28e09ee2c64
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=64 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 0 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 1 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=edabafa396143692
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=65 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 1 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 2 a
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 2 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 3 a
+cart 0 present=1 mapper=5 size=65536 banks8=8 slot=1 ss=0 data=da450d96837e55ca
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 3 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 4 a
+cart 0 present=1 mapper=6 size=65536 banks8=8 slot=1 ss=0 data=88aa06d54d4dda9a
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 4 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 5 a
+cart 0 present=1 mapper=0 size=0 banks8=0 slot=1 ss=0 data=14650fb0739d0383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=262144 ide=0
+== kind 5 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 6 a
+cart 0 present=1 mapper=0 size=0 banks8=0 slot=1 ss=0 data=14650fb0739d0383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=524288 ide=0
+== kind 6 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 7 a
+cart 0 present=1 mapper=0 size=0 banks8=0 slot=1 ss=0 data=14650fb0739d0383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=1048576 ide=0
+== kind 7 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 8 a
+cart 0 present=1 mapper=0 size=0 banks8=0 slot=1 ss=0 data=14650fb0739d0383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=2097152 ide=0
+== kind 8 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 9 a
+cart 0 present=1 mapper=0 size=0 banks8=0 slot=1 ss=0 data=14650fb0739d0383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=4194304 ide=0
+== kind 9 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 10 a
+cart 0 present=1 mapper=7 size=131072 banks8=16 slot=1 ss=0 data=fe72814514a90383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 10 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 11 a
+cart 0 present=1 mapper=8 size=131072 banks8=16 slot=1 ss=0 data=9649444b48cb36e5
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 11 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 12 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=1 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 12 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 13 a
+cart 0 present=1 mapper=8 size=131072 banks8=16 slot=1 ss=0 data=8e0dc2a803660e8c
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 13 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 14 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=1 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 14 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 15 a
+cart 0 present=1 mapper=13 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 15 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 16 a
+cart 0 present=1 mapper=11 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 16 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 17 a
+cart 0 present=1 mapper=11 size=262144 banks8=32 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 17 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 18 a
+cart 0 present=1 mapper=11 size=524288 banks8=64 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 18 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 19 a
+cart 0 present=1 mapper=11 size=786432 banks8=96 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 19 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 20 a
+cart 0 present=1 mapper=11 size=2097152 banks8=256 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 20 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 21 a
+cart 0 present=1 mapper=12 size=16384 banks8=2 slot=1 ss=0 data=f1820ff1a9d80383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 21 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 22 a
+cart 0 present=1 mapper=12 size=32768 banks8=4 slot=1 ss=0 data=479250b7d35225d7
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 22 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=c53f2952ccd1776a
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 23 a
+cart 0 present=1 mapper=12 size=49152 banks8=6 slot=1 ss=0 data=dc4ceb9e7b9525d7
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 23 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=93f1890d2decf76a
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 24 a
+cart 0 present=1 mapper=12 size=65536 banks8=8 slot=1 ss=0 data=28fc038823d825d7
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 24 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=a31066cc0f08776a
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 25 a
+cart 0 present=1 mapper=0 size=32768 banks8=4 slot=1 ss=0 data=a533a15c2b7a4fbc
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=1 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 25 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 26 a
+cart 0 present=1 mapper=0 size=32768 banks8=4 slot=1 ss=0 data=87fcc1d945533901
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=1 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 26 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 27 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=b2e440b588ab5513
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=57 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 27 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 28 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=716ec6a0db5bdda0
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=65 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 28 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 29 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=b994327cabb4637c
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=65 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 29 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 30 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=c57315cabbeee405
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=65 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 30 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 31 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=3eda3c08ff796ff1
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=65 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 31 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 32 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=5c45599981dada13
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=65 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 32 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 33 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=7722c7929c569594
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=64 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 33 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 34 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=1 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 34 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 35 a
+cart 0 present=1 mapper=17 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 35 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 36 a
+cart 0 present=1 mapper=17 size=262144 banks8=32 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 36 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 37 a
+cart 0 present=1 mapper=17 size=524288 banks8=64 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 37 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 38 a
+cart 0 present=1 mapper=17 size=1048576 banks8=128 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 38 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 39 a
+cart 0 present=1 mapper=18 size=524288 banks8=64 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 39 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 40 a
+cart 0 present=1 mapper=19 size=16384 banks8=2 slot=1 ss=0 data=3221bde1f851c868
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=1 dos2=0 midi=0 xram=0 ide=0
+== kind 40 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 41 a
+cart 0 present=1 mapper=20 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=1 dos2=0 midi=0 xram=0 ide=0
+== kind 41 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 42 a
+cart 0 present=1 mapper=21 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 42 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 43 a
+cart 0 present=1 mapper=21 size=262144 banks8=32 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 43 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 44 a
+cart 0 present=1 mapper=21 size=524288 banks8=64 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 44 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 45 a
+cart 0 present=1 mapper=22 size=16384 banks8=2 slot=1 ss=0 data=602b84977352dec3
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=1 dos2=0 midi=0 xram=0 ide=0
+== kind 45 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 46 a
+cart 0 present=1 mapper=23 size=131072 banks8=16 slot=1 ss=0 data=d4bdade5bd430482
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=1 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 46 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 47 a
+cart 0 present=1 mapper=24 size=32768 banks8=4 slot=1 ss=0 data=cc2cfc6c8089b791
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=1 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 47 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 48 a
+cart 0 present=1 mapper=24 size=32768 banks8=4 slot=1 ss=0 data=70b81054616806db
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=1 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 48 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 49 a
+cart 0 present=0 mapper=0 size=0 banks8=0 slot=1 ss=0 data=14650fb0739d0383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 49 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 50 a
+cart 0 present=1 mapper=32 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 50 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 51 a
+cart 0 present=1 mapper=32 size=262144 banks8=32 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 51 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 52 a
+cart 0 present=1 mapper=32 size=524288 banks8=64 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 52 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 53 a
+cart 0 present=1 mapper=32 size=1048576 banks8=128 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 53 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 54 a
+cart 0 present=1 mapper=33 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 54 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 55 a
+cart 0 present=1 mapper=33 size=262144 banks8=32 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 55 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 56 a
+cart 0 present=1 mapper=33 size=524288 banks8=64 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 56 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 57 a
+cart 0 present=1 mapper=33 size=1048576 banks8=128 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 57 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 58 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=1 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 58 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 59 a
+cart 0 present=1 mapper=40 size=16384 banks8=2 slot=1 ss=0 data=cd1e7045157fa8d0
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=1 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 59 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 60 a
+cart 0 present=1 mapper=35 size=8388608 banks8=1024 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 60 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 61 a
+cart 0 present=1 mapper=36 size=8388608 banks8=1024 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 61 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 62 a
+cart 0 present=1 mapper=44 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 62 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 63 a
+cart 0 present=1 mapper=41 size=1048576 banks8=128 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 63 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 64 a
+cart 0 present=1 mapper=42 size=16777216 banks8=2048 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 64 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 65 a
+cart 0 present=1 mapper=43 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 65 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 66 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=1 xram=0 ide=0
+== kind 66 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0
+== kind 67 a
+cart 0 present=1 mapper=0 size=16384 banks8=2 slot=1 ss=0 data=8656b1d06df64383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=1 xram=0 ide=0
+== kind 67 b
+cart 0 present=1 mapper=2 size=131072 banks8=16 slot=1 ss=0 data=fd14a627dd020383
+cart 1 present=0 mapper=0 size=0 banks8=0 slot=2 ss=0 data=14650fb0739d0383
+cart 2 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 3 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 4 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 5 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 6 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+cart 7 present=0 mapper=0 size=0 banks8=0 slot=-1 ss=0 data=14650fb0739d0383
+dev audio=0 ms=0 joyrex=0 opll=0 v9=0 net=0 fdc=0 vhd=0 sfg=0 idecart=0 dos2=0 midi=0 xram=0 ide=0

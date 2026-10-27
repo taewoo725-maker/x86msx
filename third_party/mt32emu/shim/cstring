@@ -1,0 +1,3 @@
+#include <string.h>
+extern "C" char *strcpy(char *d, const char *s);
+extern "C" char *strncpy(char *d, const char *s, size_t n);

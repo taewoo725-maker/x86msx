@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>기본 키보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+KR:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.k{position:absolute;box-sizing:border-box;border-radius:7px;font-family:'Share Tech Mono','Noto Sans KR',monospace;overflow:hidden;cursor:default;transition:transform .08s,filter .08s}
+.k:hover{filter:brightness(1.15);transform:translateY(1px)}
+.k .t{position:absolute;top:3px;left:0;right:0;text-align:center;font-size:10px;line-height:11px;color:#8d9ab6}
+.k .m{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:15px;line-height:18px;font-weight:700;letter-spacing:.02em}
+.k.ht .m{top:62%}
+.k-ch{background:linear-gradient(#364158,#27304a);color:#dfe5f3;box-shadow:0 3px 0 #0d111b,0 5px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.2)}
+.k-md{background:linear-gradient(#2f394f,#212a40);color:#c3cde4;box-shadow:0 3px 0 #0b0e17,0 5px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.14)}
+.k-md .m{font-size:12px}
+.k-fn{background:linear-gradient(#3a4660,#2a344d);color:#e4e9f6;box-shadow:0 3px 0 #0d111b,0 5px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.22)}
+.k-fn .m{font-size:13px}
+.k-cu{background:linear-gradient(#2d4a78,#213a63);color:#e8f1ff;box-shadow:0 3px 0 #0b1730,0 5px 5px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.25)}
+.k-cu .m{font-size:20px}
+.k-np{background:linear-gradient(#262c3b,#1d2330);color:#6d7790;box-shadow:0 2px 0 #0b0e17,inset 0 1px 0 rgba(255,255,255,.07);opacity:.62}
+.k-np .m{font-size:14px}
+.k-np.wide .m{font-size:11px;font-family:'Noto Sans KR',sans-serif;font-weight:500;color:#8a94ad}
+.k-lit{background:linear-gradient(#5b9bff,#3a78ec) !important;color:#ffffff !important;box-shadow:0 3px 0 #1c4aa8,0 0 14px rgba(80,140,255,.8),inset 0 1px 0 rgba(255,255,255,.55) !important;opacity:1 !important}
+.k-lit .t{color:#d6e6ff}
+.k.ret .m{top:50%}
+</style>
+</helmet>
+<div style="width: 1020px; height: 414px; box-sizing: border-box; padding: 28px; background: #0d0f12;">
+  <div role="img" aria-label="기본 키보드 그림" style="position: relative; width: 964px; height: 358px; border-radius: 16px; background: linear-gradient(170deg, #1d2335, #11151f); border: 1px solid #2c3550; box-shadow: inset 0 2px 0 rgba(255,255,255,0.08), 0 16px 34px rgba(0,0,0,0.6);">
+    <div style="position: absolute; left: 11px; top: 74px; width: 645px; height: 268px; border-radius: 8px; background: #0a0d15; box-shadow: inset 0 3px 10px rgba(0,0,0,0.85), 0 1px 0 rgba(255,255,255,0.06);"></div>
+    <div style="position: absolute; left: 773px; top: 74px; width: 188px; height: 268px; border-radius: 8px; background: #0e121c; box-shadow: inset 0 3px 8px rgba(0,0,0,0.75), 0 1px 0 rgba(255,255,255,0.05);"></div>
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="100">
+      <div class="{{k.cls}}" style="{{k.pos}}">
+        <div class="t">{{k.top}}</div>
+        <div class="m">{{k.label}}</div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lit":{"editor":"text","default":""},"$preview":{"width":1020,"height":414}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const lit = (this.props.lit ?? '').trim();
+    // 기본 키보드(키 편집기 배치)의 좌표를 본체 964x358 크기로 옮긴 값
+    const sx = 0.536, sy = 0.61, dy = -8;
+    const keys = [];
+    // 원 배치 좌표(x1,x2,y1,y2)로 키를 만든다
+    const add = (id, x1, x2, y1, y2, label, o) => {
+      o = o || {};
+      keys.push({ id, x1, x2, y1, y2, label, top: o.top || '', type: o.type || 'ch', cls2: o.cls2 || '' });
+    };
+    // 윗줄
+    const f = [[36, 143], [148, 257], [262, 371], [376, 485], [490, 598]];
+    ['F1', 'F2', 'F3', 'F4', 'F5'].forEach((l, i) => add(l, f[i][0], f[i][1], 76, 146, l, { type: 'fn' }));
+    add('SELECT', 867, 1015, 76, 146, 'SELECT', { type: 'fn' });
+    add('STOP', 1019, 1165, 76, 146, 'STOP', { type: 'fn' });
+    add('HOME', 1208, 1279, 76, 146, 'HOME', { type: 'fn' });
+    add('INS', 1284, 1354, 76, 146, 'INS', { type: 'fn' });
+    add('DEL', 1359, 1431, 76, 146, 'DEL', { type: 'fn' });
+    // 1줄
+    const r1 = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '₩'];
+    const r1t = ['!', '"', '#', '$', '%', '&', "'", '(', ')', '', '=', '~', '|'];
+    add('ESC', 36, 107, 171, 241, 'ESC', { type: 'md' });
+    r1.forEach((l, i) => add(l, 111 + 75.6 * i, 111 + 75.6 * i + 71, 171, 241, l, { top: r1t[i] }));
+    add('BS', 1094, 1165, 171, 241, 'BS', { type: 'md' });
+    // 2줄
+    const r2 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '@', '['];
+    const r2t = ['', '', '', '', '', '', '', '', '', '', '`', '{'];
+    add('TAB', 36, 143, 246, 316, 'TAB', { type: 'md' });
+    r2.forEach((l, i) => add(l, 147 + 75.6 * i, 147 + 75.6 * i + 71, 246, 316, l, { top: r2t[i] }));
+    add('RETURN', 1056, 1165, 246, 391, 'RETURN', { type: 'md', cls2: 'ret' });
+    // 3줄
+    const r3 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';', ':', ']'];
+    const r3t = ['', '', '', '', '', '', '', '', '', '+', '*', '}'];
+    add('CTRL', 36, 143, 321, 391, 'CTRL', { type: 'md' });
+    r3.forEach((l, i) => add(l, 147 + 75.6 * i, 147 + 75.6 * i + 71, 321, 391, l, { top: r3t[i] }));
+    // 4줄
+    const r4 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', '/', '_'];
+    const r4t = ['', '', '', '', '', '', '', '<', '>', '?', ''];
+    add('SHIFTL', 36, 200, 396, 466, 'SHIFT', { type: 'md' });
+    r4.forEach((l, i) => add(l, 205 + 75.6 * i, 205 + 75.6 * i + 71, 396, 466, l, { top: r4t[i] }));
+    add('SHIFTR', 1038, 1165, 396, 466, 'SHIFT', { type: 'md' });
+    // 5줄
+    add('CAPS', 72, 181, 474, 544, 'CAPS', { type: 'md' });
+    add('GRAPH', 186, 295, 474, 544, 'GRAPH', { type: 'md' });
+    add('SPACE', 300, 900, 474, 544, 'SPACE', { type: 'md' });
+    add('HANGUL', 905, 1050, 474, 544, '한글', { type: 'md' });
+    // 방향키 (역T)
+    add('UP', 1283, 1354, 396, 466, '↑', { type: 'cu' });
+    add('LEFT', 1208, 1279, 474, 544, '←', { type: 'cu' });
+    add('DOWN', 1283, 1354, 474, 544, '↓', { type: 'cu' });
+    add('RIGHT', 1359, 1431, 474, 544, '→', { type: 'cu' });
+    // 숫자패드 (MSX로 보내지 않음)
+    const nx = [[1472, 1545], [1549, 1620], [1624, 1695], [1700, 1771]];
+    const np = [['7', '8', '9', '/'], ['4', '5', '6', '*'], ['1', '2', '3', '-'], ['0', '.', ',', '+']];
+    const ny = [[171, 241], [246, 316], [321, 391], [396, 466]];
+    np.forEach((row, r) => row.forEach((l, i) => add('N' + l + r, nx[i][0], nx[i][1], ny[r][0], ny[r][1], l, { type: 'np' })));
+    const out = keys.map((k) => ({
+      cls: 'k k-' + k.type + (k.top ? ' ht' : '') + (k.cls2 ? ' ' + k.cls2 : '') + (lit && (lit === k.id || lit === k.label) ? ' k-lit' : ''),
+      pos: 'left:' + Math.round(k.x1 * sx) + 'px;top:' + Math.round(k.y1 * sy + dy) + 'px;width:' + Math.round((k.x2 - k.x1) * sx) + 'px;height:' + Math.round((k.y2 - k.y1) * sy) + 'px',
+      top: k.top, label: k.label
+    }));
+    return { keys: out };
+  }
+}
+</script>
+</body>
+</html>

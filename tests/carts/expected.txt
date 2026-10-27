@@ -1,0 +1,6 @@
+konami.rom	Konami	KON:[03][07][12][15][01] END
+konamiscc.rom	KonamiSCC	SCC:[04][09][14][02] END
+ascii8.rom	ASCII8	ASCII8:[02][06][11][13] END
+ascii16.rom	ASCII16	ASCII16:[03][05][07] END
+plain16.rom	Plain	PLAIN16 OK END
+plain32.rom	Plain	PLAIN32:HIGH OK END
