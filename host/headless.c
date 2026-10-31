@@ -13,6 +13,7 @@
 #include "msx_host.h"
 #include "../src/gmsynth.h"
 #include "../src/mididev.h"
+#include "../src/vdpk.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,6 +119,7 @@ int main(int argc, char **argv)
     char err[256];
     if (msx_host_init(&m, argv[1], err, sizeof err)) { fprintf(stderr, "init: %s\n", err); return 1; }
     if (getenv("V9990")) msx_v9990_enable(&m, &v9);          /* 4.0.29: Gfx9000 */
+    if (getenv("VDPASM")) vdpk_asm_on = 1;            /* 7단계: 어셈블러판 VDP 커널 (VDPK_ASM 으로 빌드했을 때) */
     if (getenv("AUDIO")) { msx_audio_enable(&m, 1); m.ch_vol[MSX_CH_MM] = 100; }
     if (getenv("MOON")) { static uint8_t wm[4u << 20]; opl4_set_memory(wm, 2u << 20); msx_moonsound_enable(&m, 1); }   /* 시험용 MoonSound (웨이브 롬은 0) */
     if (getenv("EXPAND")) msx_set_expand(&m, atoi(getenv("EXPAND")));   /* 확장기를 먼저 (카트리지 번호 SLOT1~5 를 서브슬롯에 꽂으려고) */

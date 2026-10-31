@@ -9,10 +9,12 @@ for f in build/kernel.bin build/BOOTX64.EFI; do grep -q "$B" $f || { echo "STALE
 O=/mnt/user-data/outputs/v${B//./}; I=/mnt/user-data/outputs/v${A//./}
 mkdir -p $O
 mkdir -p /tmp/pk/usb/Icons/Keyboard; cp assets/keyboard/*.png /tmp/pk/usb/Icons/Keyboard/
+mkdir -p /tmp/pk/usb/Icons/Machines; cp assets/machines/* /tmp/pk/usb/Icons/Machines/   # 5.3.19 시스템 보기 본체 사진
+mkdir -p /tmp/pk/usb/Icons/Sysview; cp assets/sysview/* /tmp/pk/usb/Icons/Sysview/   # 5.3.48 시스템 보기 주변기기 그림 (모니터·드라이브·하드·MIDI·조이스틱·확장 박스·카트리지)
 mkdir -p /tmp/pk/usb/fonts; cp third_party/noto/NotoSansKR.x8f /tmp/pk/usb/fonts/; cp third_party/noto/LICENSE.txt /tmp/pk/usb/fonts/LICENSE-NotoSansCJK.txt; cp third_party/gothic/GothicKR.x8f /tmp/pk/usb/fonts/; cp third_party/gothic/OFL.txt /tmp/pk/usb/fonts/LICENSE-GothicKR.txt; cp third_party/happy/HappyKR.x8f /tmp/pk/usb/fonts/; cp third_party/happy/README.txt /tmp/pk/usb/fonts/LICENSE-HappyKR.txt; cp third_party/happy/LICENSE-HappyKR.pdf /tmp/pk/usb/fonts/
 cp build/BOOTX64.EFI /tmp/pk/usb/EFI/BOOT/BOOTX64.EFI; cp build/kernel.bin /tmp/pk/usb/X86MSX.BIN
 cp build/BOOTX64.EFI $O/; cp build/kernel.bin $O/X86MSX.BIN; cp $I/RTW.INI $O/
-cp build/msx1.img /tmp/pk/X86MSX_v$B.img; (cd /tmp/pk && rm -f $O/X86MSX_v$B.img.zip && zip -q $O/X86MSX_v$B.img.zip X86MSX_v$B.img && rm -f X86MSX_v$B.img)
+if [ -z "$SKIPIMG" ]; then cp build/msx1.img /tmp/pk/X86MSX_v$B.img; (cd /tmp/pk && rm -f $O/X86MSX_v$B.img.zip && zip -q $O/X86MSX_v$B.img.zip X86MSX_v$B.img && rm -f X86MSX_v$B.img); fi   # SKIPIMG=1: 이미지 없이 묶기 (mkfs.fat 없는 환경)
 # USB추가파일 에는 지난 판과 달라진 파일만 넣는다 (전체 = FULL=1 이면 USB전체파일.zip 도 따로). 기준 = 지난 판 USB추가파일.zip 안 파일들의 SHA-1
 rm -f /tmp/pk/usb/BOOTX64.EFI                           # 옛 찌꺼기 (EFI/BOOT/BOOTX64.EFI 만 쓰임)
 python3 - "$A" "$B" "$I" "$O" <<'PY2'

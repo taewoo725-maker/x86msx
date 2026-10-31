@@ -26,6 +26,9 @@ typedef struct {
 /* 현재 첫 파티션 크기(섹터). 실패 0 */
 uint64_t usbgrow_part_sectors(GrowIO *io);
 
+/* 지금 하는 일의 자세한 글 (복사·확인 중인 파일 "3 / 120   \\ROMS\\a.rom"). 비어 있을 수 있음 */
+const char *usbgrow_detail(void);
+
 /* 실행. 0 성공(다시 시작 필요), 1 이미 전체 크기, -1 실패(err) */
 int usbgrow_run(GrowIO *io, char *err, int errlen);
 #endif

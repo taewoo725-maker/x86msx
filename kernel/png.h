@@ -10,7 +10,8 @@
 int png_icon16(const uint8_t *png, uint32_t len, char out[16][17]);
 /* 일반 해독 (아이콘·배지): 성공 0, 그 뒤 png_rgba로 점마다 읽음. 최대 512 x 128 */
 int png_load(const uint8_t *png, uint32_t len, uint32_t *w, uint32_t *h);
-int png_load_big(const uint8_t *png, uint32_t len, uint32_t *w, uint32_t *h, uint8_t *mem);   /* 4.0.31: 미리보기 (최대 1280 x 800). mem = PNG_BIG_MEM 바이트 작업 자리 */
+int png_load_big(const uint8_t *png, uint32_t len, uint32_t *w, uint32_t *h, uint8_t *mem);
+int png_load_mem(const uint8_t *png, uint32_t len, uint32_t *w, uint32_t *h, uint8_t *mem, uint32_t memsz, uint32_t maxw, uint32_t maxh);   /* 5.3.19: 작업 자리·최대 크기 지정 (기종 사진) */   /* 4.0.31: 미리보기 (최대 1280 x 800). mem = PNG_BIG_MEM 바이트 작업 자리 */
 #define PNG_BIG_MEM (800u * (1280u * 3 + 1) + (2u << 20))
 void png_rgba(uint32_t x, uint32_t y, int rgba[4]);
 int png_has_alpha(void);

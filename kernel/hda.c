@@ -55,6 +55,9 @@ void hda_set_dma_dev(int64_t off) { dma_dev_off = off; }
 #define LOW_LAT     400
 #include "sndrs.h"
 static SndRs rs;                                /* 부드러운 속도 맞춤 */
+extern int snd_sync_mode;                       /* 5.3.17: 1 기본(5.3.14 루틴), 2 시험 루틴 (x86msx.ini SndSync) */
+static uint32_t g_under, g_over; static int g_under_d;   /* 5.3.51: 소리 끊김 세기 (모자람 건너뜀 / 넘쳐 버림) */
+static int prev_pos = -1, prev_q;                /* 5.3.54: 지난번 쓴 직후의 재생 위치와 그때 쌓여 있던 양 — 멈춤 판별용 */
 static int tgt_lat = TARGET_LAT, ok_frames;     /* 목표 지연은 프레임이 늦어 소리가 끊길 때마다 늘리고(최대 2800 = 58 ms), 20초 조용하면 조금씩 되돌림 */
 
 static volatile uint32_t *corb;
@@ -206,6 +209,7 @@ static void set_amp(int cad, int nid, int output, int index, uint32_t ampcaps)
 
 static char info[6][64];
 static int ninfo;
+static char nc_buf[2][64];                  /* 5.3.6: 코덱이 안 보일 때 남기는 구조 시도·레지스터 값 (소리 진단 화면용) */
 static char *cur_info;                      /* 지금 시험 중인 컨트롤러의 정보 줄 */
 
 static int strstr_simple(const char *h, const char *n)
@@ -383,6 +387,70 @@ static void copy_status(char *dst, int len, const char *s)
 static volatile uint32_t *posbuf;
 static int use_posbuf;
 
+/* 컨트롤러 리셋을 풀고 코덱이 나타날 때까지 기다림. 리셋 실패 -1, 아니면 0 (코덱 표는 *codecs) */
+static int ctrl_reset_wait(uint16_t *codecs, int wait_ms)
+{
+    w32(0x08, r32(0x08) & ~1u);
+    for (int i = 0; i < 100 && (r32(0x08) & 1); i++) delay_ms(1);
+    delay_ms(1);
+    w32(0x08, r32(0x08) | 1u);
+    for (int i = 0; i < 100 && !(r32(0x08) & 1); i++) delay_ms(1);
+    if (!(r32(0x08) & 1)) return -1;
+    uint16_t c = 0;
+    for (int i = 0; i < wait_ms && !(c = r16(0x0E)); i++) delay_ms(1);   /* 코덱이 나타날 때까지 */
+    delay_ms(25);                                                         /* 나타난 뒤 안정 시간 */
+    *codecs = r16(0x0E);
+    return 0;
+}
+
+/* 5.3.6: 인텔 컨트롤러인데 코덱이 안 보일 때만 쓰는 구조 시도 (Firebat T9 Plus / N100 시험용).
+ *  1) PCI 전원 상태가 D0이 아니면 D0으로 올림
+ *  2) 확장 기능 목록의 멀티링크(ML, ID 2)에서 링크 전원(SPA)을 켬 - 새 인텔 칩은 링크를 따로 켜야 코덱이 보이는 경우가 있음
+ * 무엇을 보고 무엇을 바꿨는지 info에 남김. 바꾼 것이 있으면 1 */
+static int nocodec_rescue(int fb, int fd, int ff)
+{
+    int did = 0;
+    char *keep = cur_info; cur_info = nc_buf[0]; nc_buf[0][0] = 0;
+    uint32_t cp = pci_read(fb, fd, ff, 0x34) & 0xFF;
+    for (int n = 0; cp >= 0x40 && n < 16; n++) {
+        uint32_t h = pci_read(fb, fd, ff, cp);
+        if ((h & 0xFF) == 0x01) {
+            uint32_t pm = pci_read(fb, fd, ff, cp + 4);
+            info_add(" pm"); info_hex(pm & 3, 1);
+            if (pm & 3) { pci_write(fb, fd, ff, cp + 4, pm & ~3u); delay_ms(20); did = 1; }
+            break;
+        }
+        cp = (h >> 8) & 0xFF;
+    }
+    uint32_t off = r32(0x14) & 0xFFFFFFFCu;
+    info_add(" ll"); info_hex(off, 4);
+    for (int n = 0; n < 16 && off >= 0x20 && off < 0x3F00; n++) {
+        uint32_t hdr = r32(off);
+        if (hdr == 0xFFFFFFFFu || hdr == 0) break;
+        if (((hdr >> 16) & 0xFFF) == 2) {                          /* 멀티링크 */
+            for (int idx = 0; idx < 4; idx++) {
+                uint32_t ml = off + 0x40 + 0x40u * (uint32_t)idx;
+                if (ml + 8 > 0x4000) break;
+                uint32_t lcap = r32(ml);
+                if (lcap == 0 || lcap == 0xFFFFFFFFu) continue;
+                uint32_t lctl = r32(ml + 4);
+                info_add(" l"); info_hex((uint32_t)idx, 1); info_hex(lctl >> 16, 4);
+                if (!(lctl & 0x10000u)) {
+                    w32(ml + 4, lctl | 0x10000u);
+                    for (int i = 0; i < 20 && !(r32(ml + 4) & 0x800000u); i++) delay_ms(1);
+                    info_add(">"); info_hex(r32(ml + 4) >> 16, 4);
+                    did = 1;
+                }
+            }
+        }
+        uint32_t nx = hdr & 0xFFFF;
+        if (nx == 0 || nx == off) break;
+        off = nx;
+    }
+    cur_info = keep;
+    return did;
+}
+
 /* 컨트롤러 하나 열기: 성공 0 (출력 스트림까지 동작) */
 static int open_ctrl(int fb, int fd, int ff, int analog_only, char *status, int len)
 {
@@ -403,18 +471,19 @@ static int open_ctrl(int fb, int fd, int ff, int analog_only, char *status, int 
     ctrl_intel = (pci_read(fb, fd, ff, 0) & 0xFFFF) == 0x8086;
 
     /* 컨트롤러 리셋 */
-    w32(0x08, r32(0x08) & ~1u);
-    for (int i = 0; i < 100 && (r32(0x08) & 1); i++) delay_ms(1);
-    delay_ms(1);
-    w32(0x08, r32(0x08) | 1u);
-    for (int i = 0; i < 100 && !(r32(0x08) & 1); i++) delay_ms(1);
-    if (!(r32(0x08) & 1)) { copy_status(status, len, "snd: reset fail"); info_add(" reset fail"); return -1; }
     uint16_t codecs = 0;
-    for (int i = 0; i < 500 && !(codecs = r16(0x0E)); i++) delay_ms(1);   /* 코덱이 나타날 때까지 (최대 0.5초) */
-    delay_ms(25);                                                           /* 나타난 뒤 안정 시간 */
-    codecs = r16(0x0E);
+    if (ctrl_reset_wait(&codecs, 500) < 0) { copy_status(status, len, "snd: reset fail"); info_add(" reset fail"); return -1; }
+    static int rescued;                                                    /* 5.3.7: 켜질 때 한 번만 (되풀이하면 시작이 십수 초 멈춤) */
+    if (!codecs && ctrl_intel && !rescued && (rescued = 1) && nocodec_rescue(fb, fd, ff)) {   /* 5.3.6: 인텔에서 코덱이 안 보일 때만 (정상 PC는 이 길을 안 탐) */
+        if (ctrl_reset_wait(&codecs, 700) < 0) { copy_status(status, len, "snd: reset fail"); info_add(" reset fail"); return -1; }
+    }
     g_codecs = codecs;
-    if (!codecs) { copy_status(status, len, "snd: no codec"); info_add(" no codec"); return -1; }
+    if (!codecs) {
+        char *keep = cur_info; cur_info = nc_buf[1]; nc_buf[1][0] = 0;
+        info_add("GCAP "); info_hex(r32(0x00) & 0xFFFF, 4); info_add(" GCTL "); info_hex(r32(0x08), 4); info_add(" STATESTS "); info_hex(r16(0x0E), 4);
+        cur_info = keep;
+        copy_status(status, len, "snd: no codec"); info_add(" no codec"); return -1;
+    }
     w32(0x20, 0);                                                  /* 인터럽트 끔 */
 
     /* CORB / RIRB */
@@ -506,7 +575,7 @@ static int open_ctrl(int fb, int fd, int ff, int analog_only, char *status, int 
     sd_index = iss;
     info_add(use_immediate ? " imm" : " corb");
     if (use_posbuf) info_add(" posbuf");
-    wpos = TARGET_LAT;
+    wpos = TARGET_LAT; prev_pos = -1;
     sndrs_reset(&rs, TARGET_LAT); tgt_lat = TARGET_LAT; ok_frames = 0;
     copy_status(status, len, use_immediate ? "snd: on (imm)" : "snd: on");
     return 0;
@@ -645,8 +714,11 @@ static void cflush(const volatile void *p, int bytes)        /* 4.0.99: 쓴 샘�
     for (; a < e; a += 64) __asm__ volatile("clflush (%0)" : : "r"(a) : "memory");
     __asm__ volatile("mfence" : : : "memory");
 }
+uint32_t fe_now_ms(void);
+static uint32_t g_wr_n, g_ur_f[8], g_ur_dd[8], g_ur_ms[8];   /* 8.0.21: 모자람이 일어난 시각(ms) 도 — 파일 쓰기 기록과 맞춰 보려고 */   /* 8.0.19: 소리 쓰기 호출 번호 / 모자람이 일어난 호출 번호와 그때 남은 양 (끊김이 언제 일어나는지 보려는 진단) */
 void hda_write2(const int16_t *mono, const int16_t *right, int n, int volume, int mute)
 {
+    g_wr_n++;
     if (!ok) return;
     hp_poll();
     uint32_t raw = use_posbuf ? posbuf[sd_index * 2] : r32(sd + 0x04);
@@ -677,8 +749,13 @@ void hda_write2(const int16_t *mono, const int16_t *right, int n, int volume, in
         pos = (int)(raw / 4) % RING_FRAMES;
     }
     int d = (wpos - pos + RING_FRAMES) % RING_FRAMES;
+    /* 5.3.54: 쌓아 둔 소리(약 45 ms)보다 오래 멈췄다 돌아오면 재생 위치가 쓴 자리를 넘어갔는데, 나머지 계산(d)으로는 링이 꽉 찬 것처럼 보여
+     * "모자람" 대신 "넘침"으로 잘못 읽혔음 (지연이 80 ms 로 커지고 이후 프레임마다 소리 뒤쪽이 버려짐). 지난번 이후 재생 위치가 쌓인 양보다 많이 갔으면 모자람으로 */
+    if (!pos_estimated && prev_pos >= 0 && ((pos - prev_pos + RING_FRAMES) % RING_FRAMES) > prev_q) d = 0;
     if (d < LOW_LAT) {                                            /* 모자람(프레임이 많이 늦음): 앞으로 건너뜀. 5.2.148: 건너뛴 자리에 낡은 소리가 남아 되풀이되던 것(음이탈·울림)을 무음으로 */
-        if (tgt_lat < 2800) tgt_lat += 400;
+        g_ur_f[g_under & 7] = g_wr_n; g_ur_dd[g_under & 7] = (uint32_t)d; g_ur_ms[g_under & 7] = fe_now_ms();
+        g_under++; g_under_d = d;
+        if (tgt_lat < 2800) { tgt_lat += 400; if (tgt_lat > 2800) tgt_lat = 2800; }   /* 8.0.22: 2800 상한을 넘겨 3040 이 되면 지연+한 프레임(800)이 넘침 기준(4096-256)에 닿아 매 프레임 소리 뒤쪽을 버렸음 (SNDGLITCH: lat=3040 OVER 가 프레임마다) */
         ok_frames = 0;
         int np = (pos + tgt_lat) % RING_FRAMES;
         for (int k = 0; k < tgt_lat; k++) { int q = (pos + k) % RING_FRAMES; ring[q * 2] = 0; ring[q * 2 + 1] = 0; }
@@ -687,20 +764,24 @@ void hda_write2(const int16_t *mono, const int16_t *right, int n, int volume, in
         d = tgt_lat;
         rs.d_avg = tgt_lat;
     } else if (tgt_lat > TARGET_LAT && ++ok_frames >= 1200) { ok_frames = 0; tgt_lat -= 160; if (tgt_lat < TARGET_LAT) tgt_lat = TARGET_LAT; }
+    if (snd_sync_mode == 2 && d > RING_FRAMES - 400) {            /* 5.3.15 (SndSync=2 만): 넘침(프레임이 몰려 옴): 이번 프레임 소리는 버리고 한 번에 맞춤 (천천히 속도를 올려 음이 들뜨는 것보다 짧은 한 번이 덜 거슬림) */
+        rs.d_avg = tgt_lat;
+        return;
+    }
 
     int32_t gain = mute ? 0 : volume;                             /* 0~100, 출력 = 입력 x gain / 50 */
     { static int dig = -1, dn = -1; if (dn != nused) { dn = nused; dig = 0; for (int u = 0; u < nused; u++) if (upath[u].dev == 4 || upath[u].dev == 5) dig = 1; }
       if (dig) gain *= 2; }                                       /* HDMI·DP 디지털 출력은 앰프가 없어 소리가 작음 -> 2배(+6 dB) */
     int fw0 = wpos, fcnt = 0;
     /* 화면 주기에 맞춰 돌 때(60.00 대 59.92 Hz) 생기는 아주 작은 속도 차이는 선형 보간으로 부드럽게 흡수
-     * (전에는 64샘플마다 하나 빼거나 더해 음높이가 1.5% 튀고 5 Hz 정도로 떨렸음). 지연이 목표에서 벗어난 만큼을 4초에 걸쳐 따라감, +-0.5% */
+     * (전에는 64샘플마다 하나 빼거나 더해 음높이가 1.5% 튀고 5 Hz 정도로 떨렸음). 5.3.15: 목표 +-8 ms 안에서는 속도 고정, 밖에서는 +-0.1% 까지만 (sndrs.h) */
     static int16_t rl[2400], rr[2400];
     if (n > 2000) n = 2000;
-    int32_t step = sndrs_step(&rs, d, tgt_lat);
+    int32_t step = snd_sync_mode == 2 ? sndrs_step2(&rs, d, tgt_lat) : sndrs_step(&rs, d, tgt_lat);
     int on = sndrs_run(&rs, mono, right, n, step, rl, rr, 2400);
     for (int i = 0; i < on; i++) {
         d = (wpos - pos + RING_FRAMES) % RING_FRAMES;
-        if (d > RING_FRAMES - 256) break;                         /* 넘침: 나머지 버림 */
+        if (d > RING_FRAMES - 256) { g_over++; break; }           /* 넘침: 나머지 버림 */
         /* 직류 제거: y = x - x' + 0.996 y' */
         int32_t x = rl[i];
         dc_y = x - dc_x + (dc_y * 255) / 256;
@@ -722,6 +803,7 @@ void hda_write2(const int16_t *mono, const int16_t *right, int n, int volume, in
         wpos = (wpos + 1) % RING_FRAMES;
         fcnt++;
     }
+    prev_pos = pos; prev_q = (wpos - pos + RING_FRAMES) % RING_FRAMES;
     if (fcnt) {
         if (fw0 + fcnt <= RING_FRAMES) cflush(&ring[fw0 * 2], fcnt * 4);
         else { cflush(&ring[fw0 * 2], (RING_FRAMES - fw0) * 4); cflush(&ring[0], (fw0 + fcnt - RING_FRAMES) * 4); }
@@ -840,11 +922,17 @@ int hda_gpio_next(void)
     return gpio_step;
 }
 
+int hda_stat(uint32_t *under, uint32_t *over, int *last_d, int *tgt) { *under = g_under; *over = g_over; *last_d = g_under_d; *tgt = tgt_lat; return ok; }   /* 5.3.51 */
+
 int hda_sound_diag(char (*lines)[64], int max)
 {
     int k = 0;
     d_line(lines, &k, max);
-    if (!ok || !bar) { d_str("HDA: not running"); return k; }
+    if (!ok || !bar) {
+        d_str("HDA: not running");
+        for (int i = 0; i < 2; i++) if (nc_buf[i][0]) { d_line(lines, &k, max); d_str(i ? "" : "rescue: "); d_str(nc_buf[i]); }
+        return k;
+    }
     uint32_t ctl = r32(sd), lpib = r32(sd + 0x04);
     d_str("stream RUN "); d_dec((ctl >> 1) & 1);
     d_str("  FIFORDY "); d_dec((r8(sd + 3) >> 5) & 1);
@@ -852,7 +940,14 @@ int hda_sound_diag(char (*lines)[64], int max)
     d_str(use_posbuf ? "  posbuf" : ""); d_str("  est "); d_dec((uint32_t)pos_estimated);
     d_line(lines, &k, max);
     d_str("write pos "); d_dec((uint32_t)wpos); d_str("  peak "); d_dec((uint32_t)peak_out);
-    d_str("  re-init "); d_dec((uint32_t)recoveries); d_str("  latency "); d_dec((uint32_t)tgt_lat);
+    d_str("  calls "); d_dec(g_wr_n);
+    d_str("  under "); d_dec(g_under); d_str(" over "); d_dec(g_over);
+    d_line(lines, &k, max);
+    if (g_under) { uint32_t q0 = g_under > 8 ? g_under - 8 : 0; for (int h = 0; h < 2; h++) { uint32_t a0 = q0 + (uint32_t)h * 4, a1 = a0 + 4 < g_under ? a0 + 4 : g_under; if (a0 >= a1) break; d_str("ur(sec/left)"); for (uint32_t q = a0; q < a1; q++) { d_str(" "); d_dec(g_ur_ms[q & 7] / 1000); d_str("."); d_dec((g_ur_ms[q & 7] / 100) % 10); d_str("/"); d_dec(g_ur_dd[q & 7]); } d_line(lines, &k, max); } }   /* 8.0.22: 64자에 잘려 4개씩 두 줄 */
+    d_str("re-init "); d_dec((uint32_t)recoveries); d_str("  latency "); d_dec((uint32_t)tgt_lat);
+    { int32_t sp = rs.last - 65536, bs = rs.base_acc >> 12;                     /* 5.3.15: 지금 속도 보정 (만분율) — 늘어질 때 이 값이 움직이면 속도 맞춤 탓 */
+      d_str("  sync "); d_dec((uint32_t)snd_sync_mode); d_str(" speed "); if (sp < 0) { d_str("-"); sp = -sp; } d_dec((uint32_t)(sp * 10000 / 65536)); d_str("/10000");
+      d_str(" base "); if (bs < 0) { d_str("-"); bs = -bs; } d_dec((uint32_t)(bs * 10000 / 65536)); d_str(" lat "); d_dec((uint32_t)rs.d_avg); }
     peak_out = 0;
     if (use_immediate) {                                /* 4.0.19: 직접 명령으로 바꾼 장치만 컨트롤러 레지스터를 보임 (원인 분석용, 정상 장치의 화면은 그대로) */
     d_line(lines, &k, max);

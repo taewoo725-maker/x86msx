@@ -153,7 +153,7 @@ MapperType cart_guess_mapper_partial(const uint8_t *d, uint32_t len, uint32_t si
         return size <= 0x10000 ? MAPPER_PLAIN : MAPPER_ASCII16;
     /* ASCII8 만의 증거는 6800h·7800h 쓰기. 6000h·7000h 만 쓰는 롬(a8 == a16, Chase H.Q. V9990 1 MiB 등)은 ASCII16 (ASCII8 은 뱅크 레지스터 4개를 다 써야 함).
      * 그 밖 동점은 ASCII8 > Konami > Konami SCC 순 */
-    if (size >= (1u << 20) && a16 >= 8 && (a8 - a16) * 3 < a16)   /* 1 MiB 이상 롬에서 6000h·7000h 쓰기가 6800h·7800h 의 3배보다 많으면(우연히 섞인 몇 개는 무시) ASCII16. 제믹스 126 합본(Tank Battalion 등)이 ASCII8 로 잘못 잡히던 것 */
+    if (size >= (1u << 20) && a16 >= 8 && (a8 - a16) * 3 < a16 && (s5 + s9 + sB) < 2 * a16)   /* 5.3.39: 5000h·9000h·B000h(코나미 SCC 8 KiB 뱅크) 쓰기가 6000h·7000h 의 2배 이상이면 ASCII16 이 아니라 아래 점수로 (메탈기어2 중국어판 1 MiB 가 ASCII16 으로 잘못 잡혀 계속 다시 시작하던 것) */   /* 1 MiB 이상 롬에서 6000h·7000h 쓰기가 6800h·7800h 의 3배보다 많으면(우연히 섞인 몇 개는 무시) ASCII16. 제믹스 126 합본(Tank Battalion 등)이 ASCII8 로 잘못 잡히던 것 */
         return MAPPER_ASCII16;
     MapperType best = MAPPER_ASCII8;
     int bestv = a8;

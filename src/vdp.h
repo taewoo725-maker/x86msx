@@ -32,6 +32,7 @@ typedef struct {
     uint64_t job_t0, job_t1;
     uint8_t il;                 /* 3.4.2 VID-06: VRAM 배열이 G6·G7 끼워 넣기 순서 */
     uint8_t hs25, hs26, hs27;   /* 줄 시작 때 잡아 둔 가로 스크롤 레지스터 (V9958, 2.8.1) */          /* 방금 실행한 명령이 실제 VDP에서 걸리는 시간 (VDP 클럭 21.48 MHz, 2.8.1) */
+    int late_defer, pend_off;   /* 5.3.46: R800 에서 줄 끝(귀선) 뒤에 표시를 끄는 쓰기는 다음 줄 중간(Z80 위치)으로 */
     int line_t;                 /* 4.0.29: 줄 안 경과 클럭 (msx.c가 VDP 쓰기 전에 설정) */
     int de_pos; uint8_t de_start; /* 4.0.29: 이 줄에서 R#1 표시 켜짐/꺼짐이 바뀐 가로 위치(256폭 기준, -1 = 없음)와 줄 시작 때 상태 */
     uint8_t stat[10];           /* S#0 ~ S#9 */

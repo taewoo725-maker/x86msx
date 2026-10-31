@@ -117,7 +117,7 @@ GAMMA = 0.60                                               # 어두운 바탕에
 # 글꼴 얼굴: (파일, 얼굴 번호, 가로 배율)
 FACES = {'noto': (NOTO, 1, WS), 'gothic': (os.path.join(ROOT, 'third_party', 'gothic', '%s.ttf'), 0, 1.0), 'happy': (os.path.join(ROOT, 'third_party', 'happy', '%s.ttf'), 0, WS)}
 
-def emit_aa(name, weight, size, bdf, cs, f, face='noto'):
+def emit_aa(name, weight, size, bdf, cs, f, face='noto', scale=1):
     """부드러운 글꼴: Noto Sans CJK KR(SIL OFL)을 줄 높이·기준선은 Galmuri와 같게 그려 4비트 알파로. 없는 글자는 Galmuri를 알파 15로"""
     from PIL import Image, ImageDraw, ImageFont
     from fontTools.ttLib import TTCollection
@@ -127,9 +127,11 @@ def emit_aa(name, weight, size, bdf, cs, f, face='noto'):
     else:
         from fontTools.ttLib import TTFont
         cmap = TTFont(path).getBestCmap()
+    size *= scale                                             # 5.3.34: scale 2 = 1080p 용 두 배 크기 글꼴 (줄 높이·기준선도 두 배)
     font = ImageFont.truetype(path, size, index=fidx)
     font4 = ImageFont.truetype(path, size * 4, index=fidx)
     asc, desc, glyphs = load_bdf(bdf)
+    asc *= scale; desc *= scale
     H = asc + desc
     bits, table, missing = [], [], 0
     for cp in cs:
@@ -149,7 +151,7 @@ def emit_aa(name, weight, size, bdf, cs, f, face='noto'):
                 for x in range(adv):
                     a = int(round(((px[x, y] / 255.0) ** GAMMA) * 15))
                     data[y * bpr + x // 2] |= a << (4 if x % 2 == 0 else 0)
-        elif cp in glyphs:                                   # Noto에 없는 글자: Galmuri 점글꼴을 그대로
+        elif scale == 1 and cp in glyphs:                    # Noto에 없는 글자: Galmuri 점글꼴을 그대로
             dx, bpr1, d1 = render(asc, desc, glyphs[cp])
             adv = dx
             bpr = (adv + 1) // 2
@@ -158,7 +160,7 @@ def emit_aa(name, weight, size, bdf, cs, f, face='noto'):
                 for x in range(adv):
                     if d1[y * bpr1 + x // 8] & (0x80 >> (x % 8)):
                         data[y * bpr + x // 2] |= 15 << (4 if x % 2 == 0 else 0)
-        elif is_arabic(cp):
+        elif scale == 1 and is_arabic(cp):
             dx, bpr1, d1 = render_ttf(asc, desc, cp, asc - 1)
             adv = dx
             bpr = (adv + 1) // 2
@@ -183,14 +185,23 @@ def emit_aa(name, weight, size, bdf, cs, f, face='noto'):
     f.write(f'UiFont {name} = {{ {H}, {asc}, {len(table)}, {name}_glyphs, {name}_bits, 1 }};\n\n')
     return len(table), len(bits), missing
 
-X8F_FONTS = (('font_small', 'Regular', 12, 'Galmuri11.bdf'), ('font_large', 'Regular', 14, 'Galmuri14.bdf'), ('font_bold', 'Bold', 17, 'Galmuri14.bdf'), ('font_tiny', 'Regular', 11, 'Galmuri11.bdf'), ('font_btn', 'Regular', 13, 'Galmuri11.bdf'), ('font_head', 'Bold', 16, 'Galmuri14.bdf'), ('font_title', 'Bold', 20, 'Galmuri14.bdf'))
+X8F_FONTS = (('font_small', 'Regular', 12, 'Galmuri11.bdf'), ('font_large', 'Regular', 14, 'Galmuri14.bdf'), ('font_bold', 'Bold', 17, 'Galmuri14.bdf'), ('font_tiny', 'Regular', 11, 'Galmuri11.bdf'), ('font_btn', 'Regular', 13, 'Galmuri11.bdf'), ('font_head', 'Bold', 16, 'Galmuri14.bdf'), ('font_title', 'Bold', 20, 'Galmuri14.bdf'), ('font_mini', 'Regular', 9, 'Galmuri11.bdf'))   # 5.3.13: 9px (USB 확장 화면 작은 글)
 
-def collect_aa(weight, size, bdf, cs, face='noto'):
+def collect_aa(weight, size, bdf, cs, face='noto', scale=1):
     """emit_aa 와 같은 그림을 (표, 비트) 로 돌려줌"""
     import io
     buf = io.StringIO()
-    emit_aa('tmp', weight, size, bdf, cs, buf, face)
+    emit_aa('tmp', weight, size, bdf, cs, buf, face, scale)
     return buf.getvalue()
+
+def hd_charset(cs):
+    """5.3.34 1080p 두 배 글꼴에 넣을 글자: 메뉴 글(lang.h)에 쓰인 글자 + 영문·라틴·자모. 한자·아랍 글자는 뺌(옛 방식으로 그려짐)"""
+    lang = open(os.path.join(ROOT, 'kernel', 'lang.h'), encoding='utf-8').read() + open(os.path.join(ROOT, 'kernel', 'lang2.h'), encoding='utf-8').read()
+    used = set()
+    for t in re.findall(r'"((?:[^"\\]|\\.)*)"', lang): used |= set(map(ord, t))
+    keep = set(range(0x20, 0x7F)) | set(range(0xA0, 0x100)) | set(range(0x3131, 0x318F)) | set(range(0x3040, 0x3100))
+    keep |= {c for c in used if 0xAC00 <= c <= 0xD7A3 or 0x2190 <= c <= 0x25FF or 0x3000 <= c < 0x3040 or c in (0x2026, 0x201C, 0x201D, 0x2018, 0x2019, 0x2713, 0xD7)}
+    return sorted(c for c in keep if c in cs)
 
 def write_x8f(cs, path, face='noto'):
     """fonts/NotoSansKR.x8f - 부팅 때 USB 의 fonts 폴더에서 읽는 부드러운 글꼴 (한 파일에 작은·큰·굵은 세 가지)
@@ -204,6 +215,11 @@ def write_x8f(cs, path, face='noto'):
         tab = [tuple(int(v, 16) if v.startswith('0x') else int(v) for v in m) for m in re.findall(r'\{(0x[0-9A-F]+), (\d+), (\d+), (\d+)\}', txt)]
         h = re.search(r'UiFont tmp = \{ (\d+), (\d+), (\d+),', txt)
         blobs.append((int(h.group(1)), int(h.group(2)), tab, bits))
+    txt = collect_aa('Regular', 12, os.path.join(ROOT, 'third_party', 'galmuri', 'Galmuri11.bdf'), hd_charset(cs), face, 2)   # 아홉째 = 작은 글꼴의 두 배 크기 (1080p)
+    bits = bytes(int(x) for x in re.search(r'_bits\[\d+\] = \{(.*?)\};', txt, re.S).group(1).replace('\n', '').split(',') if x.strip())
+    tab = [tuple(int(v, 16) if v.startswith('0x') else int(v) for v in m) for m in re.findall(r'\{(0x[0-9A-F]+), (\d+), (\d+), (\d+)\}', txt)]
+    h = re.search(r'UiFont tmp = \{ (\d+), (\d+), (\d+),', txt)
+    blobs.append((int(h.group(1)), int(h.group(2)), tab, bits))
     head = 8 + 28 * len(blobs)
     off = (head + 3) & ~3
     parts, metas = [], []
@@ -232,7 +248,7 @@ def main():
         for name, file in (('font_small', 'Galmuri11.bdf'), ('font_large', 'Galmuri14.bdf')):
             n, nb, miss = emit(name, os.path.join(ROOT, 'third_party', 'galmuri', file), cs, f)
             print(f'{name}: {n} glyphs, {nb} bytes, {miss} missing of {len(cs)}')
-        f.write('UiFont font_btn = { 16, 14, 0, 0, 0, 0 };\n        UiFont font_head = { 21, 18, 0, 0, 0, 0 };\n        UiFont font_title = { 21, 18, 0, 0, 0, 0 };\n        UiFont font_tiny = { 16, 14, 0, 0, 0, 0 };      /* 줄 높이는 작은 글꼴과 같고 글자만 더 작음: 내장은 fe.c 가 작은 글꼴로 채움 */\n        UiFont font_bold = { 21, 18, 0, 0, 0, 0 };     /* 내장 글꼴에는 굵은 글꼴이 없음: fe.c 가 큰 글꼴로 채움 */\n')
+        f.write('UiFont font_btn = { 16, 14, 0, 0, 0, 0 };\n        UiFont font_head = { 21, 18, 0, 0, 0, 0 };\n        UiFont font_title = { 21, 18, 0, 0, 0, 0 };\n        UiFont font_tiny = { 16, 14, 0, 0, 0, 0 };      /* 줄 높이는 작은 글꼴과 같고 글자만 더 작음: 내장은 fe.c 가 작은 글꼴로 채움 */\n        UiFont font_bold = { 21, 18, 0, 0, 0, 0 };     /* 내장 글꼴에는 굵은 글꼴이 없음: fe.c 가 큰 글꼴로 채움 */\n        UiFont font_mini = { 16, 14, 0, 0, 0, 0 };     /* 9px: 내장은 작은 글꼴로 채움 */\n')
     if '--x8f' in sys.argv or True:
         write_x8f(cs, os.path.join(ROOT, 'third_party', 'noto', 'NotoSansKR.x8f'))
         write_x8f(cs, os.path.join(ROOT, 'third_party', 'gothic', 'GothicKR.x8f'), 'gothic')

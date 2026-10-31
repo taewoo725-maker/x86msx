@@ -105,7 +105,7 @@ int main(void)
     int len = diag_format(b, sizeof b, "5.2.26", &c, L, n, s, 0, 0);
     CHECK(len > 500 && strstr(b, "SUM.SND res=ok") && strstr(b, "SUM.TP res=warn why=i2c_intel_unsupported") && strstr(b, "== SND ==") && strstr(b, "#LOG 1"), "format");
     if (pi >= 0) { diag_expect(&diag_pcs[pi], L, n, s); len = diag_format(b, sizeof b, "5.2.26", &c, L, n, s, &diag_pcs[pi], 1);
-      CHECK(strstr(b, "#pc=? name=\"LG gram") && strstr(b, "sel=auto") && strstr(b, "SUM.TP res=info why=known_unsupported expect=unsup"), "format pc"); }
+      CHECK(strstr(b, "#pc=0 name=\"LG gram") && strstr(b, "sel=auto") && strstr(b, "SUM.TP res=info why=known_unsupported expect=unsup"), "format pc"); }
     {   /* SMBIOS: 만든 표 (BIOS·시스템·보드) */
         static uint8_t tb[256], ep[32];
         int k = 0;

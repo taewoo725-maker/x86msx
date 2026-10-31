@@ -42,6 +42,24 @@ static int mapper_tests(const char *profile, int *total)
 {
     char err[256];
     int f = 0;
+    /* 5.3.39 매퍼 자동 판별: 1 MiB 롬. 5000h·9000h·B000h(코나미 SCC 뱅크) 쓰기가 많으면 6000h·7000h 가 몇 개 섞여도 SCC, 6000h·7000h 만 쓰면 ASCII16 */
+    {
+        static uint8_t g[1u << 20];
+        memset(g, 0, sizeof g); g[0] = 'A'; g[1] = 'B';
+        uint32_t o = 0x100;
+        /* 실제 메탈기어2 중국어판 1 MiB 의 쓰기 분포: 5000h ×7, 9000h ×18, B000h ×14, 7000h ×9, 8000h ×1 */
+        uint16_t scc[49]; int ns = 0;
+        for (int i = 0; i < 7; i++) scc[ns++] = 0x5000;
+        for (int i = 0; i < 18; i++) scc[ns++] = 0x9000;
+        for (int i = 0; i < 14; i++) scc[ns++] = 0xB000;
+        for (int i = 0; i < 9; i++) scc[ns++] = 0x7000;
+        scc[ns++] = 0x8000;
+        for (int i = 0; i < ns; i++) { g[o++] = 0x32; g[o++] = (uint8_t)scc[i]; g[o++] = (uint8_t)(scc[i] >> 8); }
+        f += expect("guess 1MiB SCC bank writes -> KonamiSCC", cart_guess_mapper(g, sizeof g), MAPPER_KONAMI_SCC); (*total)++;
+        memset(g, 0, sizeof g); g[0] = 'A'; g[1] = 'B'; o = 0x100;
+        for (unsigned i = 0; i < 20; i++) { g[o++] = 0x32; g[o++] = 0x00; g[o++] = (uint8_t)((i & 1) ? 0x70 : 0x60); }
+        f += expect("guess 1MiB 6000/7000 writes -> ASCII16", cart_guess_mapper(g, sizeof g), MAPPER_ASCII16); (*total)++;
+    }
     /* Leonard처럼: 0쪽 "AB"는 데이터(예약 칸 ≠ 0), 1쪽이 진짜 머리(INIT 0x8010) → 0x4000에서 시작 */
     memset(big, 0, 0x8000);
     big[0] = 'A'; big[1] = 'B'; big[2] = 0x10; big[3] = 0x80; big[10] = 0x8D; big[11] = 0xB1;

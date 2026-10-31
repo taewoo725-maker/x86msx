@@ -14,12 +14,14 @@
 #include "../third_party/nukedsc55/sc55w.h"   /* 5.2.60 */
 #include "../src/midipkt.h"
 #include "../src/vsrc.h"
+#include "../src/vdpk.h"
 #include "../src/persist.h"
 #include "../src/media.h"
 #include "diag.h"
 #include "input.h"
 #include "font.h"
 #include "lang.h"
+#include "usbgrow.h"
 #include "lang2.h"
 #include "lang_ar.h"                                  /* 3.4.3 LANG3-01 */
 #include "version.h"
@@ -48,6 +50,9 @@
 static int rep_key = -1;   /* 4.0.62: 앞쪽에서 쓰므로 위로 */
 static FeDisplay D;
 static FePlatform P;
+uint32_t fe_now_ms(void) { return P.ms ? P.ms() : 0; }
+#define VS_PC_N 32
+static int vs_pc_lines[VS_PC_N] = { [0 ... VS_PC_N - 1] = 0x7FFF };   /* 8.0.22: 시험 PC 번호마다 화면 맞추기 시점(줄), 0x7FFF = 자동 */   /* 8.0.21: hda.c 진단용 시각 */
 static MSX *M;
 
 /* 화면 배치 */
@@ -140,6 +145,7 @@ static inline uint64_t pf_now(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" 
 #define PF_BEGIN uint64_t pf_s_ = pf_now()
 #define PF_END(k) do { uint64_t d_ = pf_now() - pf_s_; pf_acc[k] += d_; if (d_ > pf_max[k]) pf_max[k] = d_; } while (0)
 void fe_pf_add(int k, uint64_t d) { if (k >= 0 && k < PF_N) { pf_acc[k] += d; if (d > pf_max[k]) pf_max[k] = d; } }
+static uint64_t pf_wacc; static uint32_t pf_wpct;     /* 8.0.32: 일꾼 코어 MIDI 합성 (프레임 시간에 대한 비율, 메인 칸과 합치지 않음) */
 static void pf_window(uint32_t now)
 {
     if (!pf_t0) { pf_t0 = pf_now(); pf_ms0 = now; return; }
@@ -153,6 +159,7 @@ static void pf_window(uint32_t now)
         pf_worst[k] = (uint32_t)(pf_max[k] >> 16) * ems / e16;
         pf_acc[k] = pf_max[k] = 0;
     }
+    pf_wpct = (uint32_t)(pf_wacc >> 16) * 100u / e16; pf_wacc = 0;
     pf_pct[PF_N] = sum < 100 ? 100 - sum : 0;
     pf_t0 = pf_now(); pf_ms0 = now;
 }
@@ -237,9 +244,13 @@ static int midi_synth = GM_SF2;                     /* 3.4.5 SND3-07: 소프트�
 #define MT32_OK 0
 #endif
 static void int_to_str(char *o, int max, int v);
+int shot_full = 1;                                       /* 5.3.28 1 = 스크린샷·녹화를 보이는 화면 그대로, 0 = MSX 화면만 */
+int power_save = 2;                                      /* 5.3.18: 1 = 프레임 사이에 CPU 를 쉬게 함 (UEFI, ini PowerSave). 0 = 전과 같음 */
+int snd_sync_mode = 1;                                   /* 5.3.17: 소리 속도 맞춤 루틴 (1 기본 = 5.3.14, 2 시험). ini SndSync 전용 */
 static int fx_rev = 100, fx_cho = 100, fx_len = 100, fx_on = 1;   /* 공간 음향 (MIDI 탭): 리버브·코러스 세기·잔향 길이 (%, 곡이 정한 값 = 100), 켜기 */
 static void fx_apply(void);
 static int has_ci(const char *h, const char *n);
+static int midi_reload;                                  /* 5.3.49: 롬·SoundFont 를 다시 읽음 → 음원이 처음 상태라 곡이 보낸 설정을 다시 보냄 */
 static char ini_mtc[64], ini_mtp[64], ini_mt2[140];       /* ini 의 MtCtlRom·MtPcmRom (첫 MT-32), MtRom2 (둘째 MT-32 "제어|PCM") — 읽은 뒤 기계에 넣음 */
 static int acpi_mode; static char acpi_line[64];           /* ACPI 모드 켜기 실험 (Lenovo V14 스페이스+대각선) */
 static int mt_model;                                     /* 0 MT-32, 1 CM-32L (USB\MidiSound\MT32 폴더의 롬) */
@@ -657,6 +668,25 @@ static uint32_t draw_glyph(const UiFont *f, uint32_t s, uint32_t x, uint32_t y, 
     if (!g) return 0;
     uint32_t w = g->adv * s;
     if (!draw) return w;
+    if (s == 2 && f->hd) {                                      /* 5.3.34: 1080p — 12px 를 2배로 키우는 대신 24px 글자를 그대로 (자리·줄 높이는 같음) */
+        const FontGlyph *hg = font_glyph(f->hd, cp);
+        if (hg) {
+            const UiFont *hf = f->hd;
+            uint32_t hh = (uint32_t)hf->height;
+            if (x + w > D.w || y + hh > D.h) return w;
+            mark_dirty_rect(x, y, w, hh);
+            const uint8_t *hb = hf->bits + hg->off;
+            for (uint32_t r = 0; r < hh; r++) {
+                uint8_t *line = D.fb + (uintptr_t)(y + r) * D.pitch;
+                for (uint32_t c = 0; c < w; c++) {
+                    int a = c < hg->adv ? glyph_a(hf, hg, hb, (int)r, (int)c) : 0;
+                    if (!a && bg == 0xFF) continue;
+                    put_aa(line, x + c, a, fg, bg);
+                }
+            }
+            return w;
+        }
+    }
     if (x + w > D.w || y + (uint32_t)f->height * s > D.h) return w;
     const uint8_t *b = f->bits + g->off;
     mark_dirty_rect(x, y, w, (uint32_t)f->height * s);
@@ -833,16 +863,18 @@ static int lower_c(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
 static int menu_dirty;
 static int bar_visible;                     /* 메뉴 막대가 보임 */
 static uint8_t mods;                        /* 수정 키 (0x04 = 왼쪽 Ctrl) */
-static char toast_msg[96];
+static char toast_msg[192];
 static uint32_t toast_until;
 
 static void vid_snd_follow(int i);
+static uint32_t toast_ms = 2000;                       /* 5.3.41: 알림 보이는 시간 (기본 2초, 경고는 길게) */
 static void toast(const char *a, const char *b)
 {
     toast_msg[0] = 0;
     str_append(toast_msg, sizeof toast_msg, a);
     if (b) { str_append(toast_msg, sizeof toast_msg, " "); str_append(toast_msg, sizeof toast_msg, b); }
-    toast_until = P.ms() + 2000;
+    toast_until = P.ms() + toast_ms;
+    toast_ms = 2000;
     margin_bd = -1;
 }
 
@@ -1842,65 +1874,21 @@ static void adj_shift(uint8_t *dst, const uint8_t *src, int sh, uint8_t fill)
 #include "fe_v9990.inc"                              /* 5.2.85 Gfx9000 (V9990) 프런트엔드 부품: 화면 그리기·아이콘·꽂기/빼기 */
 
 static uint32_t pres_line32[4096];
-static void present_impl(void)
+/* 8.0.23 다중CPU: 화면 한 줄 그리기 (메인 또는 일꾼 코어). 줄마다 쓰는 임시 버퍼는 덩어리(PresCtx)마다 따로.
+ * 일꾼이 그리는 동안 메인도 자기 몫을 그리고 모두 끝날 때까지 기다리므로, MSX 화면 데이터(fb)는 그동안 바뀌지 않는다.
+ * 공유 상태(그린 영역 목록·여백 판 다시 그리기)는 줄마다 표(pd_*)에 적어 두었다가 메인이 줄 순서대로 반영 → 혼자 그릴 때와 결과가 같음 */
+#define PRES_NCHUNK 6
+int log_diag = 1, log_stall = 1, log_sndlog = 1, log_key = 0, log_sndglitch = 0;   /* 8.0.30: 진단용 USB 저장 스위치 (진단 > 스위치 탭). 새 진단 저장을 만들면 여기와 스위치 탭에 같이 넣을 것 */
+int mp_present = 1; int mp_mwait_ini = 1; extern int msx_mp_midi;                                     /* 8.0.23: ini MpPresent (0 = 메인 혼자 그림) */
+static uint32_t pres_par_n;                             /* 일꾼과 나눠 그린 프레임 수 (DIAG) */
+typedef struct { uint32_t line32[4096]; uint8_t adj_e[VDP_W], adj_o[VDP_W], adj_b[VDP_W]; int emu_on, plany, adj_on, adj_v; uint8_t bd; uint32_t y0, y1; } PresCtx;
+static uint32_t pd_y[VDP_H][2], pd_h[VDP_H][2]; static uint8_t pd_ov[VDP_H];
+static void pres_line(uint32_t y, PresCtx *c)
 {
-    {   /* 5.2.19 화면 출력 층: 소스 표(src/vsrc.h)로 보일 장치를 고름 — 자동이면 V9990 이 화면을 내보낼 때 V9990, 아니면 MSX(VDP) */
-        static void (*const vsrc_draw[VSRC_N])(void) = { [VSRC_VDP] = 0, [VSRC_V9990] = present_v9990 };
-        int id = run_state == RUN_STOPPED ? VSRC_VDP : msx_vsrc_pick(M, vsrc_pref);
-        int comp = vsrc_pref >= VSRC_N && M->v9 && run_state != RUN_STOPPED ? vsrc_pref - VSRC_N + 1 : 0;   /* 겹치기 1 · 나란히 2 (V9990 이 꽂혀 있을 때만) */
-        if (comp) id = VSRC_VDP;
-        if (id != vsrc_cur || comp != vcomp) { vsrc_cur = id; vcomp = comp; layout(); force_redraw = 1; margin_bd = -1; }
-        if (comp == 1) { force_redraw = 1; margin_bd = -1; }   /* 겹치기: 매 프레임 MSX 와 여백을 새로 그린 위에 섞음 (쌓여 진해지지 않게) */
-        if (vsrc_draw[id]) {
-            if (M->vdp.pal_dirty) { M->vdp.pal_dirty = 0; recompute_palette(); if (P.set_palette) P.set_palette(); force_redraw = 1; }
-            if (margin_bd != 1) draw_margins(1);
-            if (!ui_active() || live_ui()) sndm_frame();
-            if (msx_vsrc[id].active(M)) vsrc_draw[id]();
-            else {                                      /* 고른 소스가 화면을 내보내지 않음 (V9990 표시 꺼짐) → 검은 화면 */
-                if (force_redraw) { fill_msx(x0, y0, out_w, out_h, 1); mark_dirty_rect(x0, y0, out_w, out_h); force_redraw = 0; }
-                draw_toast_center(); draw_vol_osd(); last_present = P.ms();
-            }
-            return;
-        }
-    }
-    int emu_on = (mon_emu || fx_blur || fx_glow || fx_noise) && D.bpp == 4;
-    int plany = D.bpp == 4 && M->vdp.pal_nsnap > 1 && run_state != RUN_STOPPED;
-    plmode = !emu_on && plany;   /* 4.0.29: 프레임 안에서 팔레트가 바뀜 */
-    if (plany) {
-        for (int k = 0; k < M->vdp.pal_nsnap; k++)
-            for (int i = 0; i < 16; i++) {
-                uint8_t r8 = M->vdp.pal_snap[k][i][0], g8 = M->vdp.pal_snap[k][i][1], b8 = M->vdp.pal_snap[k][i][2];
-                monitor_tint(&r8, &g8, &b8);
-                snap32[k][i] = D.bgr ? ((uint32_t)r8 << 16) | ((uint32_t)g8 << 8) | b8 : ((uint32_t)b8 << 16) | ((uint32_t)g8 << 8) | r8;
-            }
-        force_redraw = 1;
-    } else if (plmode_prev) force_redraw = 1;
-    plmode_prev = plmode;
-    /* 3.2.10 VID-05: V9938 R#18 화면 위치 (openMSX와 같이 니블 ^ 7 − 7: 가로 −7~+8점, 세로 −7~+8줄, + = 오른쪽·아래) */
-    int adj_on = M->vdp.v9938 && run_state != RUN_STOPPED, adj_v = 0;
-    if (adj_on) adj_v = ((M->vdp.line_adj[0] >> 4) ^ 7) - 7;   /* 4.0.31: 가로는 줄마다 (Psycho World: 위쪽 필드는 R#18로 미세 스크롤, HUD 줄에서 0), 세로는 첫 줄 값 */
-    uint32_t *line32 = pres_line32;
-    uint8_t *line8 = (uint8_t *)line32;
-    if (M->vdp.pal_dirty) {                          /* 프로그램이 팔레트를 바꿈 */
-        M->vdp.pal_dirty = 0;
-        recompute_palette();
-        if (P.set_palette) P.set_palette();
-        force_redraw = 1;
-    }
-    if ((M->vdp.lines == 212 ? 212u : 192u) != disp_lines) { layout(); force_redraw = 1; margin_bd = -1; }   /* 192 ↔ 212줄 모드 전환 */
-    uint8_t bd = run_state == RUN_STOPPED ? 1 : vdp_backdrop(&M->vdp);
-    if (memcmp(shadow_bd, M->vdp.line_bd, disp_lines)) {   /* 줄별 테두리 색이 바뀜 (MSX2+ 로고 같은 효과) → 여백 다시 */
-        memcpy(shadow_bd, M->vdp.line_bd, disp_lines);
-        margin_bd = -1;
-    }
-    if (bd != margin_bd) draw_margins(bd);
-    fe_trace("pres: sndm");
-    if (!ui_active() || live_ui()) sndm_frame();     /* 3.7.1: 음원 아이콘 LED 계기 */
-    fe_trace("pres: lines");
-    for (uint32_t y = 0; y < disp_lines; y++) {
-        if (!(y & 63) && y) fe_trace("pres: line+64");   /* 5.2.27 멈춤 추적 */
+        int emu_on = c->emu_on, plany = c->plany, adj_on = c->adj_on, adj_v = c->adj_v; uint8_t bd = c->bd;
         static const uint8_t black[VDP_W];
-        static uint8_t adj_e[VDP_W], adj_o[VDP_W], adj_b[VDP_W];
+        uint8_t *adj_e = c->adj_e, *adj_o = c->adj_o, *adj_b = c->adj_b;
+        uint32_t *line32 = c->line32; uint8_t *line8 = (uint8_t *)line32;
         int sy = (int)y - adj_v;                            /* 3.2.10 VID-05: R#18 세로 맞춤 */
         const uint8_t *src, *odd, *ovp;
         int direct, direct_odd, eo;
@@ -1918,13 +1906,13 @@ static void present_impl(void)
         }
         if (run_state == RUN_STOPPED) { src = black; direct = 0; }
         if (!force_redraw && direct == shadow_direct[y] && eo == shadow_eo[y] && !memcmp(src, shadow[y], VDP_W) &&
-            (!eo || !memcmp(odd, shadow_odd[y], VDP_W)) && (direct < 2 || !memcmp(ovp, shadow_ov[y], 256))) continue;
+            (!eo || !memcmp(odd, shadow_odd[y], VDP_W)) && (direct < 2 || !memcmp(ovp, shadow_ov[y], 256))) return;
         if (direct >= 2) memcpy(shadow_ov[y], ovp, 256);
         memcpy(shadow[y], src, VDP_W);
         if (eo) memcpy(shadow_odd[y], odd, VDP_W);
         shadow_direct[y] = (uint8_t)direct;
         shadow_eo[y] = (uint8_t)eo;
-        if (emu_on) { emu_ly = plany && (int)y < (int)disp_lines ? (int)y : -1; emu_line_rgb(src, direct, ovp, emu_rgb[y]); emu_chg[y] = 1; continue; }   /* 3.2.3: 그리기는 아래 emu_render */
+        if (emu_on) { emu_ly = plany && (int)y < (int)disp_lines ? (int)y : -1; emu_line_rgb(src, direct, ovp, emu_rgb[y]); emu_chg[y] = 1; return; }   /* 3.2.3: 그리기는 아래 emu_render */
         uint32_t bytes = out_w * (uint32_t)D.bpp;
         uint32_t ry = row_y[y + voff], rh_ = row_y[y + voff + 1] - ry;   /* 이 줄의 화면 위치·높이 */
         uint32_t even_rows = eo ? (rh_ + 1) / 2 : rh_;          /* 인터레이스: 위쪽은 짝수 필드, 아래쪽은 홀수 필드 */
@@ -1997,8 +1985,81 @@ static void present_impl(void)
                     memcpy(dr + cx1 * bp, (const uint8_t *)line32 + cx1 * bp, (out_w - cx1) * bp);
                 } else memcpy(dr, line32, bytes);
             }
-            mark_dirty_rect(x0, ry + r0, out_w, r_end > r0 ? r_end - r0 : 0);
-            if (ov_on && (((ov_on & 1) && ry < tb_h()) || ((ov_on & 2) && !rp_fixed && ry + rh_ > rp_y && ry < rp_y + rp_h))) ov_dirty = 1;   /* 3.5.0: 막대 밑 줄을 다시 그림 */
+            { int hh = half; pd_y[y][hh] = ry + r0; pd_h[y][hh] = r_end > r0 ? r_end - r0 : 0; }   /* 8.0.23: 다 그린 뒤 메인이 줄 순서대로 mark_dirty_rect */
+            if (ov_on && (((ov_on & 1) && ry < tb_h()) || ((ov_on & 2) && !rp_fixed && ry + rh_ > rp_y && ry < rp_y + rp_h))) pd_ov[y] = 1;   /* 3.5.0: 막대 밑 줄을 다시 그림 (8.0.23: 메인이 모아서) */
+        }
+    }
+static void pres_chunk(void *arg) { PresCtx *c = (PresCtx *)arg; for (uint32_t y = c->y0; y < c->y1; y++) pres_line(y, c); }
+static void present_impl(void)
+{
+    {   /* 5.2.19 화면 출력 층: 소스 표(src/vsrc.h)로 보일 장치를 고름 — 자동이면 V9990 이 화면을 내보낼 때 V9990, 아니면 MSX(VDP) */
+        static void (*const vsrc_draw[VSRC_N])(void) = { [VSRC_VDP] = 0, [VSRC_V9990] = present_v9990 };
+        int id = run_state == RUN_STOPPED ? VSRC_VDP : msx_vsrc_pick(M, vsrc_pref);
+        int comp = vsrc_pref >= VSRC_N && M->v9 && run_state != RUN_STOPPED ? vsrc_pref - VSRC_N + 1 : 0;   /* 겹치기 1 · 나란히 2 (V9990 이 꽂혀 있을 때만) */
+        if (comp) id = VSRC_VDP;
+        if (id != vsrc_cur || comp != vcomp) { vsrc_cur = id; vcomp = comp; layout(); force_redraw = 1; margin_bd = -1; }
+        if (comp == 1) { force_redraw = 1; margin_bd = -1; }   /* 겹치기: 매 프레임 MSX 와 여백을 새로 그린 위에 섞음 (쌓여 진해지지 않게) */
+        if (vsrc_draw[id]) {
+            if (M->vdp.pal_dirty) { M->vdp.pal_dirty = 0; recompute_palette(); if (P.set_palette) P.set_palette(); force_redraw = 1; }
+            if (margin_bd != 1) draw_margins(1);
+            if (!ui_active() || live_ui()) sndm_frame();
+            if (msx_vsrc[id].active(M)) vsrc_draw[id]();
+            else {                                      /* 고른 소스가 화면을 내보내지 않음 (V9990 표시 꺼짐) → 검은 화면 */
+                if (force_redraw) { fill_msx(x0, y0, out_w, out_h, 1); mark_dirty_rect(x0, y0, out_w, out_h); force_redraw = 0; }
+                draw_toast_center(); draw_vol_osd(); last_present = P.ms();
+            }
+            return;
+        }
+    }
+    int emu_on = (mon_emu || fx_blur || fx_glow || fx_noise) && D.bpp == 4;
+    int plany = D.bpp == 4 && M->vdp.pal_nsnap > 1 && run_state != RUN_STOPPED;
+    plmode = !emu_on && plany;   /* 4.0.29: 프레임 안에서 팔레트가 바뀜 */
+    if (plany) {
+        for (int k = 0; k < M->vdp.pal_nsnap; k++)
+            for (int i = 0; i < 16; i++) {
+                uint8_t r8 = M->vdp.pal_snap[k][i][0], g8 = M->vdp.pal_snap[k][i][1], b8 = M->vdp.pal_snap[k][i][2];
+                monitor_tint(&r8, &g8, &b8);
+                snap32[k][i] = D.bgr ? ((uint32_t)r8 << 16) | ((uint32_t)g8 << 8) | b8 : ((uint32_t)b8 << 16) | ((uint32_t)g8 << 8) | r8;
+            }
+        force_redraw = 1;
+    } else if (plmode_prev) force_redraw = 1;
+    plmode_prev = plmode;
+    /* 3.2.10 VID-05: V9938 R#18 화면 위치 (openMSX와 같이 니블 ^ 7 − 7: 가로 −7~+8점, 세로 −7~+8줄, + = 오른쪽·아래) */
+    int adj_on = M->vdp.v9938 && run_state != RUN_STOPPED, adj_v = 0;
+    if (adj_on) adj_v = ((M->vdp.line_adj[0] >> 4) ^ 7) - 7;   /* 4.0.31: 가로는 줄마다 (Psycho World: 위쪽 필드는 R#18로 미세 스크롤, HUD 줄에서 0), 세로는 첫 줄 값 */
+    uint32_t *line32 = pres_line32;
+    uint8_t *line8 = (uint8_t *)line32;
+    if (M->vdp.pal_dirty) {                          /* 프로그램이 팔레트를 바꿈 */
+        M->vdp.pal_dirty = 0;
+        recompute_palette();
+        if (P.set_palette) P.set_palette();
+        force_redraw = 1;
+    }
+    if ((M->vdp.lines == 212 ? 212u : 192u) != disp_lines) { layout(); force_redraw = 1; margin_bd = -1; }   /* 192 ↔ 212줄 모드 전환 */
+    uint8_t bd = run_state == RUN_STOPPED ? 1 : vdp_backdrop(&M->vdp);
+    if (memcmp(shadow_bd, M->vdp.line_bd, disp_lines)) {   /* 줄별 테두리 색이 바뀜 (MSX2+ 로고 같은 효과) → 여백 다시 */
+        memcpy(shadow_bd, M->vdp.line_bd, disp_lines);
+        margin_bd = -1;
+    }
+    if (bd != margin_bd) draw_margins(bd);
+    fe_trace("pres: sndm");
+    if (!ui_active() || live_ui()) sndm_frame();     /* 3.7.1: 음원 아이콘 LED 계기 */
+    fe_trace("pres: lines");
+    {   /* 8.0.23: 줄 그리기를 일꾼 코어와 나눔 (P.par_run 없거나 MpPresent=0 이면 메인 혼자, 결과는 같음) */
+        static PresCtx pc[PRES_NCHUNK];
+        int nch = (P.par_run && mp_present && !emu_on) ? PRES_NCHUNK : 1;
+        uint32_t per = (disp_lines + (uint32_t)nch - 1) / (uint32_t)nch;
+        for (int i = 0; i < nch; i++) {
+            pc[i].emu_on = emu_on; pc[i].plany = plany; pc[i].adj_on = adj_on; pc[i].adj_v = adj_v; pc[i].bd = bd;
+            pc[i].y0 = (uint32_t)i * per; pc[i].y1 = pc[i].y0 + per > disp_lines ? disp_lines : pc[i].y0 + per; if (pc[i].y0 > pc[i].y1) pc[i].y0 = pc[i].y1;
+        }
+        for (uint32_t y = 0; y < disp_lines; y++) { pd_h[y][0] = pd_h[y][1] = 0; pd_y[y][0] = pd_y[y][1] = 0; pd_ov[y] = 0; }
+        if (nch > 1) { uint8_t r_ = 0, g_ = 0, b_ = 0; video_adjust(&r_, &g_, &b_); }   /* 감마 표를 메인이 먼저 만들어 둠 (일꾼들이 동시에 만들지 않게) */
+        if (nch > 1) { void *args[PRES_NCHUNK]; for (int i = 0; i < nch; i++) args[i] = &pc[i]; pres_par_n += P.par_run(pres_chunk, args, nch) > 0; }
+        else pres_chunk(&pc[0]);
+        for (uint32_t y = 0; y < disp_lines; y++) {
+            for (int h = 0; h < 2; h++) if (pd_h[y][h]) mark_dirty_rect(x0, pd_y[y][h], out_w, pd_h[y][h]);
+            if (pd_ov[y]) ov_dirty = 1;
         }
     }
     fe_trace("pres: lines done");
@@ -2038,7 +2099,7 @@ enum {
     A_CART1_INSERT, A_CART2_INSERT, A_CART1_EJECT, A_CART2_EJECT,
     A_CART3_INSERT, A_CART4_INSERT, A_CART3_EJECT, A_CART4_EJECT, A_INFO_CART3, A_INFO_CART4,
     A_EXIT, A_REBOOT, A_EXIT_NOW, A_REBOOT_NOW, A_DIAG, A_ABOUT, A_SOUND_DIAG,
-    A_LANG_KO, A_LANG_EN, A_LANG_JA, A_LANG_DE, A_LANG_FR, A_LANG_ES, A_LANG_SV, A_LANG_RU, A_LANG_PT, A_LANG_ET, A_LANG_AR, A_SCALE_AUTO, A_USB_GROW,
+    A_LANG_KO, A_LANG_EN, A_LANG_JA, A_LANG_DE, A_LANG_FR, A_LANG_ES, A_LANG_SV, A_LANG_RU, A_LANG_PT, A_LANG_ET, A_LANG_AR, A_SCALE_AUTO, A_USB_GROW, A_SYSVIEW, A_EJECT_ALL,
     A_RESET_AFTER_INSERT, A_HD_RESET_EJECT, A_HD_RESET_INS, A_VHD_RESET_INS, A_DISK_RESET_AFTER, A_PANA_FRONT, A_PANA_PAUSE, A_PANA_AUDIO,
     A_PROPS_EMU, A_PROPS_MIX, A_MIDI_MIX, A_PROPS_KB, A_NET, A_NET_WIFI, A_NET_WIRED, A_PROPS_VIDEO, A_PROPS_EFFECTS, A_PROPS_SOUND, A_PROPS_MIDI, A_POP_JOY, A_POP_MOUSE, A_IMAGE_MAKE, A_HELP, A_DISK_COPY,
     A_DISKA_INSERT, A_DISKB_INSERT, A_DISKA_EJECT, A_DISKB_EJECT, A_DISKA_WP, A_DISKB_WP,
@@ -2165,6 +2226,7 @@ static void open_medit_name(const char *name);
 static void open_machines_edit(void);
 static void scan_name(int key, char *out, int max);
 static void open_dialog(int kind);
+static void draw_sysview(void); static void sysview_open(void); static void sysview_key(int key);   /* 5.3.19 fe_sysview.inc */
 static void bgw_finish(void);                         /* 5.2.69 fe_state.inc: 조금씩 저장을 마저 */
 static int bgw_busy(void);
 static void bgw_step(uint32_t budget_ms);
@@ -2185,20 +2247,21 @@ static void full_redraw(void) { force_redraw = 1; margin_bd = -1; }
 /* 글꼴 파일 — USB\fonts\*.x8f (tools/mkfont.py 가 만듦). 작은·큰·굵은 글꼴 셋이 한 파일에 들어 있고 부팅 때 하나만 메모리에 읽음.
  * 파일이 없거나 틀리면 내장 점글꼴(Galmuri). 설정 파일 Font=<파일 이름> ("-" 는 내장). 설정 파일 Font=- 로 내장 글꼴 */
 _Static_assert(sizeof(FontGlyph) == 12, "x8f 글자 표는 12바이트");
-#define FX_MAX ((4u << 20) - (64u << 10))      /* 글꼴 파일 최대 (BSS 가 커널 끝 0x03800000 안에 들어가게 64 KB 뺌) */
+#define FX_MAX ((4u << 20) + (128u << 10))     /* 글꼴 파일 최대 (5.3.34: 1080p 두 배 글꼴 +340 KB 때문에 늘림. BSS 끝은 0x03800000 안, Makefile 이 검사) */
 static uint8_t fx_buf[FX_MAX] __attribute__((aligned(16)));
 static char fx_name[64];                                /* 지금 쓰는 파일 이름 ("" = 내장) */
 static char fx_pref[64];                                /* 고른 글꼴 ("" = 내장). 모든 언어가 따름 */
 static int fx_err;                                      /* 마지막 실패 이유: 1 읽기 실패 2 머리 틀림 3 글꼴 표 틀림 4 이름 없음 */
 static int fx_seen;                                     /* 설정 파일에 Font 가 있었나 */
-static UiFont fx_builtin[7]; static int fx_have_builtin;
+static UiFont fx_builtin[8]; static int fx_have_builtin;
 static uint32_t fx_u32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static void fx_use_builtin(void)
 {
-    if (!fx_have_builtin) { fx_builtin[0] = font_small; fx_builtin[1] = font_large; fx_builtin[2] = font_large; fx_builtin[3] = font_small; fx_builtin[4] = font_small; fx_builtin[5] = font_large; fx_builtin[6] = font_large; fx_have_builtin = 1; }
-    font_small = fx_builtin[0]; font_large = fx_builtin[1]; font_bold = fx_builtin[2]; font_tiny = fx_builtin[3]; font_btn = fx_builtin[4]; font_head = fx_builtin[5]; font_title = fx_builtin[6];
+    if (!fx_have_builtin) { fx_builtin[0] = font_small; fx_builtin[1] = font_large; fx_builtin[2] = font_large; fx_builtin[3] = font_small; fx_builtin[4] = font_small; fx_builtin[5] = font_large; fx_builtin[6] = font_large; fx_builtin[7] = font_small; fx_have_builtin = 1; }
+    font_small = fx_builtin[0]; font_large = fx_builtin[1]; font_bold = fx_builtin[2]; font_tiny = fx_builtin[3]; font_btn = fx_builtin[4]; font_head = fx_builtin[5]; font_title = fx_builtin[6]; font_mini = fx_builtin[7];
     fx_name[0] = 0;
 }
+static UiFont font_small_hd;                            /* 5.3.34: 글꼴 파일의 아홉째 (24px) */
 static int fx_install(const char *name)                 /* 0 = 파일 글꼴로 바꿈. 아니면 내장으로 돌아가고 -1 */
 {
     char nm[64]; copy_str(nm, sizeof nm, name ? name : ""); name = nm;    /* name 이 fx_name 일 수 있어 먼저 복사 */
@@ -2209,20 +2272,22 @@ static int fx_install(const char *name)                 /* 0 = 파일 글꼴로 
     copy_str(path, sizeof path, "0:\\fonts\\"); str_append(path, sizeof path, name);
     uint32_t n = 0;
     if (P.read_file(path, fx_buf, FX_MAX, &n)) { fx_err = 1; return -1; }
-    if (n < 8 + 28 * 3 || memcmp(fx_buf, "X8F1", 4) || (fx_u32(fx_buf + 4) != 3 && fx_u32(fx_buf + 4) != 4 && fx_u32(fx_buf + 4) != 7)) { fx_err = 2; return -1; }
+    if (n < 8 + 28 * 3 || memcmp(fx_buf, "X8F1", 4) || (fx_u32(fx_buf + 4) != 3 && fx_u32(fx_buf + 4) != 4 && fx_u32(fx_buf + 4) != 7 && fx_u32(fx_buf + 4) != 8 && fx_u32(fx_buf + 4) != 9)) { fx_err = 2; return -1; }
     uint32_t nfont = fx_u32(fx_buf + 4);
     if (n < 8 + 28 * nfont) { fx_err = 2; return -1; }
-    static const uint32_t want_h[7] = { 16, 21, 21, 16, 16, 21, 21 };    /* 화면 배치가 줄 높이에 맞춰져 있음 */
-    UiFont nf[7];
+    static const uint32_t want_h[9] = { 16, 21, 21, 16, 16, 21, 21, 16, 32 };    /* 화면 배치가 줄 높이에 맞춰져 있음 (아홉째 = 작은 글꼴 두 배) */
+    UiFont nf[9];
     for (uint32_t i = 0; i < nfont; i++) {
         const uint8_t *m = fx_buf + 8 + 28 * i;
         uint32_t h = fx_u32(m), asc = fx_u32(m + 4), cnt = fx_u32(m + 8), aa = fx_u32(m + 12), to = fx_u32(m + 16), bo = fx_u32(m + 20), bl = fx_u32(m + 24);
         if (h != want_h[i] || !cnt || (to & 3) || to > n || cnt > (n - to) / 12 || bo > n || bl > n - bo) { fx_err = 3; return -1; }
-        nf[i].height = (int)h; nf[i].ascent = (int)asc; nf[i].count = (int)cnt; nf[i].glyphs = (const FontGlyph *)(fx_buf + to); nf[i].bits = fx_buf + bo; nf[i].aa = (int)aa;
+        nf[i].height = (int)h; nf[i].ascent = (int)asc; nf[i].count = (int)cnt; nf[i].glyphs = (const FontGlyph *)(fx_buf + to); nf[i].bits = fx_buf + bo; nf[i].aa = (int)aa; nf[i].hd = 0;
     }
     if (nfont < 4) nf[3] = nf[0];
     if (nfont < 7) { nf[4] = nf[0]; nf[5] = nf[2]; nf[6] = nf[2]; }
-    font_small = nf[0]; font_large = nf[1]; font_bold = nf[2]; font_tiny = nf[3]; font_btn = nf[4]; font_head = nf[5]; font_title = nf[6];
+    if (nfont < 8) nf[7] = nf[3];                       /* 5.3.13: 옛 글꼴 파일엔 9px 이 없음 → 11px */
+    if (nfont >= 9) { font_small_hd = nf[8]; nf[0].hd = &font_small_hd; }          /* 5.3.34 */
+    font_small = nf[0]; font_large = nf[1]; font_bold = nf[2]; font_tiny = nf[3]; font_btn = nf[4]; font_head = nf[5]; font_title = nf[6]; font_mini = nf[7];
     copy_str(fx_name, sizeof fx_name, name);
     return 0;
 }
@@ -2284,6 +2349,52 @@ static void cart_remove(int n)                          /* 카트리지 빼기 (
 static char vhd_dir[6][64];                             /* 3.7.2: fe_vhd.inc 가상 하드 C~H 폴더 */
 static int vhd_any(void) { for (int i = 0; i < 6; i++) if (vhd_dir[i][0]) return 1; return 0; }   /* 3.8.2: 하드 이미지와 가상 하드는 둘 중 하나만 */
 static void open_vhd_browser(int drv);
+/* 5.3.41: 슬롯 확장기 안(SLOT1~4)에 꽂으면 못 도는 것으로 확인된 롬 (SHA-1) — 메탈기어2 원본 덤프 대부분. 확장을 끄거나 'Slot Patch' 판을 쓰면 됨 */
+static const char *const noexp_sha[] = {
+    "08166c71ff85c958d2d1249f4b9ba755b313e206",
+    "28b140ac48838aa720ae1c8b5d67138321f699c3",
+    "3033225b0895bf552b2160eb4dd826056a4fd5ec",
+    "337fb6f52c117106db02440a95b7d698ebd3da35",
+    "360fe420d71dabfacbf8855ae92ea6b6e4c0d2ae",
+    "4b78514753008cabda2ff3d3cb537b2429efd7d2",
+    "4c98fef02840e7c39051fc21ee0dbffc9e27f98d",
+    "53e1fb8ee77757cd20bf4c7aa4a5c6c786c664d6",
+    "54c9da6ef45c3086c92414dfb95bf82832820857",
+    "5bb1be67984903649f2e8ec5bb3e559945a36f43",
+    "644ee67d4e32060354f4f858cc6da7749f2adf1c",
+    "732f7f3d60865449d52ea24d8cdbf6a6a1d8b65a",
+    "7681b0dde4d2c40512e33afe9abc72b7ef591294",
+    "78560a5c2e6de02896a56c5662b1aaccaf9d386f",
+    "78c16176b9836880a984e0d86bb22714a917aede",
+    "7be2f14fd0df5718cdb69b972c5f7c1f284b03e6",
+    "89b1f403fac335344a54f23be5b30815449f3173",
+    "8a33f75e1a11e11d5935f78fb2552aec11f29672",
+    "8cc81bb1e5d9477e08b2a4728eb997c5890f405d",
+    "983eb5deeb61af5ce82ad598692192b8ae8a2a08",
+    "9eab209920e78e05746e5a3e74fe452f289c2cfe",
+    "a38dff1197ce0b8850d907a961e82bbdbe0c5b9f",
+    "a5245bf246e42a17dc5825a2337c45293fad29e4",
+    "a7b196f7e934faa76602c8c00bd2f6e6d2d70787",
+    "ac71117eb20ec8a84035acbbd380df8235a5c665",
+    "b0ac664a2d5619097c0ab95989b886823f5eeb3f",
+    "b65cd6d9b26ec10e57e6a0117e21074dd3bb4f05",
+    "c0455b9c0a7306f46d8a28bca5c32f1ae27f72a2",
+    "c18adae0ca1243e13a15d381a431cc0dfc68223b",
+    "d3be700ef457614514084d97e13b71368776db4d",
+    "d5a2b277bbe6c419ead5daa2ed6e560cbbbc0e5c",
+    "d8cd8c87d720cf0bf52a7f432999979de5438bd5",
+    "e9e778c3d103cc8c32093cd6880fa8d7238bbd9e",
+    "ea0824ea0692d2cdff816a2b3c3eb9a587a5f536",
+    "f9bc911ad3d1bc042fc18e74b1987a5d8464fb3e"
+};
+static int noexp_rom(const uint8_t *buf, uint32_t size)
+{
+    char hx[41];
+    if (size != (512u << 10) && size != (1u << 20)) return 0;
+    sha1_hex(buf, size, hx);
+    for (unsigned i = 0; i < sizeof noexp_sha / sizeof noexp_sha[0]; i++) if (!strcmp(hx, noexp_sha[i])) return 1;
+    return 0;
+}
 static void after_cart_insert(int n)
 {
     int forced = n == 1 && !slot_expand;
@@ -2367,6 +2478,22 @@ static void do_action(int a)
     case A_SC_EDIT: open_dialog(8); break;
     case A_KEYMAP_EDIT: open_dialog(14); break;
     case A_VHD_C: case A_VHD_D: case A_VHD_E: case A_VHD_F: case A_VHD_G: case A_VHD_H: open_vhd_browser(a - A_VHD_C); break;   /* 3.7.2 */           /* 3.2.12 KBD-02 */
+    case A_EJECT_ALL: {                                 /* 5.3.31 미디어 > 전체해제: 꽂힌 것 모두 한 번에 (리셋은 마지막에 한 번만) */
+        int rs = 0;
+        for (int n = 0; n < 5; n++) {
+            if (!M->cart[n].present) continue;
+            if (CART_IS_IDE(M->cart[n].mapper)) hd_eject();
+            cart_remove(n); cart_name[n][0] = 0; cart_path[n][0] = 0; cart_special[n] = 0;
+            if (reset_after_insert) rs = 1;
+        }
+        for (int d = 0; d < 2; d++) if (M->fdc_kind && disk_size[d]) disk_eject(d);
+        if (M->tape) tape_eject();
+        if (!vhd_any() && (hd_secs || hd2_secs)) { hd_eject_unit(0); hd_auto_cart_remove(0); if (hd_reset_eject) rs = 1; }
+        settings_changed(); margin_bd = -1;
+        if (rs) power_on();
+        break;
+    }
+    case A_SYSVIEW: sysview_open(); break;             /* 5.3.19 시스템 보기 (fe_sysview.inc) */
     case A_USB_GROW: bgw_finish(); if (vrec_on) { vrec_on = 0; margin_bd = -1; } open_dialog(4); break;   /* 3.2.13: 확장은 영상 버퍼 자리를 씀 → 녹화 버림 */
     case A_MACHINE: open_machines(); break;
     case A_MEDIA: pop_media(); break;          /* 3.5.0 */
@@ -2483,6 +2610,7 @@ static int action_state(int a)
     case A_DISK_RESET_AFTER: return disk_reset_after_insert ? 2 : 1;
     case A_INFO_CART1: case A_INFO_CART2: case A_INFO_VOLUME: case A_INFO_MACHINE: case A_INFO_DISKA: case A_INFO_DISKB: case A_INFO_TAPE: return 3;
     case A_TAPE_EJECT: case A_TAPE_REWIND: return M->tape ? 1 : 0;
+    case A_EJECT_ALL: { int any = M->tape ? 1 : 0; for (int n = 0; n < 5; n++) if (M->cart[n].present) any = 1; if (M->fdc_kind && (disk_size[0] || disk_size[1])) any = 1; if (!vhd_any() && (hd_secs || hd2_secs)) any = 1; return any; }   /* 5.3.31 */
     case A_TAPE_INSERT: case A_TAPE_NEW: return tape_slot() ? 1 : 0;   /* 5.2.36 */
     case A_HD_INSERT: return P.hd_open && !vhd_any() ? 1 : 0;      /* 3.8.2: 가상 하드가 잡혀 있으면 이미지 삽입 불가 */
     case A_HD_EJECT: return hd_secs && !vhd_any() ? 1 : 0;
@@ -2636,7 +2764,8 @@ MENU(m_hd, { S_INSERT, 0, &m_hd_ins, 0 }, { S_EJECT, 0, &m_hd_ej, 0 }, SEP,
      { S_VHD_MENU, 0, &m_vhd, 0 });   /* 3.7.2 가상 하드 C~H (3.9.9: 하위 메뉴) */
 /* 3.5.0: 미디어 = 미디어 판과 같은 장치 메뉴 (키보드로는 RCtrl+RShift+D 또는 파일 → 미디어) */
 MENU(m_media, { S_CART1, 0, &m_cart1, 0 }, { S_CART2, 0, &m_cart2, 0 }, { S_CART3, 0, &m_cart3, 0 }, { S_CART4, 0, &m_cart4, 0 }, { S_CART5, 0, &m_cart5, 0 }, SEP,
-     { S_DISK_A, 0, &m_diska, 0 }, { S_DISK_B, 0, &m_diskb, 0 }, { S_HARDDISK, 0, &m_hd, 0 }, SEP, { S_CASSETTE, 0, &m_tape, 0 });   /* 3.7.3: 하드 → 줄 → 카세트 */
+     { S_DISK_A, 0, &m_diska, 0 }, { S_DISK_B, 0, &m_diskb, 0 }, { S_HARDDISK, 0, &m_hd, 0 }, SEP, { S_CASSETTE, 0, &m_tape, 0 },
+     SEP, { S_EJECT_ALL, A_EJECT_ALL, 0, 0 });   /* 3.7.3: 하드 → 줄 → 카세트, 5.3.31: 카세트 밑 전체해제 */
 MENU(m_save, { S_QUICK_SAVE, A_QUICK_SAVE, 0, "F8" }, { S_CPU_SAVE, A_STATE_SAVE, 0, "LAlt+F8" });       /* 도구 막대 저장 단추 */
 MENU(m_load, { S_QUICK_LOAD, A_QUICK_LOAD, 0, "F7" }, { S_CPU_LOAD, A_STATE_LOAD, 0, "LAlt+F7" });       /* 도구 막대 불러오기 단추 */
 MENU(m_power, { S_FULL_RESET, A_FULL_RESET, 0, 0 }, { S_SOFT_RESET, A_SOFT_RESET, 0, 0 }, SEP, { S_REBOOT_PC, A_REBOOT, 0, "RCtrl+Pause" }, { S_EXIT, A_EXIT, 0, "LCtrl+Pause" });   /* 전원 단추 */
@@ -2669,7 +2798,7 @@ MENU(m_options, { S_EMULATION, A_PROPS_EMU, 0, "RShift+F6" }, { S_M_NETWORK, 0, 
      { S_EFFECTS, A_PROPS_EFFECTS, 0, "RShift+F10" },   /* 3.6.1: 모니터 유형·스캔라인은 효과 창 안 항목으로 (메뉴로는 넣지 않음) */ { S_SOUND, 0, &m_sound, 0 }, { S_OUTPUT, A_PROPS_OUTPUT, 0, 0 }, { S_MIDI, A_PROPS_MIDI, 0, "RShift+F11" },
      SEP, { S_LANGUAGE, A_LANG_WIN, 0, "RCtrl+RShift+L" });   /* 탭 없이 항목마다 자기 창 */
 MENU(m_tools, { S_MACHINE_EDITOR, A_MACHINE_EDIT, 0, "RCtrl+RShift+M" }, { S_SHORTCUT_EDITOR, A_SC_EDIT, 0, "RCtrl+RShift+S" }, { S_KEYMAP_EDITOR, A_KEYMAP_EDIT, 0, 0 }, SEP, { S_MIXER_MENU, A_PROPS_MIX, 0, "LCtrl+LAlt+M" }, { S_MIDI_MIXER_MENU, A_MIDI_MIX, 0, "LCtrl+F12" }, { S_INPUT_DEV, A_PROPS_KB, 0, "RCtrl+RShift+K" });   /* 4.0: 키보드·마우스·조이스틱을 입력장치 한 창(탭 3개)으로 */
-MENU(m_system, { S_DIAG, A_DIAG, 0, "LCtrl+F6" }, { S_USB_GROW, A_USB_GROW, 0, 0 }, SEP, { S_IMAGE_MAKE, A_IMAGE_MAKE, 0, 0 }, { S_DISK_COPY, A_DISK_COPY, 0, 0 });
+MENU(m_system, { S_SYSVIEW, A_SYSVIEW, 0, "RCtrl+RShift+V" }, { S_DISK_COPY, A_DISK_COPY, 0, 0 }, SEP, { S_IMAGE_MAKE, A_IMAGE_MAKE, 0, 0 }, { S_USB_GROW, A_USB_GROW, 0, 0 }, { S_DIAG, A_DIAG, 0, 0 });   /* 8.0.36: 시스템 보기·파일 관리자 | 이미지 만들기·USB 전체 용량·진단정보 */
 MENU(m_help, { S_HELP_MENU, A_HELP, 0, 0 }, { S_M_SYSTEM, 0, &m_system, 0 }, SEP, { S_ABOUT, A_ABOUT, 0, "RCtrl+F6" });   /* 3.0.2: 도움말, 시스템 ▶ */
 
 /* 네트워크 메뉴는 네트워크 카드(Insert Special > Network(UNAPI) > X86Network)를 꽂았을 때만 막대에 나타난다 */
@@ -3724,6 +3853,17 @@ static void zext_of(const char *nm, char *out)   /* 파일 이름의 확장자(�
     if (dot) for (const char *p = dot + 1; *p && k < 5; p++) out[k++] = (char)lower_c(*p);
     out[k] = 0;
 }
+/* 5.3.52: 서명 없는 큰 롬이라도 파일 이름에 "Yamanooto" 가 있으면 Yamanooto 로 (Seed of Dragon K Yamanooto 처럼 2 MiB 인데 ASCII16 으로 잘못 잡혀 검은 화면이던 것). 직접 고른 종류·ASCII16-X·Neo 서명은 그대로 */
+static MapperType name_mapper(const char *path, uint32_t size, MapperType mt)
+{
+    if (size < (1u << 20) || size > (16u << 20) || mt == MAPPER_YAMANOOTO || mt == MAPPER_ASCII16X || mt == MAPPER_NEO8 || mt == MAPPER_NEO16) return mt;
+    for (const char *q = path; *q; q++) {
+        static const char w[] = "yamanooto"; int i = 0;
+        while (w[i] && q[i] && (q[i] | 0x20) == w[i]) i++;
+        if (!w[i]) return MAPPER_YAMANOOTO;
+    }
+    return mt;
+}
 static void probe_type(int e)
 {
     FeDirEntry *x = &entries[e];
@@ -3769,12 +3909,12 @@ static void probe_type(int e)
     if (is_zip(path)) {                                 /* 3.2.0: zip은 꺼내서 */
         uint8_t *tmp = P.scratch_size >= (10u << 20) ? P.scratch + (8u << 20) : 0;   /* 3.4.4: 8~10 MiB (롬 2 MiB까지) */
         if (tmp && !read_rom_file(path, tmp, MSX_ROM_MAX, &size) && size) {
-            x->guess = cart_guess_mapper(tmp, size);
+            x->guess = name_mapper(path, size, cart_guess_mapper(tmp, size));
             x->size = size;
             if (!x->user_type) x->type = x->guess;
         }
     } else if (P.read_file && !P.read_file(path, probe_buf, want, &size)) {
-        x->guess = cart_guess_mapper_partial(probe_buf, want, size);
+        x->guess = name_mapper(path, size, cart_guess_mapper_partial(probe_buf, want, size));
         if (!x->user_type) x->type = x->guess;
     }
     x->type_known = 1;
@@ -3890,6 +4030,7 @@ static void pf_text(char *t, int n, int worst)
         num_append(t, n, worst ? pf_worst[k] : pf_pct[k], 0, ' ');
         str_append(t, n, worst ? "ms  " : "%  ");
     }
+    if (!worst) { str_append(t, n, "midi-worker "); num_append(t, n, pf_wpct, 0, ' '); str_append(t, n, "%  "); }   /* 8.0.32: 일꾼 코어가 쓴 시간 (core 와 별개) */
 }
 static uint32_t gap_last, gap_max, gap_show, gap_reset;
 static uint32_t gap_show_pub(void) { return gap_show; }     /* 프레임 간격 측정 (진단) */
@@ -4291,7 +4432,7 @@ static void cart_insert_file(int n, const char *path, const FeDirEntry *xe)
         return;
     }
     const FeDirEntry *x = xe;
-    MapperType mt = x->user_type ? x->type : cart_guess_mapper(buf, size);
+    MapperType mt = x->user_type ? x->type : name_mapper(path, size, cart_guess_mapper(buf, size));
     const MapperType guess_mt = mt;                     /* 서명·크기로 알아낸 큰 롬 종류는 DB(ASCII16 등)가 덮어쓰지 못하게 */
     int db_start = -1, db_sram = 0;                     /* 3.8.0: db_sram = ASCII8 SRAM 크기(KB) */
     int nextor = !x->user_type && is_nextor_rom(buf, size);   /* 3.7.1: Nextor 롬 → X86MSX 가상 디스크 카트리지 */
@@ -4382,6 +4523,7 @@ static void cart_insert_file(int n, const char *path, const FeDirEntry *xe)
     settings_changed();
     menu_close_all();
     after_cart_insert(n);
+    if (slot_expand && n < 4 && noexp_rom(buf, size)) { toast_ms = 6000; toast(T(S_NOEXP_ROM), 0); }   /* 5.3.41: 확장 슬롯 비지원 롬 안내 (롬은 그대로 꽂음) */
 }
 void fe_test_hd(const char *path) { hd_insert(path, path, 1); }
 int fe_test_cart_special(int n) { return n >= 0 && n < MSX_CART_SLOTS ? cart_special[n] : -1; }   /* 3.9.4: 시험 틀 (카트리지 특수 번호) */   /* 3.7.1: 시험 틀 */
@@ -4420,7 +4562,11 @@ void fe_test_menu_dump(void (*out)(const char *))
         menu_dump_rec(bar_menus[b], k, b);
     }
 }
-void fe_test_action(const char *n) { if (!strcmp(n, "mixall")) { mix_test_all = 1; do_action(A_PROPS_MIX); return; } if (!strcmp(n, "net")) { do_action(A_NET); return; } if (!strncmp(n, "dzip:", 5)) { insert_disk_file(0, n + 5, n + 5, 0); return; } if (!strcmp(n, "disknext")) { disk_next(0); return; } if (!strncmp(n, "tape:", 5)) { uint32_t ts = 0; char tn[64] = ""; if (!tape_load_file(n + 5, &ts, tn, sizeof tn, 1)) { copy_str(tape_path, sizeof tape_path, n + 5); copy_str(tape_name, sizeof tape_name, n + 5); msx_tape_insert(M, tape_buf, ts, TAPE_MAX); } return; } if (!strncmp(n, "mach:", 5)) { char e[96]; switch_machine(n + 5, e, sizeof e); return; } if (!strcmp(n, "sced")) { do_action(A_SC_EDIT); return; } if (!strcmp(n, "soft")) { do_action(A_SOFT_RESET); return; } if (!strcmp(n, "hard")) { do_action(A_HARD_RESET); return; } if (!strcmp(n, "prnview")) do_action(A_PRN_VIEW); if (!strcmp(n, "vhd")) do_action(A_VHD_C); if (!strcmp(n, "diskcopy")) do_action(A_DISK_COPY); else if (!strcmp(n, "redraw")) { full_redraw(); } else if (!strcmp(n, "mixer")) do_action(A_PROPS_MIX); else if (!strcmp(n, "midimix")) do_action(A_MIDI_MIX); else if (!strcmp(n, "media")) do_action(A_MEDIA); else if (!strcmp(n, "exit")) do_action(A_EXIT); else if (!strcmp(n, "reboot")) do_action(A_REBOOT); else if (!strcmp(n, "keymap")) do_action(A_KEYMAP_EDIT); else if (!strcmp(n, "about")) do_action(A_ABOUT); else if (!strcmp(n, "hdeject")) do_action(A_HD_EJECT); else if (!strcmp(n, "rombrowse")) open_browser(0); else if (!strcmp(n, "tapebrowse")) open_browser(12); else if (!strcmp(n, "diskbrowse")) open_browser(10); else if (!strcmp(n, "hdbrowse")) open_browser(13); else if (!strcmp(n, "basbrowse")) open_browser(14); else if (!strcmp(n, "diagjoy")) open_diag(4); else if (!strcmp(n, "diag")) open_diag(0); else if (!strcmp(n, "diagsum")) open_diag(9); else if (!strcmp(n, "diagcolor")) open_diag(8); else if (!strcmp(n, "image")) do_action(A_IMAGE_MAKE); else if (!strcmp(n, "lang")) open_langwin(); else if (!strcmp(n, "langopen")) langwin_test_open(); else if (!strncmp(n, "props:", 6)) open_props(n[6] - '0');   /* 속성 창 탭 번호로 열기 (선택형 설정 시험) */ else if (!strcmp(n, "mouseprops")) open_props(9); else if (!strcmp(n, "kbprops")) open_props(7); else if (!strcmp(n, "joyprops")) open_props(8); else if (!strcmp(n, "emuprops")) open_props(0); else if (!strcmp(n, "vidprops")) open_props(1); else if (!strcmp(n, "sndprops")) open_props(3); else if (!strcmp(n, "gfx9000")) special_apply(0, special_kind(158), 1); else if (!strncmp(n, "v9show:", 7)) { if (M->v9) { M->v9->shown = 1; M->v9->regs[15] = 1; M->v9->pal15[1] = (uint16_t)(31 << 10); } vsrc_pref = n[7] - '0' - 1; }   /* 시험 — V9990 이 초록 화면을 내보내게 하고 화면 소스를 고름 */ else if (!strncmp(n, "vsrc:", 5)) { vsrc_pref = n[5] - '0' - 1; } else if (!strncmp(n, "aspect:", 7)) { aspect_mode = n[7] - '0'; layout(); full_redraw(); }   /* 5.2.42 */ else if (!strncmp(n, "special:", 8)) { int k = 0; for (const char *q = n + 8; *q >= '0' && *q <= '9'; q++) k = k * 10 + (*q - '0'); special_apply(0, k, 1); }   /* 5.2.43 */ }   /* 3.7.0: 시험 틀 (5.2.19 vidprops·gfx9000·vsrc:0~2) */
+static int sv_demo_req;
+static int sv_tab, sv_perf_sel;                     /* 8.0.34: 시스템 보기 탭 (0 성능 / 1 배치, 8.0.36), 성능 탭에서 고른 항목 (fe_sysperf.inc) */
+static void scr_clobber_test(void) { if (P.scratch) memset(P.scratch, 0x5A, 4u << 20); }                                 /* fe_sysview.inc: 시험용 "모든 주변기기" 그림 */
+static void settings_flush(void); static int settings_dirty;
+void fe_test_action(const char *n) { if (!strcmp(n, "inisave")) { settings_dirty = 1; settings_flush(); return; } if (!strcmp(n, "mixall")) { mix_test_all = 1; do_action(A_PROPS_MIX); return; } if (!strcmp(n, "net")) { do_action(A_NET); return; } if (!strncmp(n, "dzip:", 5)) { insert_disk_file(0, n + 5, n + 5, 0); return; } if (!strcmp(n, "disknext")) { disk_next(0); return; } if (!strncmp(n, "tape:", 5)) { uint32_t ts = 0; char tn[64] = ""; if (!tape_load_file(n + 5, &ts, tn, sizeof tn, 1)) { copy_str(tape_path, sizeof tape_path, n + 5); copy_str(tape_name, sizeof tape_name, n + 5); msx_tape_insert(M, tape_buf, ts, TAPE_MAX); } return; } if (!strncmp(n, "mach:", 5)) { char e[96]; switch_machine(n + 5, e, sizeof e); return; } if (!strcmp(n, "sced")) { do_action(A_SC_EDIT); return; } if (!strcmp(n, "soft")) { do_action(A_SOFT_RESET); return; } if (!strcmp(n, "hard")) { do_action(A_HARD_RESET); return; } if (!strcmp(n, "prnview")) do_action(A_PRN_VIEW); if (!strcmp(n, "vhd")) do_action(A_VHD_C); if (!strcmp(n, "diskcopy")) do_action(A_DISK_COPY); else if (!strcmp(n, "redraw")) { full_redraw(); } else if (!strcmp(n, "mixer")) do_action(A_PROPS_MIX); else if (!strcmp(n, "midimix")) do_action(A_MIDI_MIX); else if (!strcmp(n, "media")) do_action(A_MEDIA); else if (!strcmp(n, "exit")) do_action(A_EXIT); else if (!strcmp(n, "reboot")) do_action(A_REBOOT); else if (!strcmp(n, "keymap")) do_action(A_KEYMAP_EDIT); else if (!strcmp(n, "about")) do_action(A_ABOUT); else if (!strcmp(n, "hdeject")) do_action(A_HD_EJECT); else if (!strcmp(n, "ejectall")) do_action(A_EJECT_ALL); else if (!strcmp(n, "rombrowse")) open_browser(0); else if (!strcmp(n, "tapebrowse")) open_browser(12); else if (!strcmp(n, "diskbrowse")) open_browser(10); else if (!strcmp(n, "hdbrowse")) open_browser(13); else if (!strcmp(n, "basbrowse")) open_browser(14); else if (!strcmp(n, "diagjoy")) open_diag(4); else if (!strcmp(n, "diag")) open_diag(0); else if (!strcmp(n, "diagsum")) open_diag(9); else if (!strcmp(n, "diagsw")) open_diag(10); else if (!strcmp(n, "diagcolor")) open_diag(8); else if (!strcmp(n, "image")) do_action(A_IMAGE_MAKE); else if (!strcmp(n, "usbgrow")) do_action(A_USB_GROW); else if (!strcmp(n, "sysview")) do_action(A_SYSVIEW); else if (!strcmp(n, "vrec")) do_action(A_VID_REC); else if (!strcmp(n, "shotfull0")) shot_full = 0; else if (!strcmp(n, "vrecn")) { shot_full = 0; do_action(A_VID_REC); } else if (!strncmp(n, "svperf", 6)) { do_action(A_SYSVIEW); sv_tab = 0; sv_perf_sel = n[6] ? n[6] - '0' : 0; } else if (!strcmp(n, "svshot")) { sv_demo_req = 1; do_action(A_SYSVIEW); scr_clobber_test(); do_action(A_SCREENSHOT); }   /* 5.3.25 시험: 창을 연 채 스크린샷이 작업 메모리 앞쪽을 덮어쓴 것처럼 */ else if (!strcmp(n, "svdemo")) { sv_demo_req = 1; do_action(A_SYSVIEW); } else if (!strcmp(n, "lang")) open_langwin(); else if (!strcmp(n, "langopen")) langwin_test_open(); else if (!strncmp(n, "props:", 6)) open_props(n[6] - '0');   /* 속성 창 탭 번호로 열기 (선택형 설정 시험) */ else if (!strcmp(n, "mouseprops")) open_props(9); else if (!strcmp(n, "kbprops")) open_props(7); else if (!strcmp(n, "joyprops")) open_props(8); else if (!strcmp(n, "emuprops")) open_props(0); else if (!strcmp(n, "vidprops")) open_props(1); else if (!strcmp(n, "sndprops")) open_props(3); else if (!strcmp(n, "gfx9000")) special_apply(0, special_kind(158), 1); else if (!strncmp(n, "v9show:", 7)) { if (M->v9) { M->v9->shown = 1; M->v9->regs[15] = 1; M->v9->pal15[1] = (uint16_t)(31 << 10); } vsrc_pref = n[7] - '0' - 1; }   /* 시험 — V9990 이 초록 화면을 내보내게 하고 화면 소스를 고름 */ else if (!strncmp(n, "vsrc:", 5)) { vsrc_pref = n[5] - '0' - 1; } else if (!strncmp(n, "aspect:", 7)) { aspect_mode = n[7] - '0'; layout(); full_redraw(); }   /* 5.2.42 */ else if (!strncmp(n, "special:", 8)) { int k = 0; for (const char *q = n + 8; *q >= '0' && *q <= '9'; q++) k = k * 10 + (*q - '0'); special_apply(0, k, 1); }   /* 5.2.43 */ }   /* 3.7.0: 시험 틀 (5.2.19 vidprops·gfx9000·vsrc:0~2) */
 void fe_insert_special(int n, int kind) { if (n >= 0 && n < MSX_CART_SLOTS) do_action(SPX(n, kind)); }   /* 3.6.7: 시험 틀용 */
 void fe_insert_rom(int n, const char *path)           /* 3.6.1: 시험 틀용 */
 {
@@ -4593,6 +4739,13 @@ static void browser_key(int key)
     case 0xC7: menu_sel = 0; break;
     case 0xCF: menu_sel = nlist ? nlist - 1 : 0; break;
     case 0x0E: go_up(); break;
+    case 0x3F: {                                        /* 5.3.49: F5 = USB 를 뺐다 꽂은 뒤 다시 찾기 (못 찾으면 드라이브 목록으로) */
+        if (P.usb_rescan) P.usb_rescan();
+        load_dir(0);
+        if (list_error && cur_path[0]) { cur_path[0] = 0; cur_disp[0] = 0; brw_base = 0; brw_depth = 0; load_dir(0); }
+        toast(nt("USB 를 다시 찾았습니다", "USB rescanned", "USBを再検索しました"), 0);
+        menu_sel = 0;
+        break; }
     case 0xCB: case 0xCD: {
         if (!nlist) break;
         if (!(mods & 0x04)) {                           /* ←/→: 한 페이지씩 */
@@ -4932,7 +5085,7 @@ static void about_key(int key)
 static void draw_info(int about)
 {
     UiRect o;
-    UiRect b = ui_full_card(about ? T(S_ABOUT) : T(S_DIAG_TITLE), "X86MSX " MSXEMU_VERSION " (" MSXEMU_BUILD ")", about ? 0 : machine_name, &o);
+    UiRect b = ui_full_card(about ? T(S_ABOUT) : T(S_DIAG_TITLE), "X86MSX " MSXEMU_VERSION_FULL " (" MSXEMU_BUILD ")", about ? 0 : machine_name, &o);
     uint32_t pad = 24 * S, x = b.x + pad, w = b.w - 2 * pad, y = b.y + 16 * S, bottom = dlg_cmd_y() - 8 * S;
     if (about) {                                        /* 3.7.0: 로고 머리 + 에뮬레이션·이 PC·만든 것 */
         uint32_t hh = 2 * LH + SLH + 30 * S;
@@ -4942,7 +5095,7 @@ static void draw_info(int about)
         for (int i = 0; i < 4; i++) ui_rrect(bx + (uint32_t)i * (bw + 3 * S), by, bw, bh, 2 * S, band[i]);
         uint32_t tx = bx + 4 * (bw + 3 * S) + 14 * S;
         uint32_t tw = text_f(F, 2 * S, tx, by - 2 * S, "X86MSX", C_TEXT, 0xFF, 0, 1);
-        char ver[64]; copy_str(ver, sizeof ver, T(S_AB_VER)); str_append(ver, sizeof ver, " " MSXEMU_VERSION "  ·  " MSXEMU_BUILD);
+        char ver[64]; copy_str(ver, sizeof ver, T(S_AB_VER)); str_append(ver, sizeof ver, " " MSXEMU_VERSION_FULL "  ·  " MSXEMU_BUILD);
         text_f(SF, 1, tx + tw + 14 * S, by + LH * 2 - SLH - 4 * S, ver, C_MUTED, 0xFF, 0, 1);
         text_clip(tx, by + 2 * LH + 2 * S, T(S_ABOUT_TEXT), C_TEXT, 0xFF, x + w - tx - 12 * S);
         y += hh + 12 * S;
@@ -5028,53 +5181,269 @@ static char grow_what[16];
 /* 확장 단계(usbgrow.c 가 progress 로 알려 주는 이름)마다 지금 무엇을 하는지 한 줄로 안내 (한·일 외는 영어) */
 static const char *grow_stage_text(const char *w)
 {
-    int k = !strcmp(w, "read") ? 0 : !strcmp(w, "format") ? 1 : !strcmp(w, "FAT") ? 2 : !strcmp(w, "files") ? 3 : !strcmp(w, "mbr") ? 4 : !strcmp(w, "done") ? 5 : -1;
-    static const char *const ko[] = { "1/5  USB 안의 파일을 읽어 두는 중입니다 (메모리에 보관)", "2/5  새 파일 시스템의 시작 영역을 만드는 중입니다", "3/5  파일 위치표(FAT)를 쓰는 중입니다 (가장 오래 걸릴 수 있음)", "4/5  폴더와 파일을 새 자리에 옮겨 쓰는 중입니다", "5/5  파티션 크기를 바꾸고 확인하는 중입니다 (거의 끝)", "끝났습니다" };
-    static const char *const ja[] = { "1/5  USB内のファイルを読み込んでいます(メモリに保管)", "2/5  新しいファイルシステムの先頭領域を作っています", "3/5  ファイル配置表(FAT)を書いています(最も時間がかかる場合あり)", "4/5  フォルダとファイルを新しい位置へ書き込んでいます", "5/5  パーティションサイズを変更して確認しています(もうすぐ完了)", "完了しました" };
-    static const char *const en[] = { "1/5  Reading the files on the USB into memory", "2/5  Creating the start of the new file system", "3/5  Writing the file allocation table (FAT) - this can take the longest", "4/5  Writing folders and files to their new places", "5/5  Updating and verifying the partition size (almost done)", "Finished" };
+    static const char *const nm[] = { "scan", "list", "format", "FAT", "dirs", "copy", "verify", "mbr", "done" };
+    int k = -1;
+    for (int i = 0; i < 9; i++) if (!strcmp(w, nm[i])) k = i;
+    static const char *const ko[] = {
+        "1/8  USB를 검사하는 중입니다 (파티션 구성, 남은 공간)",
+        "2/8  USB 안의 폴더와 파일 목록을 읽는 중입니다",
+        "3/8  남은 공간에 새 파티션의 시작 영역을 만드는 중입니다",
+        "4/8  새 파티션의 파일 위치표(FAT)를 쓰는 중입니다 (큰 USB는 오래 걸림)",
+        "5/8  새 파티션에 폴더를 만드는 중입니다",
+        "6/8  파일을 새 파티션으로 복사하는 중입니다 (원래 파일은 그대로 둠)",
+        "7/8  새 파티션을 처음부터 끝까지 다시 읽어 원본과 비교하는 중입니다",
+        "8/8  마지막으로 파티션 표만 바꾸는 중입니다 (여기까지는 원래 USB 그대로)",
+        "끝났습니다" };
+    static const char *const ja[] = {
+        "1/8  USBを検査しています(パーティション構成、空き領域)",
+        "2/8  USB内のフォルダとファイルの一覧を読み込んでいます",
+        "3/8  空き領域に新しいパーティションの先頭領域を作っています",
+        "4/8  新しいパーティションのファイル配置表(FAT)を書いています(大きなUSBは時間がかかります)",
+        "5/8  新しいパーティションにフォルダを作っています",
+        "6/8  ファイルを新しいパーティションへコピーしています(元のファイルはそのまま)",
+        "7/8  新しいパーティションを最初から最後まで読み直して元と比較しています",
+        "8/8  最後にパーティション表だけを書き換えています(ここまでは元のUSBのまま)",
+        "完了しました" };
+    static const char *const en[] = {
+        "1/8  Checking the USB (partitions, free space)",
+        "2/8  Reading the list of folders and files",
+        "3/8  Creating the start of a new partition in the free space",
+        "4/8  Writing the new partition's file allocation table (FAT) - big USB drives take longer",
+        "5/8  Creating folders in the new partition",
+        "6/8  Copying the files to the new partition (the originals stay untouched)",
+        "7/8  Reading the whole new partition back and comparing it with the original",
+        "8/8  Finally switching the partition table (until now the USB is unchanged)",
+        "Finished" };
     if (k < 0) return "";
     return lang == 0 ? ko[k] : lang == 2 ? ja[k] : en[k];
 }
+/* ---- 5.3.9: USB 확장 화면 (시안 그대로: 하드 아이콘 + 큰 % + 8단계 + 파티션 막대) ---- */
+static void g_disc(int cx, int cy, int r, uint32_t rgb)
+{
+    for (int dy = -r; dy <= r; dy++) {
+        int dx = 0; while ((dx + 1) * (dx + 1) + dy * dy <= r * r + r) dx++;
+        fe_fill_rgb((uint32_t)(cx - dx), (uint32_t)(cy + dy), (uint32_t)(2 * dx + 1), 1, rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+    }
+}
+static void g_rrect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t r, uint32_t rgb)
+{
+    if (!w || !h) return;
+    if (r * 2 > h) r = h / 2;
+    if (r * 2 > w) r = w / 2;
+    for (uint32_t i = 0; i < r; i++) {
+        uint32_t dy = r - i, in = r;
+        for (uint32_t k = r + 1; k-- > 0; ) if (k * k + dy * dy <= r * r + r) { in = r - k; break; }
+        fe_fill_rgb(x + in, y + i, w - 2 * in, 1, rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+        fe_fill_rgb(x + in, y + h - 1 - i, w - 2 * in, 1, rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+    }
+    fe_fill_rgb(x, y + r, w, h - 2 * r, rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+}
+static uint32_t g_mix(uint32_t a, uint32_t b, uint32_t t, uint32_t n)
+{
+    uint32_t o = 0;
+    for (int s = 16; s >= 0; s -= 8) { uint32_t ca = (a >> s) & 255, cb = (b >> s) & 255; o |= ((ca * (n - t) + cb * t) / n) << s; }
+    return o;
+}
+/* 둥근 막대: 칸(track) 위에 pct 만큼 a→b 색으로 채움 */
+static void g_bar(uint32_t x, uint32_t y, uint32_t w, uint32_t h, int pct, uint32_t track, uint32_t a, uint32_t b)
+{
+    g_rrect(x, y, w, h, h / 2, track);
+    uint32_t fw = (uint32_t)((uint64_t)w * (uint32_t)pct / 100);
+    if (!fw) return;
+    if (fw < h) fw = h;
+    g_rrect(x, y, fw, h, h / 2, a);
+    for (uint32_t i = h / 2; i + h / 2 < fw; i++) { uint32_t c = g_mix(a, b, i, w), rr = c >> 16; fe_fill_rgb(x + i, y, 1, h, rr, (c >> 8) & 255, c & 255); }
+    g_rrect(x + fw - h, y, h, h, h / 2, g_mix(a, b, fw, w));
+}
+/* 하드디스크 그림 — 시안 SVG(280x92) 그대로: 둥근 몸통 #262c33(테두리 #0d0f12), 접시 r36 (58,46) #14171b 테두리 #3a424b,
+ * 바쁠 때 흰 빛 부채꼴(투명 10%)이 1.2초에 한 바퀴, 허브 r7 #7b838d, 팔 8x52 (124,14) 축 (128,18) 28° (끝나면 0°),
+ * 작은 막대 (150,26) 108x8, LED r6 (258,70), 글 "NEW FAT32 · USB" (150,62). w = 그림 폭 */
+static void g_hdd(uint32_t x, uint32_t y, uint32_t w, uint32_t led, int pct, uint32_t ms, int busy, int done)
+{
+    static const int16_t cs[24] = { 1000, 966, 866, 707, 500, 259, 0, -259, -500, -707, -866, -966, -1000, -966, -866, -707, -500, -259, 0, 259, 500, 707, 866, 966 };
+#define HX(v) ((int)(x + (uint32_t)(v) * w / 280))
+#define HY(v) ((int)(y + (uint32_t)(v) * w / 280))
+#define HL(v) ((int)((uint32_t)(v) * w / 280))
+    g_rrect(x, y, w, (uint32_t)HL(92), (uint32_t)HL(12), 0x0d0f12);
+    g_rrect(x + (uint32_t)HL(2), y + (uint32_t)HL(2), w - (uint32_t)HL(4), (uint32_t)HL(88), (uint32_t)HL(10), 0x262c33);
+    int cx = HX(58), cy = HY(46), r = HL(36);
+    g_disc(cx, cy, r, 0x3a424b); g_disc(cx, cy, r - (HL(1) ? HL(1) : 1), 0x14171b);
+    if (busy) {                                           /* 빛 부채꼴 (90° 폭), 1.2초 한 바퀴 */
+        int a0 = (int)((ms / 50) % 24);
+        int c0x = cs[a0], c0y = cs[(a0 + 18) % 24], c1x = cs[(a0 + 6) % 24], c1y = cs[(a0 + 24 - 6 + 18) % 24];
+        for (int dy = -r + 1; dy <= r - 1; dy++)
+            for (int dx = -r + 1; dx <= r - 1; dx++) {
+                if (dx * dx + dy * dy >= (r - 1) * (r - 1)) continue;
+                if (dx * c0y - dy * c0x <= 0 && dx * c1y - dy * c1x >= 0)
+                    fe_fill_rgb((uint32_t)(cx + dx), (uint32_t)(cy + dy), 1, 1, 0x2b, 0x30, 0x36);   /* #14171b 위에 흰색 10% */
+            }
+    }
+    g_disc(cx, cy, HL(7), 0x7b838d);
+    static const int16_t asn[61] = { 0, 17, 35, 52, 70, 87, 105, 122, 139, 156, 174, 191, 208, 225, 242, 259, 276, 292, 309, 326, 342, 358, 375, 391, 407, 423, 438, 454, 469, 485, 500, 515, 530, 545, 559, 574, 588, 602, 616, 629, 643, 656, 669, 682, 695, 707, 719, 731, 743, 755, 766, 777, 788, 799, 809, 819, 829, 839, 848, 857, 866 };   /* sin 0°..60° */
+    static const int16_t acs[61] = { 1000, 1000, 999, 999, 998, 996, 995, 993, 990, 988, 985, 982, 978, 974, 970, 966, 961, 956, 951, 946, 940, 934, 927, 921, 914, 906, 899, 891, 883, 875, 866, 857, 848, 839, 829, 819, 809, 799, 788, 777, 766, 755, 743, 731, 719, 707, 695, 682, 669, 656, 643, 629, 616, 602, 588, 574, 559, 545, 530, 515, 500 };   /* cos 0°..60° */
+    int ph = busy ? (int)((ms / 60) % 24) : 0, ai = busy ? 40 + (ph < 13 ? ph : 24 - ph) : 28;   /* 바쁠 때 팔 끝이 접시 안에서만: 40°(가장자리)↔52°(안쪽) 왕복 약 1.4초, 쉴 때 28° */
+    if (done) ai = 0;
+    int px = HX(128), py = HY(18), sn = asn[ai], csn = acs[ai];
+    for (int i = 0; i <= 24; i++) {                       /* 축에서 아래로 52, 28° 돌림 (왼쪽 아래로) */
+        int len = HL(52) * i / 24;
+        g_disc(px - (int)((long)len * sn / 1000), py + (int)((long)len * csn / 1000), HL(4), 0xaab2bb);
+    }
+    g_disc(px, py, HL(6), 0x7b838d);
+    g_rrect((uint32_t)HX(150), (uint32_t)HY(26), (uint32_t)HL(108), (uint32_t)HL(8), (uint32_t)HL(4), 0x14171b);
+    if (pct > 0) { int fw = HL(108) * pct / 100; if (fw < HL(8)) fw = HL(8); g_rrect((uint32_t)HX(150), (uint32_t)HY(26), (uint32_t)fw, (uint32_t)HL(8), (uint32_t)HL(4), led); }
+    g_disc(HX(258), HY(70), HL(6), led);
+    text_f(&font_mini, S, (uint32_t)HX(150), (uint32_t)HY(62) - 8 * S, "NEW FAT32 \xC2\xB7 USB", C_MUTED, 0xFF, (uint32_t)HL(128), 1);
+#undef HX
+#undef HY
+#undef HL
+}
+static uint32_t grow_last_draw;              /* 5.3.10: 그리기 60 ms 마다 (접시가 돌아가게) */
+static uint64_t grow_part0, grow_disk0;      /* 5.3.10: 확장 전 크기 (끝난 뒤에도 이 값을 보여 줌) */
+#define GN 2                                   /* 시안 크기의 GN/4 (마스터님: 1/2) */
+#define D(v) ((uint32_t)(v) * GN * S / 4)   /* 시안 px → 화면 */
+/* 5.3.9 시안("X86MSX USB 확장 화면 시안") 그대로: 창 1040x640, 안쪽 여백 32, 줄 사이 18. 모드 0 시작 전, 1 진행 중, 2 끝남 */
+static const char *grow_t(const char *ko, const char *en, const char *ja) { return lang == 0 ? ko : lang == 2 ? ja : en; }
+static void grow_panel(UiRect b, UiRect o, int mode)
+{
+    static const char *const stk[] = { "USB 검사", "폴더 목록 읽기", "새 파티션 만들기", "FAT 표 쓰기", "폴더 만들기", "파일 복사", "전부 다시 읽어 확인", "파티션 표 바꾸기" };
+    static const char *const ste[] = { "Check USB", "Read folder list", "Make new partition", "Write FAT", "Make folders", "Copy files", "Read back and verify", "Switch partition table" };
+    static const char *const stj[] = { "USB検査", "フォルダ一覧読込", "新しい領域を作成", "FAT表を書込", "フォルダ作成", "ファイルコピー", "全部読み直して確認", "パーティション表を切替" };
+    static const char *const nm[] = { "scan", "list", "format", "FAT", "dirs", "copy", "verify", "mbr" };
+    const uint32_t CH = 13 * S;                           /* 9px 글씨 줄 높이 */
+    const uint32_t G = D(18);                             /* 시안의 줄 사이 */
+    uint32_t lx = o.x + D(32), lw = o.w - D(64), y = b.y + D(14);
+    g_rrect(o.x + 2 * S, b.y, o.w - 4 * S, o.y + o.h - b.y - 2 * S, D(14), 0x14171b);   /* 시안 카드 바탕 #14171b */
+    int cur = 8;
+    for (int i = 0; i < 8; i++) if (!strcmp(grow_what, nm[i])) cur = i;
+    if (mode == 2) cur = 8;
+    uint64_t part = grow_part0, disk = grow_disk0;
+    if (!disk && P.grow_query) { P.grow_query(&part, &disk); grow_part0 = part; grow_disk0 = disk; }
+    char vp[32], vd[32]; size_text(vp, sizeof vp, part); size_text(vd, sizeof vd, disk);
+    uint32_t led = mode == 2 ? 0x3ecf6e : mode == 1 ? 0xff7a1a : 0x4a515b;
+    int pct = mode == 2 ? 100 : mode == 1 ? grow_pct : 0;
+    /* 설명 줄 14px 흐림 (#8a929c) */
+    char sub[160]; sub[0] = 0;
+    if (mode == 1) {                                      /* "6/8 · 파일을 … 중입니다" (괄호 안 설명은 뺌) */
+        const char *t = grow_stage_text(grow_what); int n = 0;
+        while (*t && *t != ' ' && n < 8) sub[n++] = *t++;
+        while (*t == ' ') t++;
+        sub[n++] = ' '; copy_str(sub + n, sizeof sub - (uint32_t)n, "\xC2\xB7 "); n += 3;
+        while (*t && n < (int)sizeof sub - 1) { if (t[0] == ' ' && t[1] == '(') break; if (t[0] == '(' && lang == 2) break; sub[n++] = *t++; }
+        sub[n] = 0;
+    } else if (mode == 0) { str_append(sub, sizeof sub, grow_t("지금은 ", "Only ", "今は ")); str_append(sub, sizeof sub, vp); str_append(sub, sizeof sub, grow_t("만 쓰고 있습니다", " of the USB is in use", "だけ使っています")); }
+    else copy_str(sub, sizeof sub, grow_t("모든 파일을 다시 읽어 확인했고, 파티션 표를 바꿨습니다", "Every file was read back and verified, and the partition table was switched", "すべてのファイルを読み直して確認し、パーティション表を切り替えました"));
+    text_f(ft_cap(), S, lx, y, sub, C_MUTED, 0xFF, lw, 1);   /* 설명 줄은 11px 그대로 */
+    y += (uint32_t)ft_cap()->height * S + G;
+    /* 하드 그림 420x138 + 큰 숫자 (84px 굵게 = 제목 글꼴 21px x 4) */
+    uint32_t iw = D(420), ih = iw * 92 / 280;
+    g_hdd(lx, y, iw, led, pct, P.ms ? (uint32_t)P.ms() : 0, mode == 1, mode == 2);
+    uint32_t px = lx + iw + D(32);
+    char pt[24]; pt[0] = 0;
+    if (mode == 0) copy_str(pt, sizeof pt, vd); else num_append(pt, sizeof pt, (uint32_t)pct, 0, ' ');
+    const UiFont *BF = ft_title();
+    uint32_t bs = GN * S, bh = (uint32_t)BF->height * bs, bw = text_f(BF, bs, 0, 0, pt, 0, 0, 0, 0);
+    uint32_t ty = y + (ih - bh) / 2;
+    if (mode == 0) { text_f(&font_mini, S, px, y + D(8), grow_t("쓸 수 있는 크기", "Usable size", "使える大きさ"), C_MUTED, 0xFF, lx + lw - px, 1); ty = y + D(8) + CH + D(4); }
+    text_f(BF, bs, px, ty, pt, mode == 2 ? C_OK : C_TEXT, 0xFF, 0, 1);
+    if (mode) text_f(&font_mini, S, px + bw + D(10), ty + bh - CH * S + 2 * S, "%", C_MUTED, 0xFF, 0, 1);   /* 32px 흐림 → 절반 */
+    y += ih + G;
+    if (mode) {                                           /* 진행 막대 14px, 노랑→주황 */
+        g_bar(lx, y, lw, D(14), pct, 0x262c33, mode == 2 ? 0x3ecf6e : 0xf2c230, mode == 2 ? 0x3ecf6e : 0xff7a1a);
+        y += D(14) + G;
+        uint32_t rowh = CH + D(6), cw = lw / 2, d = D(22);   /* 8단계: 두 칸, 가로줄 순서 (1·2 / 3·4 …) */
+        for (int i = 0; i < 8; i++) {
+            uint32_t cx = lx + (uint32_t)(i % 2) * cw, cy = y + (uint32_t)(i / 2) * (rowh + D(6));
+            int st = i < cur ? 0 : i == cur ? 1 : 2;
+            g_disc((int)(cx + d / 2), (int)(cy + rowh / 2), (int)(d / 2), st == 0 ? 0x3ecf6e : st == 1 ? 0xff7a1a : 0x262c33);
+            if (st == 0) {                                /* 체크 */
+                int mx = (int)(cx + d / 2), my = (int)(cy + rowh / 2), u = (int)S;
+                for (int k = 0; k <= 3 * u; k++) g_disc(mx - 4 * u + k, my + k - u, u, 0x0d0f12);
+                for (int k = 0; k <= 6 * u; k++) g_disc(mx - u + k, my + 2 * u - k, u, 0x0d0f12);
+            } else { char t[4]; t[0] = (char)('1' + i); t[1] = 0; uint32_t tw = text_f(&font_mini, S, 0, 0, t, 0, 0, 0, 0); text_f(&font_mini, S, cx + d / 2 - tw / 2, cy + (rowh - CH) / 2, t, st == 1 ? C_BACK : C_MUTED, 0xFF, 0, 1); }
+            const char *name = lang == 0 ? stk[i] : lang == 2 ? stj[i] : ste[i];
+            if (st == 1) text_f(ft_cap(), S, cx + d + D(10), cy + (rowh - CH) / 2, name, C_TEXT, 0xFF, cw - d - D(14), 1);   /* 지금: 흰색 (굵은 작은 글꼴이 없어 단추 글꼴) */
+            else text_f(&font_mini, S, cx + d + D(10), cy + (rowh - CH) / 2, name, st == 0 ? C_MUTED : C_FAINT, 0xFF, cw - d - D(14), 1);
+        }
+        y += 4 * rowh + 3 * D(6) + G;
+        if (mode == 1) {                                  /* 지금 처리하는 파일: 어두운 칸 (#0d0f12, 둥글기 8, 안쪽 10/14) */
+            g_rrect(lx, y, lw, CH + D(20), D(8), 0x0d0f12);
+            text_f(&font_mini, S, lx + D(14), y + D(10), usbgrow_detail()[0] ? usbgrow_detail() : "", C_TEXT, 0xFF, lw - D(28), 1);
+            y += CH + D(20) + G;
+        }
+    } else {                                              /* 설명: 폭에 안 들어가면 문장 끝(". ")에서 두 줄로 */
+        const char *ex = T(S_GROW_EXPLAIN);
+        if (text_f(&font_mini, S, 0, 0, ex, 0, 0, 0, 0) > lw) {
+            char l1[120]; int n = 0;
+            while (ex[n] && n < (int)sizeof l1 - 1) { l1[n] = ex[n]; n++; if (n >= 2 && l1[n - 2] == '.' && l1[n - 1] == ' ') break; if (n >= 3 && (uint8_t)l1[n - 3] == 0xE3 && (uint8_t)l1[n - 2] == 0x80 && (uint8_t)l1[n - 1] == 0x82) break; }
+            l1[n] = 0;
+            text_f(&font_mini, S, lx, y, l1, C_MUTED, 0xFF, lw, 1); y += CH + D(4);
+            text_f(&font_mini, S, lx, y, ex + n, C_MUTED, 0xFF, lw, 1); y += CH + G;
+        } else { text_f(&font_mini, S, lx, y, ex, C_MUTED, 0xFF, lw, 1); y += CH + G; }
+    }
+    /* 원래 파티션 14% · 틈 2% · 새 파티션 84% (높이 34, 이름표 12px 가운데) */
+    {
+        uint32_t ph = D(34), ow = lw * 14 / 100, nx = lx + lw * 16 / 100, nw = lw - lw * 16 / 100;
+        char t1[48], t2[64];
+        t1[0] = 0; str_append(t1, sizeof t1, grow_t("원래 ", "old ", "元 ")); str_append(t1, sizeof t1, vp);
+        t2[0] = 0; str_append(t2, sizeof t2, grow_t("새 파티션 \xC2\xB7 ", "new partition \xC2\xB7 ", "新しい領域 \xC2\xB7 ")); str_append(t2, sizeof t2, vd);
+        g_rrect(lx, y, ow, ph, D(6), 0x3a424b);
+        g_rrect(nx, y, nw, ph, D(6), 0x2b3138);
+        uint32_t fw = (uint32_t)((uint64_t)nw * (uint32_t)pct / 100);
+        if (fw) g_rrect(nx, y, fw < D(12) ? D(12) : fw, ph, D(6), mode == 2 ? 0x3ecf6e : 0xf2c230);
+        uint32_t w1 = text_f(&font_mini, S, 0, 0, t1, 0, 0, 0, 0), w2 = text_f(&font_mini, S, 0, 0, t2, 0, 0, 0, 0);
+        text_f(&font_mini, S, lx + (ow > w1 ? (ow - w1) / 2 : 0), y + (ph - CH) / 2, t1, C_TEXT, 0xFF, ow, 1);
+        text_f(&font_mini, S, nx + (nw > w2 ? (nw - w2) / 2 : 0), y + (ph - CH) / 2, t2, fw > nw / 2 ? C_BACK : C_MUTED, 0xFF, nw, 1);
+        y += ph + G;
+    }
+    /* 맨 아래 경고: 윗줄 + 12 띄우고 16px 굵게 */
+    uint32_t wy = (mode == 1 ? o.y + o.h - D(26) : dlg_cmd_y() - D(12)) - CH;
+    if (wy < y + D(12)) wy = y + D(12);
+    const char *wt = mode == 1 ? grow_t("전원을 끄거나 USB를 뽑지 마세요 \xE2\x80\x94 지금 끊어도 원래 USB는 그대로입니다", "Do not power off or unplug the USB \xE2\x80\x94 even now the original USB is untouched", "電源を切ったりUSBを抜かないでください \xE2\x80\x94 今中断しても元のUSBはそのままです")
+                   : mode == 0 ? grow_t("시작하면 끝날 때까지 USB를 뽑지 마세요 (보통 1~3분)", "Once started, keep the USB plugged in until it finishes (usually 1-3 minutes)", "始めたら終わるまでUSBを抜かないでください (通常1~3分)") : 0;
+    char ft[160];
+    if (!wt) { ft[0] = 0; str_append(ft, sizeof ft, grow_t("이제 ", "Now all ", "これで ")); str_append(ft, sizeof ft, vd); str_append(ft, sizeof ft, grow_t(" 전부 쓸 수 있습니다 \xC2\xB7 원래 ", " is usable \xC2\xB7 the old ", " 全部使えます \xC2\xB7 元の ")); str_append(ft, sizeof ft, vp); str_append(ft, sizeof ft, grow_t(" 자리는 쓰지 않는 영역으로 남습니다", " area is left unused", " の場所は未使用領域として残ります")); wt = ft; }
+    if (text_f(&font_mini, S, 0, 0, wt, 0, 0, 0, 0) > lw) {   /* 안 들어가면 " · " / " — " 에서 두 줄로 */
+        char l1[160]; int n = 0, cut = -1;
+        for (; wt[n] && n < (int)sizeof l1 - 1; n++) { l1[n] = wt[n]; if (wt[n] == ' ' && (uint8_t)wt[n + 1] >= 0xC2 && ((uint8_t)wt[n + 1] == 0xC2 || (uint8_t)wt[n + 1] == 0xE2) && cut < 0) { cut = n; } }
+        if (cut < 0) cut = n / 2;
+        l1[cut] = 0;
+        const char *l2 = wt + cut + 1; while (*l2 == ' ') l2++;
+        if ((uint8_t)l2[0] == 0xC2 && (uint8_t)l2[1] == 0xB7) { l2 += 2; while (*l2 == ' ') l2++; }
+        else if ((uint8_t)l2[0] == 0xE2 && (uint8_t)l2[1] == 0x80 && (uint8_t)l2[2] == 0x94) { l2 += 3; while (*l2 == ' ') l2++; }
+        wy -= CH + D(4);
+        fe_fill_rgb(lx, wy - D(12), lw, S, 0x26, 0x2c, 0x34);
+        text_f(&font_mini, S, lx, wy, l1, mode == 2 ? C_OK : C_WARN, 0xFF, lw, 1);
+        text_f(&font_mini, S, lx, wy + CH + D(4), l2, mode == 2 ? C_OK : C_WARN, 0xFF, lw, 1);
+    } else { fe_fill_rgb(lx, wy - D(12), lw, S, 0x26, 0x2c, 0x34); text_f(&font_mini, S, lx, wy, wt, mode == 2 ? C_OK : C_WARN, 0xFF, lw, 1); }
+}
+#undef D
+#undef GN
 static void draw_grow(void)
 {
     UiRect o;
-    UiRect b = ui_full_card(T(S_USB_GROW), 0, grow_state == 1 ? "..." : 0, &o);
-    uint32_t pad = 24 * S, lx = b.x + pad, lw = b.w - 2 * pad, y = b.y + 18 * S;
-    uint64_t part = 0, disk = 0;
-    if (!P.grow_query || P.grow_query(&part, &disk)) { text_clip(lx, y, T(S_GROW_UNSUPPORTED), C_TEXT, 0xFF, lw); y += LH * 2; }
-    else {
-        char v[32];
-        y += ui_section(lx, y, lw, "USB");
-        size_text(v, sizeof v, part); y += info_line(lx, y, lw, T(S_GROW_PART), v, C_TEXT);
-        size_text(v, sizeof v, disk); y += info_line(lx, y, lw, T(S_GROW_DISK), v, C_OK);
-        if (disk) {                                       /* 쓰는 부분 막대 */
-            uint32_t k = (uint32_t)((uint64_t)lw * part / disk);
-            ui_rrect(lx, y + 4 * S, lw, 8 * S, 4 * S, C_LINE);
-            ui_rrect(lx, y + 4 * S, k < 8 * S ? 8 * S : k, 8 * S, 4 * S, C_ACC);
-            y += 28 * S;
-        }
-        y += info_line(lx, y, lw, 0, T(S_GROW_EXPLAIN), C_TEXT);
-        y += info_line(lx, y, lw, 0, T(S_GROW_WARN), C_WARN) + LH;
+    const char *title = grow_state == 1 ? grow_t("USB 확장 중\xE2\x80\xA6", "Expanding USB\xE2\x80\xA6", "USB拡張中\xE2\x80\xA6") : (grow_state == 2 && grow_done) ? grow_t("확장이 끝났습니다", "Expansion finished", "拡張が終わりました") : T(S_USB_GROW);
+    UiRect b = ui_full_card(title, 0, 0, &o);
+    if (!P.grow_query || P.grow_query(&(uint64_t){0}, &(uint64_t){0})) {
+        text_clip(b.x + 24 * S, b.y + 18 * S, T(S_GROW_UNSUPPORTED), C_TEXT, 0xFF, b.w - 48 * S);
+    } else if (grow_state == 0 || grow_state == 1 || (grow_state == 2 && grow_done)) {
+        grow_panel(b, o, grow_state == 1 ? 1 : grow_state == 0 ? 0 : 2);
+    } else if (grow_state == 2) {
+        text_clip(b.x + 24 * S, b.y + 18 * S, grow_msg, C_TEXT, 0xFF, b.w - 48 * S);
     }
-    if (grow_state == 1) {
-        text_clip(lx, y, T(S_GROW_RUNNING), C_TEXT, 0xFF, lw); y += LH + 10 * S;
-        ui_rrect(lx, y, lw, LH, LH / 2, C_FIELD);
-        uint32_t k = (lw - 4 * S) * (uint32_t)grow_pct / 100;
-        if (k) ui_rrect(lx + 2 * S, y + 2 * S, k, LH - 4 * S, (LH - 4 * S) / 2, C_OK);
-        y += LH + 8 * S;                                   /* 4.0.28: 몇 %인지, 어느 단계인지 글자로도 보여 줌 */
-        { char pt[48]; pt[0] = 0; num_append(pt, sizeof pt, (uint32_t)grow_pct, 0, ' '); str_append(pt, sizeof pt, " %   "); str_append(pt, sizeof pt, grow_what); text_clip(lx, y, pt, C_TEXT, 0xFF, lw); }
-        y += LH + 6 * S;
-        text_clip(lx, y, grow_stage_text(grow_what), C_OK, 0xFF, lw); y += LH + 6 * S;      /* 지금 하는 일 */
-        text_clip(lx, y, T(S_GROW_WARN), C_WARN, 0xFF, lw);
-    } else if (grow_state == 2) text_clip(lx, y, grow_msg, C_TEXT, 0xFF, lw);
-    if (grow_state != 1) ui_cmdbar(o.x + S, dlg_cmd_y(), o.w - 2 * S, grow_state == 0 ? T(S_GROW_CONFIRM) : grow_done ? T(S_GROW_ANYKEY) : T(S_PRESS_ESC));
+    if (grow_state != 1) ui_cmdbar(o.x + S, dlg_cmd_y(), o.w - 2 * S, grow_state == 0 ? T(S_GROW_CONFIRM) : grow_done ? grow_t("Enter 다시 시작", "Enter Restart", "Enter 再起動") : T(S_PRESS_ESC));
 }
 
 static void grow_progress(int pct, const char *what)
 {
     copy_str(grow_what, sizeof grow_what, what ? what : "");
-    grow_pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    int np = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    uint32_t now = P.ms ? (uint32_t)P.ms() : 0;
+    int changed = np != grow_pct || strcmp(what ? what : "", grow_what) != 0;
+    grow_pct = np;
+    if (!changed && now - grow_last_draw < 60) return;
+    grow_last_draw = now;
     draw_grow();
+    if (P.flush) P.flush();
 }
 
 static int grow_w_stub(const char *a, const uint8_t *d, uint32_t n) { (void)a; (void)d; (void)n; return -1; }
@@ -5087,6 +5456,7 @@ static void grow_start(void)
 {
     if (!P.grow_run || grow_state != 0) return;
     grow_state = 1; grow_pct = 0; grow_done = 0;
+    if (P.grow_query) P.grow_query(&grow_part0, &grow_disk0);   /* 5.3.10: 확장 전 크기를 기억 */
     draw_grow();
     /* 확장하는 동안과 확장 뒤에는 USB 쓰기를 모두 막는다. 펌웨어(UEFI)·FAT 캐시는 옛 FAT·FSInfo·폴더를 기억하고 있어서,
      * 확장 뒤에 설정·상태 저장 같은 쓰기가 한 번이라도 나가면 옛 내용이 새 파일 시스템 위에 덮여 Windows 가 "손상"으로 본다 (실기에서 발견).
@@ -5440,13 +5810,15 @@ static void vo_pretty(char (*ln)[64], int n)
         copy_str(ln[i], 64, d);
     }
 }
+static uint32_t outg_fit_px(int tab);                   /* 5.3.35 출력장치 창 높이 = 내용만큼 */
 static void card_caps(uint32_t *w, uint32_t *h)
 {
     uint32_t cw = 0, ch = 0;
     switch (dialog) {
     case 2: cw = 1000; break;                           /* 진단 */
     case 3: cw = 920; break;                            /* X86MSX에 대하여 */
-    case 4: cw = 700; ch = 420; break;                  /* USB 전체 용량 */
+    case 4: cw = 560; ch = grow_state == 1 ? 360 : grow_done ? 400 : 330; break;
+    case 21: cw = 1200; ch = 744; break;                /* 5.3.19 시스템 보기 (시안 1200x744 팝업) */   /* USB 전체 용량 (5.3.10: 시안 1040x640 의 절반, 글씨는 작은 글꼴) */
     case 6:
         if (outg_is(props_tab)) cw = 720;               /* 출력장치 창 (시안 720 폭) */
         else if (props_tab == 5) cw = 1280;                  /* MIDI 창은 시안 너비 (5.2.197: 창 폭은 그대로, 줄만 좁힘) (좁은 화면이면 화면에 맞춰 줄어듦) */
@@ -5468,6 +5840,7 @@ static void card_caps(uint32_t *w, uint32_t *h)
     default: break;
     }
     *w = cw * S; *h = ch * S;
+    if (dialog == 6 && outg_is(props_tab)) { uint32_t hp = outg_fit_px(props_tab); if (hp) *h = hp; }   /* 5.3.35: 아래 빈 공간 없이 내용만큼 (넘치면 줄 간격을 좁혀 화면 안에) */
 }
 /* 탭 0~5 = 옵션 속성 창(blueMSX 순서 + 4.0.89 출력 장치 탭), 6~9 = 도구 팝업(믹서, 키보드, 조이스틱, 마우스) */
 static const StrId tab_label[10] = { S_TAB_EMU, S_VIDEO, S_EFFECTS, S_SOUND, S_OUTPUT, S_MIDI, S_TAB_MIXER, S_TAB_KEYBOARD, S_TAB_JOY, S_TAB_MOUSE };
@@ -5490,7 +5863,7 @@ static void mix_apply(void)
     M->stereo = snd_stereo;                             /* 3.3.3 */
 }
 /* MIDI 탭(5)도 MSX 를 멈추지 않음 — 멈추면 음원이 안 돌아 시험음·소리 막대가 안 나왔음 */
-static int live_mixer(void) { return (dialog == 6 && props_tab >= 5) || dialog == 18 || dialog == 19; }
+static int live_mixer(void) { return (dialog == 6 && props_tab >= 5) || dialog == 18 || dialog == 19 || dialog == 4 || dialog == 21; }   /* 5.3.14: USB 확장도 가운데 팝업 (MSX 화면이 뒤에 보임); 5.3.19 시스템 보기도 */
 static int live_pop(void) { return pop_mode && depth > 0 && !dialog && open_menu[0] == &m_media; }   /* 미디어 팝업(RCtrl+RShift+D)도 MSX 를 멈추지 않음 */
 static int live_ui(void) { return live_mixer() || live_pop(); }   /* MIDI 믹서도 */   /* 4.0: 입력장치 팝업도 MSX 화면을 뒤에 계속 보임 */   /* 3.3.3: 믹서 창은 MSX를 멈추지 않음 (계기·소리 확인) */
 static int mix_has_pan(int c) { return c >= 0 && c < MSX_CH_N && msx_ch_info[c].pan_ok; }   /* 본체 채널 표 (내장·USB MIDI·마스터·KEY 는 좌우 없음) */   /* 3.7.0: 내장·USB MIDI·기타는 좌우 없음 */
@@ -5576,6 +5949,7 @@ static int props_items(int tab, PropItem *it)
             else { copy_str(v, sizeof v, T(S_VSYNC_AUTO)); str_append(v, sizeof v, msx_is_pal(M) ? " (50 Hz)" : " (60 Hz)"); }
             ADD(1, 50, T(S_VSYNC), v, 0, 1);
         }
+        ADDO(266, 1);                                   /* 5.3.29 전체화면 스크린샷 (주사 주파수 밑) */
         ADD(0, 0, T(S_VID_ADJUST), "", 0, 1);           /* 2.12: 밝기·대비·채도·감마 */
         ADDO(45, 1); ADDO(46, 1); ADDO(47, 1); ADDO(48, 1);   /* 밝기·대비·채도·감마 — 설정 표 */
         ADD(1, 49, T(S_VIDEO_RESET), "", 0, 1);
@@ -5733,10 +6107,35 @@ static void props_fix_sel(void)
 /* 항목 높이 */
 static uint32_t item_h_of(const PropItem *q, int first)
 {
-    if (q->kind == 0) return (first ? 0 : 4 * S) + SLH + 8 * S;   /* 제목 줄 간격을 줄여 한눈에 */
-    if (q->kind == 4) return SLH + 10 * S;
+    if (q->kind == 0) return ui_tight ? (first ? 0 : 2 * S) + SLH + 6 * S : (first ? 0 : 4 * S) + SLH + 8 * S;   /* 제목 줄 간격을 줄여 한눈에 */
+    if (q->kind == 4) return SLH + (ui_tight ? 6 : 10) * S;
     if (q->kind >= 5) return 0;                         /* 종류 5·6 = 앞 줄의 오른쪽 반 */
     return ui_row_h();
+}
+/* 5.3.35 출력장치 창(화면·효과·소리 출력)이 필요한 높이 (px). 넘치면 줄 간격을 좁힌 값 */
+static uint32_t outg_fit_px(int tab)
+{
+    static PropItem it[32];
+    int n = props_items(tab, it);
+    uint32_t chrome = ui_head_h() + 2 * S + 4 * S + ui_tabs_h() + 10 * S + 10 * S + 2 * S + ui_cmdbar_h() + 4 * S, tot[2] = { 0, 0 };
+    int sv = ui_tight;
+    for (int t = 0; t < 2; t++) {
+        ui_tight = t;
+        uint32_t y = 0;
+        if (tab == 4) {                                 /* 소리 출력 = 장치 카드 (draw_out_cards 와 같은 계산) */
+            for (int i = 0; i < n; i++) {
+                const PropItem *q = &it[i];
+                if (q->kind == 0) { y += (i ? 4 * S : 0) + item_h_of(q, i == 0); continue; }
+                if (q->kind == 4) { y += SLH + 6 * S; continue; }
+                y += (q->kind == 2 ? LH + 18 * S : LH + SLH + 22 * S) + 8 * S;
+            }
+        } else for (int i = 0; i < n; i++) y += item_h_of(&it[i], i == 0);
+        tot[t] = y;
+    }
+    ui_tight = sv;
+    uint32_t h = chrome + tot[0];
+    if (D.h && h > D.h - 26 * S) h = chrome + tot[1];        /* 창이 들어갈 수 있는 높이 (card_rect: 위아래 10*S + 6*S 여백) 를 넘으면 좁힌 값 */
+    return h;
 }
 /* 에뮬레이션 탭 = 카드 배치. 항목의 grp로 자리를 정함 — 0 기종·슬롯(두 칸), 1·2 속도(왼쪽·오른쪽 열), 3 상태 저장, 4 기능, 5 플래시 카드 */
 static void set_expand(int want);
@@ -5905,8 +6304,14 @@ static void draw_out_cards(PropItem *it, int n, int selidx, uint32_t X, uint32_t
 static void draw_item_list2(PropItem *it, int n, int selidx, uint32_t X, uint32_t W, uint32_t top, uint32_t bottom)
 {
     uint32_t total = 0, upto = 0;
-    for (int i = 0; i < n; i++) { if (i == selidx) upto = total + item_h_of(&it[i], i == 0); total += item_h_of(&it[i], i == 0); }
     uint32_t avail = bottom > top ? bottom - top : 0, skip = 0;
+    ui_tight = 0;
+    if (props_tab >= 1 && props_tab <= 3) {             /* 5.3.32 출력장치 창: 넘치면 줄 간격을 좁혀 한 화면에 */
+        uint32_t t0 = 0;
+        for (int i = 0; i < n; i++) t0 += item_h_of(&it[i], i == 0);
+        if (t0 > avail) ui_tight = 1;
+    }
+    for (int i = 0; i < n; i++) { if (i == selidx) upto = total + item_h_of(&it[i], i == 0); total += item_h_of(&it[i], i == 0); }
     if (total > avail && upto > avail) skip = upto - avail;
     int32_t y = (int32_t)top - (int32_t)skip;
     uint32_t vx = X + W * 46 / 100;
@@ -5943,6 +6348,7 @@ static void draw_item_list2(PropItem *it, int n, int selidx, uint32_t X, uint32_
         y += (int32_t)h;
     }
     if (total > avail) ui_scrollbar(X + W - 2 * S, top, avail, (int)skip, (int)avail, (int)total);
+    ui_tight = 0;
 }
 
 /* 3.0 마우스: 믹서 칸. 막대를 누르면 그 높이로 음량, 이름을 누르면 끄기/켜기 (a = 채널, b = 막대 위, c = 막대 높이) */
@@ -6648,6 +7054,7 @@ static void draw_dialog(void)
     if (dialog == 6) { draw_props(); return; }
     if (dialog == 5) { draw_machines(); return; }
     if (dialog == 4) { draw_grow(); return; }
+    if (dialog == 21) { draw_sysview(); return; }
     if (dialog == 1) draw_browser();
     else if (dialog == 2) draw_diag();
     else if (dialog == 3) draw_info(1);
@@ -6777,6 +7184,7 @@ static const Shortcut sc_def[] = {
     { 0x75, 0x20, A_PRN_RAW },                                    /* 4.0.34: LShift+F6 프린터 원본 파일로 (.prn) */
     { 0x7B, 0x04, A_MIDI_MIX },                                   /* LCtrl+F12 MIDI 믹서 (팝업) */
     { 0x78, 0x10, A_DISKB_NEXT },                                 /* 새 단축키 배치 (B 드라이브 다음 디스크 칸 추가) */
+    { 0x56, 0x0A, A_SYSVIEW },                                    /* 8.0.37: RCtrl+RShift+V 시스템 보기 (도움말 → 시스템) */
 };
 
 static int ralt_down, ralt_other;
@@ -6965,11 +7373,44 @@ static void klog_frame_end(uint32_t now, uint32_t t0)
         }
     }
     klog_pf_ms = pf_ms0;
-    if (klog_dirty && (now - klog_act >= 3000 || klog_force) && P.write_file && P.create) {
+    if (log_key && klog_dirty && (now - klog_act >= 3000 || klog_force) && ui_active() && !live_ui() && P.write_file && P.create) {   /* 5.3.55: MSX 가 도는 중에는 쓰지 않음 (USB 쓰기가 0.3~2.7초 걸려 그동안 소리·화면이 멈췄음) → 메뉴·창을 열었을 때 한 번 */
         klog_dirty = 0; klog_force = 0;
         P.create("0:\\LOG", 1);
         P.create("0:\\LOG\\KEY_X" MSXEMU_VERSION ".TXT", 0);
         P.write_file("0:\\LOG\\KEY_X" MSXEMU_VERSION ".TXT", (const uint8_t *)klog_buf, klog_len);
+    }
+}
+
+/* 5.3.51: 소리 끊김 기록 — 연주만 듣는 중에 소리가 빠졌다 나올 때(HDA 버퍼 모자람/넘침) 그 순간의 프레임 간격·구간별 최대 시간을 LOG\SNDGLITCH.TXT 에 (10초에 한 번만 씀) */
+static char sg_buf[6144]; static uint32_t sg_len;
+static void snd_glitch_check(void)
+{
+    static uint32_t pu, po, last_ms, prev_frame; static int pend;
+    uint32_t now = P.ms(), gap = prev_frame ? now - prev_frame : 0;
+    prev_frame = now;
+    if (!P.snd_stat) return;
+    uint32_t u, o; int d, tg;
+    if (!P.snd_stat(&u, &o, &d, &tg)) return;
+    if (u != pu || o != po) {
+        char l[420], w[160]; l[0] = 0;
+        str_append(l, sizeof l, "t="); num_append(l, sizeof l, now, 0, ' ');
+        str_append(l, sizeof l, u != pu ? " UNDER" : " OVER");
+        str_append(l, sizeof l, " total u="); num_append(l, sizeof l, u, 0, ' ');
+        str_append(l, sizeof l, " o="); num_append(l, sizeof l, o, 0, ' ');
+        str_append(l, sizeof l, " lat="); num_append(l, sizeof l, (uint32_t)tg, 0, ' ');
+        str_append(l, sizeof l, " frame gap="); num_append(l, sizeof l, gap, 0, ' ');
+        str_append(l, sizeof l, "ms\r\n  share "); pf_text(w, sizeof w, 0); str_append(l, sizeof l, w);
+        str_append(l, sizeof l, "\r\n  worst "); pf_text(w, sizeof w, 1); str_append(l, sizeof l, w);
+        str_append(l, sizeof l, "\r\n");
+        uint32_t k = (uint32_t)strlen(l);
+        if (sg_len + k >= sizeof sg_buf) { uint32_t h = sizeof sg_buf / 2; memmove(sg_buf, sg_buf + h, sg_len - h); sg_len -= h; }
+        memcpy(sg_buf + sg_len, l, k); sg_len += k;
+        pu = u; po = o; pend = 1;
+    }
+    if (log_sndglitch && pend && now - last_ms >= 10000 && ui_active() && !live_ui() && P.write_file && P.create) {   /* 5.3.54: 연주 중에 쓰면 그 쓰기(약 80 ms)가 스스로 소리 끊김을 만들었음 → 메뉴를 열었을 때만 씀 */
+        pend = 0; last_ms = now;
+        P.create("0:\\LOG", 1); P.create("0:\\LOG\\SNDGLITCH.TXT", 0);
+        P.write_file("0:\\LOG\\SNDGLITCH.TXT", (const uint8_t *)sg_buf, sg_len);
     }
 }
 
@@ -7011,6 +7452,7 @@ static void key_event(int key, int press)
         if (dialog == 15 && pa != A_HARD_RESET && pa != A_SOFT_RESET && pa != A_FULL_RESET && pa != A_RESET_CTRL) pa = A_NONE;      /* 4.0.34: PC 재부팅·끝내기·리셋 키는 어느 창에서나 먼저 */
         if (pa != A_NONE && pa == popup_act && dialog && dialog == popup_dlg && (dialog != 6 || props_tab == popup_tab)) { consumed[key] = 1; dialog_back(); return; }   /* 단축키로 연 팝업은 같은 단축키로 닫음 */
         if (dialog && (pa == A_VOL_UP || pa == A_VOL_DOWN || pa == A_MUTE)) { consumed[key] = 1; do_action(pa); return; }   /* 음량 키는 글자를 먼저 받는 창(파일 관리자 F11 등)에서도, 창은 그대로 둔 채 */
+        if (dialog && (pa == A_SCREENSHOT || pa == A_AUDIO_REC || pa == A_VID_REC)) { consumed[key] = 1; do_action(pa); return; }   /* 5.3.36 화면 저장·소리 저장·영상 녹화 키는 글자를 먼저 받는 창(파일 관리자 F11 등)에서도 */
         if (pa == A_PROPS_MIX) {                        /* 믹서는 어느 창·메뉴가 떠 있어도 먼저 열고, 닫으면 하던 곳으로 */
             consumed[key] = 1;
             if (ui_active()) ui_ret_save(); else ui_ret_valid = 0;
@@ -7101,6 +7543,7 @@ static void key_event(int key, int press)
     if (dialog == 12) { help_key(key); return; }
     if (dialog == 3) { about_key(key); return; }
     if (dialog == 5) { machines_key(key); return; }
+    if (dialog == 21) { sysview_key(key); return; }   /* 5.3.19 */
     if (dialog == 4) {
         if (grow_done) { if (!(key & 0x80)) { silence_all(); P.reboot(); } return; }   /* 4.0.28 */
         if (key == 0x01 && grow_state != 1) dialog_back();
@@ -7725,6 +8168,15 @@ static uint8_t ini_prev[INI_SIZE];                     /* 3.5.5: 장치에 있�
 static int ini_prev_ok;
 
 static void settings_changed(void) { settings_dirty = 1; settings_due = P.ms() + 2000; }
+/* 5.3.56: 연주 중에는 설정 저장을 미룸. USB 쓰기가 0.3초 안팎 걸려 그동안 MSX·소리가 멈췄음.
+ * "연주 중" = MSX 가 돌고(메뉴·창이 없고) 최근 1초 안에 소리가 났을 때. 소리가 없거나 메뉴가 열리면 저장 */
+static uint32_t snd_loud_ms;                         /* 마지막으로 소리가 컸던 때 */
+static int ini_defer(uint32_t now)
+{
+    if (run_state != RUN_ON) return 0;
+    if (ui_active() && !live_ui()) return 0;
+    return snd_loud_ms && now - snd_loud_ms < 1000;
+}
 
 static void ini_put(char *b, const char *key, const char *val)
 {
@@ -7774,6 +8226,7 @@ static int sf_has_gm(void)                              /* MT-32 용이 아닌 .
 }
 static void sf_load_slot(int slot, int quiet)
 {
+    midi_reload = 1;
     FeSf *f = &fe_sf[slot];
     (void)sf_rd_slot;
     gm_sf_slot(slot); gm_unload_sf2();
@@ -7820,6 +8273,7 @@ static int sf_presets(int slot) { gm_sf_slot(slot); return gm_sf2_presets(); }
 /* Roland SC-55 (Nuked-SC55) — USB\MidiSound\SC55\ 의 롬. SC-55mkII (rom1·rom2·waverom1·waverom2·rom_sm.bin) 를 먼저, 없으면 SC-55 (sc55_rom1·2·waverom1·2·3.bin) */
 static void sc55_load(int quiet)
 {
+    midi_reload = 1;
     sc55w_close(); sc55_info[0] = 0;
     if (!sc55w_tmp()) { sc55_state = -9; return; }        /* 레거시 판에는 없음 */
     if (!P.read_file) { sc55_state = -1; return; }
@@ -7830,7 +8284,7 @@ static void sc55_load(int quiet)
         midi_path(path, sizeof path, MD_SC55, sc55w_files[m][0]);
         if (!P.read_file(path, hb, 1, &fs) && fs) model = m;
     }
-    if (model < 0) { sc55_state = -1; if (!quiet) toast(nt("SC-55 롬이 없습니다", "SC-55 ROM not found", "SC-55 ROMがありません"), "USB\\MidiSound\\SC55"); return; }
+    if (model < 0) { sc55_state = -1; rs_usb_probe(); if (!quiet) toast(rs_usb_bad ? nt("USB 를 읽지 못했습니다", "Cannot read USB", "USBを読めません") : nt("SC-55 롬이 없습니다", "SC-55 ROM not found", "SC-55 ROMがありません"), rs_usb_bad ? nt("다시 꽂거나 MIDI 탭에서 F5", "Replug, or F5 in MIDI tab", "挿し直すかMIDIタブでF5") : "USB\\MidiSound\\SC55"); return; }
     for (int f = 0; f < SC55_NFILE; f++) {
         char path[FE_PATH_MAX]; uint32_t n = 0;
         midi_path(path, sizeof path, MD_SC55, sc55w_files[model][f]);
@@ -7896,6 +8350,7 @@ static int has_ci(const char *h, const char *n)        /* 대소문자 가리지
 }
 static void mt_load(int slot, int quiet)
 {
+    midi_reload = 1;
     uint32_t t_a = P.ms();                               /* 롬 읽기 단계별 시간 (KEY 로그 N 줄: 준비·이름 찾기 / 제어 / PCM / 열기) */
     gm_mt32_close(slot);
     mt_inf[slot][0] = 0;
@@ -7918,8 +8373,8 @@ static void mt_load(int slot, int quiet)
       str_append(l, sizeof l, "ms 제어 "); num_append(l, sizeof l, t_c - t_b, 0, ' '); str_append(l, sizeof l, "ms/"); num_append(l, sizeof l, nc, 0, ' ');
       str_append(l, sizeof l, "B PCM "); num_append(l, sizeof l, t_d - t_c, 0, ' '); str_append(l, sizeof l, "ms/"); num_append(l, sizeof l, np, 0, ' '); str_append(l, sizeof l, "B"); klog_note(l); }
     if (rf1 || nc < 1024 || rf2 || np < 1024) {
-        mt_st[slot] = -1;
-        if (!quiet) toast(nt("MidiSound\\MT32 폴더에 롬 파일이 없습니다", "ROM files not found in MidiSound\\MT32", "MidiSound\\MT32にROMがありません"), 0);
+        mt_st[slot] = -1; rs_usb_probe();
+        if (!quiet) toast(rs_usb_bad ? nt("USB 를 읽지 못했습니다 — 다시 꽂거나 MIDI 탭에서 F5", "Cannot read USB - replug, or F5 in MIDI tab", "USBを読めません — 挿し直すかF5") : nt("MidiSound\\MT32 폴더에 롬 파일이 없습니다", "ROM files not found in MidiSound\\MT32", "MidiSound\\MT32にROMがありません"), 0);
         return;
     }
     uint32_t t_e = P.ms();
@@ -7952,6 +8407,7 @@ static void midi_ui_from_bus(void)
 static void midi_synth_apply(void)                     /* 꽂힌 소프트웨어 기계마다 음원 인스턴스 i 의 방식을 정함 */
 {
     fx_apply();                                         /* 5.2.159 */
+    int md_before[GM_INST_MAX]; for (int i = 0; i < GM_INST_MAX; i++) md_before[i] = gmi_mode(i); midi_reload = 0;
     { const MidiDev *m32 = midibus_find(MDK_MT32); if (m32) mt_model = m32->opt; }   /* 첫 MT-32 기계의 롬 종류 (옛 설정 변수) */
     for (int sl = 0; sl < MT_N; sl++) {                 /* 엔진 슬롯마다 — 기계가 바라는 롬이 지금 불러온 것과 다르면 다시 읽음, 기계가 없어졌으면 엔진을 닫음 */
         char sg[140]; mt_sig(sl, sg, sizeof sg);
@@ -7983,6 +8439,8 @@ static void midi_synth_apply(void)                     /* 꽂힌 소프트웨어
         gmi_set_sf(i, slot, gs);
         gmi_set_mode(i, want != GM_FM && fe_sf[slot].state == 1 ? GM_SF2 : GM_FM);
     }
+    for (int i = 0; i < midi_bus.n && i < GM_INST_MAX; i++)    /* 5.3.49: 새로 켜졌거나 롬을 다시 읽은 음원은 곡이 보낸 설정부터 다시 받음 */
+        if (gmi_mode(i) != GM_OFF && (gmi_mode(i) != md_before[i] || midi_reload)) midibus_replay(i);
 }
 
 /* 설정 표 — 숫자 하나로 된 설정은 이 표 한 줄 (ini 키·변수·읽을 때 검사·기종별 저장 여부).
@@ -7993,6 +8451,12 @@ enum { OF_NONE, OF_NUM, OF_PCT, OF_SIGNED, OF_GAMMA, OF_PCT_OFF, OF_INV };   /* 
 typedef struct { const char *key; int *var; uint8_t kind; int lo, hi, bad; uint8_t per_machine; uint16_t prop; uint8_t step, ui; uint16_t str; uint8_t fmt; } FeOpt;   /* RANGE: 밖이면 bad, CLAMP: lo~hi 로 자름, MASK: & hi */
 /* 속성 창 — prop = 속성 항목 번호 (0 = 창에 없음), step = 막대 한 칸 (0 = 켜기/끄기), ui = 바꾼 뒤 할 일 (OU_*)
  * str = 줄 이름(StrId), fmt = 값 글자 꼴 (OF_*). 이 둘이 있으면 속성 창 줄도 표가 그림 (opt_prop_item) */
+int mp_pool_on;                                     /* 8.0.1: ini MpPool=1 일 때만 모든 코어를 일꾼으로 띄워 시험 (uefi/main.c 가 읽음) */
+int mp_pool_done;                                   /* 8.0.17: 일꾼 시험이 끝나면 1 → DIAG.TXT 다시 저장 */
+int mp_wake_done;                                   /* 8.0.7: 깨우기 시험이 끝나면 1 → DIAG.TXT 다시 저장 */
+int mp_auto = 1;                                    /* 8.0.8: ini MpAuto=0 이면 허용 PC 에서도 코어를 깨우지 않음 (한 코어만 사용). 기본 1 */
+int mp_wake_on;                                     /* 8.0.6: ini MpWake=1 일 때만 다른 코어 하나를 APIC 로 깨워 보는 시험 (uefi/main.c 가 읽음) */
+int mp_test_on;                                     /* 8.0.1: ini MpTest=1 일 때만 다른 코어 시험 (uefi/main.c 가 읽음) */
 static const FeOpt fe_opts[] = {
     { "Mute", &muted, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
     { "Volume", &volume, OPT_CLAMP, 0, 100, 0, 1, 0, 0, 0 },
@@ -8007,6 +8471,19 @@ static const FeOpt fe_opts[] = {
     { "FxNoise", &fx_noise, OPT_CLAMP, 0, 100, 0, 1, 55, 10, OU_C32|OU_REDRAW|OU_HAND, S_FX_NOISE, OF_PCT_OFF },
     { "Aspect", &aspect_mode, OPT_RANGE, 0, 2, 0, 1, 0, 0, 0 },
     { "VdpCmdTiming", &msx_vdp_cmd_timing, OPT_BOOL, 0, 0, 0, 1, 58, 0, 0, S_VDP_TIMING, OF_NONE },
+    { "VdpAsm", &vdpk_asm_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
+    { "MpPresent", &mp_present, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
+    { "MpMidi", &msx_mp_midi, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.25: MIDI 음원(GM·MT-32) 합성을 일꾼 코어가 (다른 음원 섞는 동안, 늦어짐 없음) */
+    { "LogDiag", &log_diag, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.30: 스위치 탭 — LOG\DIAG.TXT */
+    { "LogStall", &log_stall, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\STALL.TXT */
+    { "LogSndLog", &log_sndlog, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\SNDLOG.TXT */
+    { "LogKey", &log_key, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\KEY_X<버전>.TXT (기본 끔) */
+    { "LogSndGlitch", &log_sndglitch, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\SNDGLITCH.TXT (기본 끔) */
+    { "MpMwait", &mp_mwait_ini, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.23: 노는 일꾼 코어를 MWAIT 로 재움 (0 = pause 로 돌기) */   /* 8.0.23: 화면 줄 그리기를 일꾼 코어와 나눔 (기본 켬, 일꾼이 없으면 메인 혼자) */
+    { "MpPool", &mp_pool_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.1 다중CPU 4-2a: 있는 코어를 모두 일꾼으로 (기본 끔) */
+    { "MpAuto", &mp_auto, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.8: 허용 PC 자동 깨우기 켬/끔 */
+    { "MpWake", &mp_wake_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.6: APIC 로 코어 하나 깨우기 시험 (기본 끔) */
+    { "MpTest", &mp_test_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.1 다중CPU 4-1: 다른 코어에 숫자 세기를 시키는 시험 (기본 끔) */   /* 5.3.37 7단계: VDP 그리기 점 커널 어셈블러판 (기본 끔 = C판) */
     { "PrnMode", &prn_mode, OPT_RANGE, 0, 2, 0, 1, 0, 0, 0 },
     { "PrnPreview", &prn_preview, OPT_RANGE, 0, 2, 1, 0, 0, 0, 0 },
     { "SpriteHide", &spr_hide, OPT_BOOL, 0, 0, 0, 1, 51, 0, OU_SPR, S_SPR_SHOW, OF_INV },
@@ -8048,6 +8525,9 @@ static const FeOpt fe_opts[] = {
     { "MidiLen", &fx_len, OPT_CLAMP, 0, 200, 0, 0, 0, 0, 0 },
     { "MidiFxOn", &fx_on, OPT_BOOL, 0, 0, 0, 1, 0, 0, 0 },
     { "AcpiMode", &acpi_mode, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* ini 전용 (실험) */
+    { "SndSync", &snd_sync_mode, OPT_CLAMP, 1, 2, 1, 0, 0, 0, 0 },
+    { "ShotFull", &shot_full, OPT_BOOL, 0, 0, 0, 0, 266, 0, 0, S_SHOT_FULL, OF_NONE },   /* 5.3.28 비디오 탭 스위치 */
+    { "PowerSave", &power_save, OPT_CLAMP, 0, 2, 0, 0, 0, 0, 0 },   /* 5.3.18 ini 전용: 1 = 프레임 사이 hlt 로 쉼 (발열·팬) */   /* 5.3.17 ini 전용: 1 기본 소리 속도 맞춤(5.3.14), 2 시험 루틴 */
     { "MidiInPort", &midi_in_port, OPT_CLAMP, 0, MDP_N - 1, 0, 0, 0, 0, 0 },   /* 5.2.56 */
     { "PanaFront", &pana_front, OPT_BOOL, 0, 0, 0, 1, 0, 0, 0 },
     { "PanaPause", &pana_pause, OPT_BOOL, 0, 0, 0, 1, 0, 0, 0 },
@@ -8142,6 +8622,7 @@ static void settings_flush(void)
     ini_num(b, "AudioOut", audio_out);
     
     ini_num(b, "Scanlines", scanlines);
+    for (int i = 0; i < VS_PC_N; i++) if (vs_pc_lines[i] != 0x7FFF) { char kn[24] = "VsyncLinesPC"; num_append(kn, sizeof kn, (uint32_t)i, 0, ' '); ini_num(b, kn, vs_pc_lines[i]); }   /* 8.0.22 */
     ini_num(b, "VideoSource", vsrc_pref + 1); ini_num(b, "DiagPC", diag_pc_sel + 1); ini_num(b, "FirmwareSwitch", fw_switch);
     
     
@@ -8316,6 +8797,7 @@ static void ini_parse_lines(char *line)                /* 4.0.34: ini 본문(또
             else if (!strcmp(k, "DiskDir") && v[0]) copy_str(disk_dir, sizeof disk_dir, v);
             else if (!strcmp(k, "DiskDirName") && v[0]) copy_str(disk_dir_disp, sizeof disk_dir_disp, v);
             else if (!strcmp(k, "AudioOut")) audio_out = 0;
+            else if (!strncmp(k, "VsyncLinesPC", 12)) { long i = ini_long(k + 12), x = ini_long(v); if (i >= 0 && i < VS_PC_N && x >= -400 && x <= 400) vs_pc_lines[i] = (int)x; }   /* 8.0.22 */
             else if (!strcmp(k, "Scanlines")) { long x = ini_long(v); scanlines = x == 1 ? 100 : x < 0 ? 0 : x > 100 ? 100 : (int)x; if (scanlines) scan_last = scanlines; }   /* 3.2.9까지 1 = 켬(검정) */
             else if (!strcmp(k, "MonitorEmu")) { static const int old[6] = { 0, 1, 1, 5, 6, 7 }; long x = ini_long(v); mon_emu = x < 0 || x > 5 ? 0 : old[x]; }   /* 3.2.10까지: 없음·LED·RGB·OLD·Scale2x·Hq2x */
             else if (!strcmp(k, "FirmwareSwitch")) { fw_switch = ini_long(v) != 0; msx_fw_turbor = fw_switch; }
@@ -8632,7 +9114,7 @@ static void snd_watch(const int16_t *s, int n)
     sil_run = (peak <= 2 && had_loud && dm > 0 && volume > 0 && !muted) ? sil_run + 1 : 0;
     const char *why = hf_run >= 2 ? "HIGH-FREQ NOISE (hf% > 150, peak > 4000)" : clip_run >= 2 ? "CLIPPING (over 25% of samples at full scale)" : sil_run >= 4 ? "SILENT while MIDI bytes keep coming" : 0;
     peak = clip = 0; sabs = sdif = 0;
-    if (why && secs - last_save >= 20 && P.write_file && P.create) {
+    if (why && log_sndlog && secs - last_save >= 20 && P.write_file && P.create) {
         last_save = secs; static char fb[48 * 100 + 400]; fb[0] = 0;
         str_append(fb, sizeof fb, "X86MSX " MSXEMU_VERSION " sound log\r\ntrigger: "); str_append(fb, sizeof fb, why);
         str_append(fb, sizeof fb, "\r\nlast loud second: t "); num_append(fb, sizeof fb, last_peak_s, 0, ' ');
@@ -8668,6 +9150,7 @@ static void play_audio(void)
     const int16_t *s = M->psg.buf;
     int n = M->psg.buf_n, st = M->stereo && P.audio2;
     snd_watch(s, n);  /* 3.3.3 스테레오 */
+    { int pk = 0; for (int i = 0; i < n; i++) { int v = s[i] < 0 ? -s[i] : s[i]; if (v > pk) pk = v; } if (pk > 8) snd_loud_ms = P.ms(); }   /* 5.3.56: 소리 있음 표시 (설정 저장 미루기용) */
     if (sp == 100) { if (st) P.audio2(M->out_l, M->out_r, n, volume, muted); else P.audio(s, n, volume, muted); return; }
     int out = n * 100 / sp;                             /* 빠르면 솎고, 느리면 늘림 */
     if (out > 2048) out = 2048;
@@ -8790,6 +9273,8 @@ static int ptr_wanted(void)
 /* 3.5.0 믹서 계기 (도구 막대 음원 계기): 0 PSG, 1 SCC, 2 MSX-MUSIC, 3 PCM */
 static int mix_meter_of(int c) { static const int ch[4] = { MIX_PSG, MIX_SCC, MIX_MM, MIX_PCM }; return c >= 0 && c < 4 ? mix_meter[ch[c]] : 0; }
 #include "fe_ov.inc"
+#include "fe_sysperf.inc"                              /* 8.0.34 시스템 보기 > 성능 (CPU·메모리·디스크) */
+#include "fe_sysview.inc"                              /* 5.3.19 시스템 보기 (md_* 는 fe_ov.inc 것) */
 static void ov_draw_fwd(void) { ov_draw(); }
 
 static int drag_on;                                  /* 3.4.4: 끄는 중인 막대 (누른 자리의 hit 복사본) */
@@ -8903,9 +9388,12 @@ static void fe_frame_core(void)
     {   /* 5.2.21 사진 대신 LOG: 켠 뒤 10초에 한 번, 진단 창 탭을 바꾸거나 소리를 다시 찾은 뒤, 진단 창에서 프레임이 0.7초 넘게 멈췄으면 LOG\DIAG.TXT */
         static int boot_saved; static uint32_t last_f, last_periodic;
         uint32_t now = P.ms();
-        if (!boot_saved && now > 10000) { boot_saved = 1; diag_save_now(); }
-        else if (dg_save_due && (int32_t)(now - dg_save_due) >= 0) { dg_save_due = 0; diag_save_now(); }
-        else if (boot_saved && now - last_periodic > 60000) { last_periodic = now; diag_save_now(); }   /* 1분마다 LOG\DIAG.TXT 갱신 — 소리가 갑자기 사라진 뒤 그 순간의 소리 장치 상태(stream RUN, peak, re-init, latency)를 남김 */
+        if (mp_wake_done == 1) { mp_wake_done = 2; dg_save_due = now + 300; }
+        if (mp_pool_done == 1) { mp_pool_done = 2; dg_save_due = now + 300; }
+        { static int vs_applied; if (!vs_applied && now > 3000) { vs_applied = 1; vs_pc_apply(); } }   /* 8.0.22: 이 PC 에 저장된 화면 맞추기 시점 */
+        if (!boot_saved && now > 10000 && !ini_defer(now)) { boot_saved = 1; diag_save_now(); }   /* 8.0.19: 연주 중에는 DIAG.TXT 저장도 미룸 (USB 쓰기 동안 MSX·소리가 멈춤) */
+        else if (dg_save_due && (int32_t)(now - dg_save_due) >= 0 && !ini_defer(now)) { dg_save_due = 0; diag_save_now(); }
+        else if (boot_saved && now - last_periodic > 60000 && !ini_defer(now)) { last_periodic = now; diag_save_now(); }   /* 1분마다 LOG\DIAG.TXT 갱신 — 소리가 갑자기 사라진 뒤 그 순간의 소리 장치 상태(stream RUN, peak, re-init, latency)를 남김 */
         else if (last_f && now - last_f > 700 && dialog == 2) dg_save_due = now + 100;
         if (last_f && now - last_f > 1000) stall_note(now - last_f);   /* 1초 넘게 멈췄다 다시 돌면 LOG\STALL.TXT */
         last_f = now;
@@ -9019,7 +9507,8 @@ static void fe_frame_body(void)
     gap_last = now;
     if (now - gap_reset >= 1000) { gap_show = gap_max; gap_max = 0; gap_reset = now; }
     pf_window(now);
-    if (settings_dirty && (int32_t)(now - settings_due) >= 0 && !dialog) settings_flush();
+    sysperf_tick(now);                                  /* 8.0.34: 시스템 보기 > 성능이 열려 있을 때만 1초마다 */
+    if (settings_dirty && (int32_t)(now - settings_due) >= 0 && !dialog && !ini_defer(now)) settings_flush();   /* 5.3.56: 연주 중이면 미룸 */
     TRC("body: after settings");
     if (M->tape && M->tape_dirty && !M->tape_motor) {   /* 테이프: 모터가 멈추고 2초 뒤 저장 */
         if (!tape_due) tape_due = now + 2000;
@@ -9064,11 +9553,12 @@ static void fe_frame_body(void)
 #else
         { extern int nethost_poll(void) __attribute__((weak)); if (nethost_poll && M->net.enabled && nethost_poll()) msx_net_event(M); }   /* 5.0.108 */
 #endif
-        PF_END(PF_CORE); { extern uint64_t msx_synth_cyc; uint64_t sy_ = msx_synth_cyc; msx_synth_cyc = 0; if (sy_ > pf_acc[PF_CORE]) sy_ = pf_acc[PF_CORE]; pf_acc[PF_CORE] -= sy_; fe_pf_add(PF_SYNTH, sy_); } mix_meter_frame(); { PF_BEGIN; midi_frame(now); PF_END(PF_MIDI); } }
+        PF_END(PF_CORE); { extern uint64_t msx_synth_wcyc; pf_wacc += msx_synth_wcyc; msx_synth_wcyc = 0; } { extern uint64_t msx_synth_cyc; uint64_t sy_ = msx_synth_cyc; msx_synth_cyc = 0; if (sy_ > pf_acc[PF_CORE]) sy_ = pf_acc[PF_CORE]; pf_acc[PF_CORE] -= sy_; fe_pf_add(PF_SYNTH, sy_); } mix_meter_frame(); { PF_BEGIN; midi_frame(now); PF_END(PF_MIDI); } }
     vrec_frame();                                       /* 영상 녹화는 보이는 화면 전체 — 창이 열려 MSX가 멈춰 있어도 */
     TRC("body: before audio");
     if (live_mixer()) { static uint32_t lm; if (now - lm >= 66) { lm = now; menu_dirty = 1; } }   /* 계기 다시 그리기 */
     { PF_BEGIN; play_audio(); PF_END(PF_AUDIO); }
+    snd_glitch_check();
     TRC("body: after audio");
 
     read_leds();

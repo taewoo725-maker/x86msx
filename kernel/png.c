@@ -102,6 +102,17 @@ int png_load_big(const uint8_t *png, uint32_t len, uint32_t *w_out, uint32_t *h_
     return r;
 }
 
+/* 5.3.19: 작업 자리 크기와 최대 크기를 부르는 쪽이 정하는 판 (시스템 보기의 기종 사진 — 원본 그대로, 최대 2048 폭).
+ * mem 은 memsz 바이트: 앞은 줄 자료(rawcap), 뒤 2 MB 는 압축 자료. png_load_big 은 그대로 둠 */
+int png_load_mem(const uint8_t *png, uint32_t len, uint32_t *w_out, uint32_t *h_out, uint8_t *mem, uint32_t memsz, uint32_t mw, uint32_t mh)
+{
+    if (memsz <= BIGIDAT_SZ + 4096) return -1;
+    rawp = mem; idatp = mem + (memsz - BIGIDAT_SZ); rawcap = memsz - BIGIDAT_SZ; idatcap = BIGIDAT_SZ; maxw = mw; maxh = mh;
+
+    int r = png_load_core(png, len, w_out, h_out);
+    return r;
+}
+
 /* png_load 뒤: (x, y) 점의 RGBA (0~255) */
 void png_rgba(uint32_t x, uint32_t y, int rgba[4])
 {

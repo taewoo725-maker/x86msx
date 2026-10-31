@@ -123,6 +123,7 @@ typedef struct MSX {
     uint8_t f4_status, trpause_reg;
     int pause_sw;                       /* turbo R 일시 정지 키 (프런트엔드의 PAUSE 스위치) */
     uint8_t pcm_ctrl, pcm_da;           /* PCM: A5h 제어, 마지막 DA 값 */
+    uint64_t pcm_ref;                   /* PCM: 마지막 A4h 쓰기 시각 (읽기 카운터 기준) */
     uint16_t pcm_n;                     /* 이번 프레임 DA 쓰기 수 */
     uint32_t pcm_t[2048];               /* 프레임 안 시간 (T-state) */
     uint8_t pcm_v[2048];

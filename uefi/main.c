@@ -127,6 +127,8 @@ static uint32_t vs_pci_rd(int b, int d, int f, int off)
     uint32_t v; __asm__ volatile("inl %1, %0" : "=a"(v) : "Nd"((uint16_t)0xCFC)); return v;
 }
 static uint64_t vs_wt;
+static uint64_t vs_last_ret; static uint32_t vs_hlts;   /* 8.0.26: 마지막으로 화면 시작을 잡은 시각, 화면 기다리며 쉰 횟수 */
+static uint32_t cb_s[3][5];          /* 8.0.22: [2] = 화면 아래 절반만 복사한 프레임 (흐르는 글씨 줄) */          /* 8.0.21: [전체/일부] 복사 시작·끝 줄 번호, 복사 줄 범위, 횟수 */
 static uint32_t vs_hz100;           /* 잰 화면 주기 (Hz x 100), 0 = 모름 */
 #define VS_AUTO 0x7FFF
 static int vs_off = VS_AUTO;        /* 맞추기 시점 옮김 (줄). + = 새 프레임 시작 뒤, - = 앞. 기본(자동) = 전체 줄의 8.5% 앞 (AMD 노트북 실기: -96/1125) */
@@ -156,7 +158,7 @@ static int vs_wait(void)
     while (!(inb((uint16_t)vs_port) & 8)) if (rdtsc() - t0 > lim) return 0;  /* 다음 귀선 시작까지 */
     return 1;
 }
-static void plat_vs_adj(int d) { if (vs_off == VS_AUTO) vs_off = vs_effoff(); vs_off += d; if (vs_off > 400) vs_off = 400; if (vs_off < -400) vs_off = -400; }
+static int plat_vs_adj(int d, int set) { if (set) { vs_off = d; if (vs_off == VS_AUTO) return vs_off; } else { if (vs_off == VS_AUTO) vs_off = vs_effoff(); vs_off += d; } if (vs_off > 400) vs_off = 400; if (vs_off < -400) vs_off = -400; return vs_off; }
 static uint32_t vs_per[8]; static int vs_pern;   /* 마지막 주기 확인에서 잰 간격(ms) — 실패 원인 기록 */
 static int vs_period_ok(void)
 {
@@ -478,6 +480,21 @@ static void rescan_volumes(void)
         if (system_vol_present()) return;
     }
     g_rescan_fail++;
+}
+
+/* 5.3.49: 사용자가 직접 요청(F5)한 다시 찾기 — 펌웨어가 새로 꽂은 USB 를 잡을 때까지 더 오래(최대 약 4초) 기다림 */
+static void plat_usb_rescan(void)
+{
+    int before = nvols;
+    connect_storage(); refresh_volumes();
+    for (int t = 0; t < 10; t++) {
+        if (system_vol_present() && nvols >= before && t >= 1) break;
+        connect_usb_bus();
+        BS->Stall(400000);
+        connect_storage();
+        refresh_volumes();
+    }
+    g_rescan_n++;
 }
 
 static EFI_FILE_PROTOCOL *open_volume_once(int v)
@@ -921,11 +938,8 @@ static int plat_grow_run(void (*progress)(int, const char *), char *err, int err
         put_line(err, "not enough memory"); (void)errlen; return -1;
     }
     GrowIO io = { disk_rd, disk_wr, 0, boot_disk->Media->LastBlock + 1, (uint8_t *)(uintptr_t)mem, 80u << 20, progress };
-    /* 확장하기 전에 펌웨어 FAT 드라이버를 이 파티션에서 뗀다. 드라이버는 옛 FAT·FSInfo·폴더를 캐시로 갖고 있다가
-     * 닫을 때·볼륨 상태를 고칠 때 직접 USB 에 다시 쓰는데, 확장 뒤에 그러면 새 파일 시스템이 옛 내용으로 덮여 Windows 가 손상으로 본다
-     * (실기 덤프로 확인: FAT 첫 섹터·FSInfo 가 옛 값). 떼는 순간 캐시를 먼저 비우고, 그 뒤에는 쓸 드라이버가 없다.
-     * 확장 코드는 디스크 전체 Block I/O 만 쓰므로 영향 없음 (이 USB 의 파일은 확장 뒤 다시 시작할 때까지 못 읽음) */
-    BS->DisconnectController(boot_dev, 0, 0);
+    /* 5.3.8: 기존 파티션은 건드리지 않고 남은 공간에 새 파티션을 만들어 복사한 뒤 MBR 만 바꾸므로, 펌웨어 FAT 드라이버를 떼지 않는다
+     * (예전엔 같은 자리에서 다시 써서 펌웨어가 기억하던 옛 FAT 가 새 파일 시스템을 덮었음). 디스크 전체 Block I/O 만 씀 */
     int r = usbgrow_run(&io, err, errlen);
     boot_disk->FlushBlocks(boot_disk);
     return r;
@@ -1169,24 +1183,42 @@ int i2c_tp_present(void);
 int i2c_tp_off(void);
 void i2c_tp_set_off(int off);
 int i2c_tp_read(int *dx, int *dy, int *dz, int *btn);
-/* 3.0: USB 마우스 + PS/2 마우스를 합침 */
+/* USB 밖의 포인터 장치 표 (5.3.42): PS/2 마우스·터치패드, I2C 터치패드. 새 장치 = 함수 몇 개 + 이 표 한 줄.
+   present: 있으면 1. off/set_off: 사용 안 함 켜고 끄기. take: 쌓인 움직임을 *dx.. 에 더하고 1(있음)/0 돌려줌.
+   name: 목록 이름, lone/join: 이름 줄에 처음/뒤에 붙일 때 글자. 순서 = 목록 번호 순서 (USB 다음). */
+typedef struct { const char *name, *lone, *join; int (*present)(void); int (*off)(void); void (*set_off)(int); int (*take)(int *, int *, int *, int *); } PtrDrv;
+static int ptr_ps2_present(void) { return have_8042 && ps2_mouse_present(); }
+static int ptr_ps2_off(void) { return ps2_off; }
+static void ptr_ps2_set_off(int off) { ps2_off = off; }
+static int ptr_ps2_take(int *dx, int *dy, int *dz, int *btn)
+{
+    if (!have_8042) return 0;
+    int px = 0, py = 0, pz = 0, pb = 0;
+    int r = ps2_mouse_take(&px, &py, &pz, &pb, 0, 0);
+    *dx += px; *dy += py; *dz += pz; *btn |= pb;
+    return r;
+}
+static const PtrDrv ptr_drv[] = {
+    { "PS/2 mouse / touchpad", "PS/2 mouse",   " + PS/2", ptr_ps2_present, ptr_ps2_off, ptr_ps2_set_off, ptr_ps2_take },
+    { "I2C touchpad",          "I2C touchpad", " + I2C",  i2c_tp_present,  i2c_tp_off,  i2c_tp_set_off,  i2c_tp_read },   /* 3.8.9 */
+};
+#define PTR_N ((int)(sizeof ptr_drv / sizeof ptr_drv[0]))
+/* 3.0: USB 마우스 + 위 표의 장치들을 합침 */
 static int plat_mouse_read(int *dx, int *dy, int *dz, int *buttons, char *name, int max)
 {
-    int ux, uy, uz, ub, px = 0, py = 0, pz = 0, pb = 0;
+    int ux, uy, uz, ub;
     char un[24] = "";
-    int nu = mouse_usb_read(&ux, &uy, &uz, &ub, un, sizeof un);
-    int np = have_8042 ? ps2_mouse_take(&px, &py, &pz, &pb, 0, 0) : 0;
-    *dx = ux + px; *dy = uy + py; *dz = uz + pz; *buttons = ub | pb;
-    int ni = i2c_tp_read(dx, dy, dz, buttons);                  /* 3.8.9: I2C 터치패드 */
-    if (name && max > 0) {
-        int n = 0;
-        const char *t = un;
-        while (*t && n < max - 1) name[n++] = *t++;
-        if (np) { t = n ? " + PS/2" : "PS/2 mouse"; while (*t && n < max - 1) name[n++] = *t++; }
-        if (ni) { t = n ? " + I2C" : "I2C touchpad"; while (*t && n < max - 1) name[n++] = *t++; }
-        name[n] = 0;
+    int total = mouse_usb_read(&ux, &uy, &uz, &ub, un, sizeof un);
+    *dx = ux; *dy = uy; *dz = uz; *buttons = ub;
+    int n = 0;
+    if (name && max > 0) { const char *t = un; while (*t && n < max - 1) name[n++] = *t++; }
+    for (int i = 0; i < PTR_N; i++) {
+        int r = ptr_drv[i].take(dx, dy, dz, buttons);
+        if (r && name && max > 0) { const char *t = n ? ptr_drv[i].join : ptr_drv[i].lone; while (*t && n < max - 1) name[n++] = *t++; }
+        total += r;
     }
-    return nu + np + ni;
+    if (name && max > 0) name[n] = 0;
+    return total;
 }
 
 static int plat_mouse_dev(int n, char *name, int max, int *on)
@@ -1194,22 +1226,23 @@ static int plat_mouse_dev(int n, char *name, int max, int *on)
     int nu = mouse_usb_count();
     if (n < nu) return mouse_usb_dev(n, name, max, on);
     int k = n - nu;
-    const char *t = 0;
-    if (have_8042 && ps2_mouse_present()) { if (k == 0) { t = "PS/2 mouse / touchpad"; *on = !ps2_off; } k--; }
-    if (!t && k == 0 && i2c_tp_present()) { t = "I2C touchpad"; *on = !i2c_tp_off(); }   /* 3.8.9 */
-    if (!t) return 0;
-    int i = 0;
-    while (t[i] && i < max - 1) { name[i] = t[i]; i++; }
-    name[i] = 0;
-    return 1;
+    for (int i = 0; i < PTR_N; i++) if (ptr_drv[i].present()) {
+        if (k-- == 0) {
+            *on = !ptr_drv[i].off();
+            int j = 0;
+            for (const char *t = ptr_drv[i].name; *t && j < max - 1; t++) name[j++] = *t;
+            name[j] = 0;
+            return 1;
+        }
+    }
+    return 0;
 }
 static void plat_mouse_set(int n, int on)
 {
     int nu = mouse_usb_count();
     if (n < nu) { mouse_usb_set(n, on); return; }
     int k = n - nu;
-    if (have_8042 && ps2_mouse_present()) { if (k == 0) { ps2_off = !on; return; } k--; }
-    if (k == 0 && i2c_tp_present()) i2c_tp_set_off(!on);
+    for (int i = 0; i < PTR_N; i++) if (ptr_drv[i].present()) { if (k-- == 0) { ptr_drv[i].set_off(!on); return; } }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1265,17 +1298,24 @@ static int efi_now(int t[6])
     return 0;
 }
 
+/* PC 소리 드라이버 표 (5.3.42): 지금은 HDA 한 종류. 두 번째(USB 오디오 등)가 생기면 한 줄 더하고 snd_cur만 고르면 됨. */
+typedef struct { const char *name; void (*write)(const int16_t *, int, int, int); void (*write2)(const int16_t *, const int16_t *, int, int, int); void (*silence)(void); } SoundDrv;
+static const SoundDrv snd_drv[] = {
+    { "hda", hda_write, hda_write2, hda_silence },
+};
+static const SoundDrv *snd_cur = &snd_drv[0];
+
 static void plat_reboot(void)
 {
-    hda_silence();                                  /* 3.8.1: 다시 켜지는 동안 마지막 소리가 남지 않게 */
+    snd_cur->silence();                             /* 3.8.1: 다시 켜지는 동안 마지막 소리가 남지 않게 */
     ST->RuntimeServices->ResetSystem(0, EFI_SUCCESS, 0, 0);
     outb(0xCF9, 0x02);
     outb(0xCF9, 0x06);
     for (;;) __asm__ volatile("hlt");
 }
 
-static void plat_audio(const int16_t *s, int n, int volume, int mute) { hda_write(s, n, volume, mute); }
-static void plat_audio2(const int16_t *l, const int16_t *r, int n, int volume, int mute) { hda_write2(l, r, n, volume, mute); }
+static void plat_audio(const int16_t *s, int n, int volume, int mute) { snd_cur->write(s, n, volume, mute); }
+static void plat_audio2(const int16_t *l, const int16_t *r, int n, int volume, int mute) { snd_cur->write2(l, r, n, volume, mute); }
 
 /* 4.0.34: 화면 출력 고르기. GOP 핸들(그래픽 출력)이 여러 개면 목록에 올리고, x86msx.ini의 VideoOut=번호로 고른 것을 쓴다 (바꾸면 다시 시작해야 적용) */
 #define VO_MAX 8
@@ -1500,6 +1540,398 @@ static void rtw_bg_poll(void)
     }
 }
 
+/* 8.0.4: 코어 수 조회 결과 코드와 CPU(CPUID)가 알려 주는 코어·스레드 수 — DIAG `cpu why` 줄 (읽기 전용, 동작 안 바뀜) */
+static long g_cpu_loc_st = -1, g_cpu_get_st = -1;   /* -1 = 아직 안 불렀음 */
+static void cwhy_num(char *b, int *n, uint32_t x) { char r[12]; int k = 0; if (!x) r[k++] = '0'; while (x) { r[k++] = (char)('0' + x % 10); x /= 10; } while (k) b[(*n)++] = r[--k]; }
+static void cwhy_str(char *b, int *n, const char *s) { while (*s) b[(*n)++] = *s++; }
+static void cwhy_st(char *b, int *n, long st)
+{
+    if (st == -1) cwhy_str(b, n, "not_called");
+    else if (st == 0) cwhy_str(b, n, "ok");
+    else { cwhy_str(b, n, "err"); cwhy_num(b, n, (uint32_t)(st & 0xFF)); }   /* 14 = NOT_FOUND, 3 = UNSUPPORTED */
+}
+/* 8.0.5: ACPI MADT 로 코어 목록 읽기 (읽기 전용 — Windows·Linux 가 코어를 알아내는 표준 방식. MP Services 가 없어도 됨) */
+static const EFI_GUID FW_MP_GUID = { 0xf33261e7, 0x23cb, 0x11d5, { 0xbd, 0x5b, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 } };   /* 구형 Framework MP Services */
+static const char *madt_find(const uint8_t **madt)
+{
+    static const EFI_GUID A20 = { 0x8868e871, 0xe4f1, 0x11d3, { 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 } };
+    static const EFI_GUID A10 = { 0xeb9d2d30, 0x2d88, 0x11d3, { 0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d } };
+    typedef struct { EFI_GUID g; void *t; } CT;
+    CT *ct = (CT *)ST->ConfigurationTable; const uint8_t *rsdp = 0;
+    *madt = 0;
+    for (int pass = 0; pass < 2 && !rsdp; pass++)
+        for (UINTN i = 0; i < ST->NumberOfTableEntries; i++)
+            if (!__builtin_memcmp(&ct[i].g, pass ? &A10 : &A20, sizeof(EFI_GUID))) { rsdp = (const uint8_t *)ct[i].t; break; }
+    if (!rsdp || __builtin_memcmp(rsdp, "RSD PTR ", 8)) return "no_rsdp";
+    const uint8_t *root; int esz;
+    uint64_t x = rsdp[15] >= 2 ? *(const uint64_t *)(rsdp + 24) : 0;
+    if (x) { root = (const uint8_t *)(uintptr_t)x; esz = 8; } else { root = (const uint8_t *)(uintptr_t)*(const uint32_t *)(rsdp + 16); esz = 4; }
+    uint32_t rl = root ? *(const uint32_t *)(root + 4) : 0;
+    if (!root || rl < 36 || rl > 0x100000) return "bad_root";
+    for (uint32_t o = 36; o + (uint32_t)esz <= rl; o += (uint32_t)esz) {
+        const uint8_t *t = (const uint8_t *)(uintptr_t)(esz == 8 ? *(const uint64_t *)(root + o) : *(const uint32_t *)(root + o));
+        if (t && !__builtin_memcmp(t, "APIC", 4)) { uint32_t l = *(const uint32_t *)(t + 4); if (l >= 44 && l < 0x100000) { *madt = t; return "ok"; } }
+    }
+    return "no_madt";
+}
+static void cwhy_madt(char *b, int *n)
+{
+    const uint8_t *t; const char *r = madt_find(&t);
+    cwhy_str(b, n, " madt="); cwhy_str(b, n, r);
+    if (t) {
+        uint32_t l = *(const uint32_t *)(t + 4), tot = 0, en = 0, x2 = 0, shown = 0;
+        char ids[160]; int k = 0;
+        for (uint32_t o = 44; o + 2 <= l;) {
+            uint8_t ty = t[o], ln = t[o + 1];
+            if (ln < 2 || o + ln > l) break;
+            if ((ty == 0 && ln >= 8) || (ty == 9 && ln >= 16)) {
+                uint32_t id, fl; if (ty == 0) { id = t[o + 3]; fl = *(const uint32_t *)(t + o + 4); } else { id = *(const uint32_t *)(t + o + 4); fl = *(const uint32_t *)(t + o + 8); x2++; }
+                tot++; if (fl & 1) en++;
+                if (shown < 24 && k < 140) { if (shown) ids[k++] = ','; if (!(fl & 1)) ids[k++] = '-'; if (!id) ids[k++] = '0'; else { char d[12]; int m = 0; while (id) { d[m++] = (char)('0' + id % 10); id /= 10; } while (m) ids[k++] = d[--m]; } shown++; }
+            }
+            o += ln;
+        }
+        ids[k] = 0;
+        cwhy_str(b, n, " madt_cpus="); cwhy_num(b, n, tot);
+        cwhy_str(b, n, " enabled="); cwhy_num(b, n, en);
+        if (x2) { cwhy_str(b, n, " x2apic="); cwhy_num(b, n, x2); }
+        cwhy_str(b, n, " apic_ids="); cwhy_str(b, n, ids);
+        uint32_t a, bx, c, d; __asm__ volatile("cpuid" : "=a"(a), "=b"(bx), "=c"(c), "=d"(d) : "a"(1), "c"(0));
+        cwhy_str(b, n, " bsp="); cwhy_num(b, n, bx >> 24);
+    }
+    { void *fw = 0; long st = (long)BS->LocateProtocol((EFI_GUID *)&FW_MP_GUID, 0, &fw);   /* 있는지만 찾음 (호출 안 함) */
+      cwhy_str(b, n, " fw_mp="); cwhy_str(b, n, st == 0 && fw ? "yes" : "no"); }
+}
+static int plat_cpu_why(char *b, int max)
+{
+    int n = 0; (void)max;
+    uint32_t a, bx, c, d, maxleaf;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(bx), "=c"(c), "=d"(d) : "a"(0), "c"(0));
+    maxleaf = a;
+    cwhy_str(b, &n, "locate="); cwhy_st(b, &n, g_cpu_loc_st);
+    cwhy_str(b, &n, " get="); cwhy_st(b, &n, g_cpu_get_st);
+    cwhy_str(b, &n, " cpuid max_leaf="); cwhy_num(b, &n, maxleaf);
+    if (maxleaf >= 0xB) {
+        uint32_t smt = 0, pkg = 0;
+        __asm__ volatile("cpuid" : "=a"(a), "=b"(bx), "=c"(c), "=d"(d) : "a"(0xB), "c"(0));
+        smt = bx & 0xFFFF;
+        __asm__ volatile("cpuid" : "=a"(a), "=b"(bx), "=c"(c), "=d"(d) : "a"(0xB), "c"(1));
+        pkg = bx & 0xFFFF;
+        cwhy_str(b, &n, " threads_per_core="); cwhy_num(b, &n, smt);
+        cwhy_str(b, &n, " logical_cpus="); cwhy_num(b, &n, pkg);
+        { uint32_t a7, b7, c7, d7; int hyb = 0;   /* 8.0.6: 성능+효율 코어가 섞인 CPU(CPUID 7 EDX 15)에서는 논리÷스레드 계산이 틀려서 cores 를 안 찍음 */
+          if (maxleaf >= 7) { __asm__ volatile("cpuid" : "=a"(a7), "=b"(b7), "=c"(c7), "=d"(d7) : "a"(7), "c"(0)); hyb = (d7 >> 15) & 1; }
+          if (hyb) cwhy_str(b, &n, " hybrid=1"); else if (smt) { cwhy_str(b, &n, " cores="); cwhy_num(b, &n, pkg / smt); } }
+    } else if (maxleaf >= 1) {
+        __asm__ volatile("cpuid" : "=a"(a), "=b"(bx), "=c"(c), "=d"(d) : "a"(1), "c"(0));
+        cwhy_str(b, &n, " logical_cpus(leaf1)="); cwhy_num(b, &n, (bx >> 16) & 0xFF);
+    }
+    cwhy_madt(b, &n);   /* 8.0.5 */
+    b[n] = 0; return n;
+}
+
+/* 5.3.56: 코어 수 조회 (읽기 전용 — 다른 코어를 깨우지 않음) */
+static int plat_cpu_cores(int *total, int *enabled)
+{
+    static int done, has, tt, ee;
+    if (!done) {
+        done = 1;
+        EFI_MP_SERVICES *mp = 0;
+        g_cpu_loc_st = (long)BS->LocateProtocol(&MP_SERVICES_GUID, 0, (void **)&mp);   /* 8.0.4: 왜 못 읽었는지 DIAG 에 남김 */
+        if (g_cpu_loc_st == (long)EFI_SUCCESS && mp) {
+            UINTN t = 0, e = 0;
+            g_cpu_get_st = (long)mp->GetNumberOfProcessors(mp, &t, &e);
+            if (g_cpu_get_st == (long)EFI_SUCCESS) { has = 1; tt = (int)t; ee = (int)e; }
+        }
+    }
+    *total = tt; *enabled = ee;
+    return has;
+}
+
+/* 8.0.1 다중CPU 4-1: 다른 코어 하나에 "숫자 더하기"를 시키고 결과·걸린 시간만 기록한다. ini MpTest=1 일 때만, 켠 지 6초 뒤 한 번.
+ * MSX·소리·화면과 무관 (다른 코어는 메모리 변수만 쓰고 펌웨어 함수를 부르지 않음). 무선랜이 쓰는 코어와는 겹치지 않게 마지막 코어를 고름 */
+extern int mp_test_on, mp_pool_on;
+#define MPOOL_MWAIT 1
+#include "../src/mpool.h"
+#include "mpwake.h"
+extern int mp_wake_on, mp_wake_done, mp_auto, mp_pool_done, mp_mwait_ini;
+static MpWakeResult g_wake; static int g_wake_state;   /* 8.0.6: 0 안 함, 1 시험함 */
+#define MP_N 50000000ull
+static volatile uint64_t g_mp_sum, g_mp_cyc; static volatile int g_mp_done; static uint8_t g_mp_fin;
+static int g_mp_state, g_mp_ap = -1; static uint32_t g_mp_t0; static uint32_t g_mp_ms;   /* state: 0 안 함, 1 도는 중, 2 성공, 3 틀린 값, 4 MP 없음, 5 다른 코어 없음, 6 시작 실패, 7 응답 없음 */
+static void mp_ap_main(void *arg)
+{
+    (void)arg;
+    uint64_t t0 = rdtsc(); volatile uint64_t s = 0;
+    for (uint64_t i = 0; i < MP_N; i++) s += i;
+    g_mp_sum = s; g_mp_cyc = rdtsc() - t0; g_mp_done = 1;
+}
+/* 8.0.9: 직접 깨운 일꾼 (MP Services 가 없는 PC 용). 아래 함수들은 pool_poll 이 쓰므로 앞에 둠 */
+static MpWorkerSet g_wset; static MpWCtx g_wctx[MP_MAXW]; static int g_pool_direct, g_pool_direct_started;
+/* 8.0.10: 일꾼 스택은 메인 프로그램 이미지 안의 고정 메모리 (메인 코어가 확실히 쓰는 사상 안), 단계 표시는 DIAG 에 남김 */
+static uint8_t g_wstack[MP_MAXW][16384] __attribute__((aligned(4096)));
+static volatile uint8_t g_wstage[MP_MAXW]; static int g_pool_launch, g_pl_i, g_pl_n; static uint32_t g_pl_ids[MP_MAXW]; static uint32_t g_wapic[MP_MAXW]; static uint64_t g_wbeat_snap[MP_MAXW]; static int g_wbeat_taken;
+static int g_pool_live;              /* 8.0.23: 1 = 일꾼들이 살아서 일을 기다림 */
+static void pool_snap(void) { if (g_wbeat_taken) return; g_wbeat_taken = 1; for (int i = 0; i < MP_MAXW; i++) g_wbeat_snap[i] = mp_slots[i].beat; }
+static void pool_ap_entry(void *arg)
+{
+    int i = (int)((MpSlot *)arg - mp_slots); if (i >= 0 && i < MP_MAXW) g_wstage[i] = 3;   /* 3 = 일꾼 코어에서 C 함수에 들어옴 */
+    mpool_worker(arg);
+}
+static int wake_allowed(void);
+static int madt_aps(uint32_t *ids, int max, uint32_t *bsp, int *x2);
+/* ---- 8.0.1 4-2a 일꾼 풀 시험: ini MpPool=1 이면 켠 지 8초 뒤, 메인을 뺀 모든 코어(무선랜이 쓰는 코어 하나는 제외)를 일꾼으로 띄우고
+ * 일꾼마다 "숫자 더하기" 한 건씩을 올려 합계가 맞는지·병렬로 얼마나 빨랐는지 재고 일꾼을 모두 멈춘다 (소리·화면·MSX 와 무관) */
+typedef struct { uint64_t a, b, out, cyc; } PoolJob;
+static void pool_job(void *p)
+{
+    PoolJob *j = (PoolJob *)p; uint64_t t0 = rdtsc(); volatile uint64_t s = 0;
+    for (uint64_t i = j->a; i < j->b; i++) s += i;
+    j->out = s; j->cyc = rdtsc() - t0;
+}
+#define POOL_N 30000000ull
+static PoolJob g_pj[MP_MAXW]; static int g_pj_id[MP_MAXW]; static uint8_t g_pool_fin[MP_MAXW];
+static int g_pool_state, g_pool_nw, g_pool_ok, g_pool_bad, g_pool_rej, g_pool_reserved; static uint32_t g_pool_t0; static uint64_t g_pool_tsc0, g_pool_wall, g_pool_cpu;
+/* state: 0 안 함, 1 일꾼 띄우는 중, 2 일 하는 중, 3 멈추는 중, 4 끝(성공), 5 일꾼 못 띄움, 6 응답 없음, 7 합계 틀림 */
+static void pool_poll(void)
+{
+    if (g_pool_launch) {                                                      /* 8.0.18: 코어를 프레임마다 하나씩 띄우는 중 */
+        if (g_pl_i < g_pl_n) {
+            int k = g_pool_direct_started;
+            g_wstage[k] = 0; g_wapic[k] = g_pl_ids[g_pl_i];
+            g_wctx[k].stack_top = (uint64_t)(uintptr_t)&g_wstack[k][16384]; g_wctx[k].entry = (uint64_t)(uintptr_t)pool_ap_entry; g_wctx[k].arg = (uint64_t)(uintptr_t)&mp_slots[k];
+            if (mpworkers_start(&g_wset, g_pl_ids[g_pl_i], &g_wctx[k]) == 0) { g_pool_direct_started = ++k; g_pool_nw = k; }
+            g_pl_i++;
+            return;
+        }
+        g_pool_launch = 0;
+        if (!g_pool_nw) { mpworkers_close(&g_wset); g_pool_state = 5; return; }
+        g_pool_t0 = plat_ms(); return;
+    }
+    if (g_pool_state == 0 && (mp_pool_on || (mp_auto && wake_allowed())) && plat_ms() > 8000 && g_rtw_state != 1) {   /* 8.0.17: 허용 PC 는 켤 때 스스로 일꾼 시험 (MpAuto=0 이면 끔) */
+        EFI_MP_SERVICES *mp = 0; g_pool_state = 5;
+        if (BS->LocateProtocol(&MP_SERVICES_GUID, 0, (void **)&mp) != EFI_SUCCESS || !mp) {
+            /* 8.0.9: 펌웨어에 MP Services 가 없으면 APIC 로 직접 깨운 코어를 일꾼으로 (허용 PC 또는 MpWake=1 일 때만) */
+            if (!(mp_wake_on || (mp_auto && wake_allowed()))) return;
+            if (g_wake_state == 0) { g_pool_state = 0; return; }   /* 8.0.16: 깨우기 시험이 먼저 끝나야 함 (시험이 일꾼 코어에 INIT 을 또 보내 죽이던 것) */
+            uint32_t ids[MP_MAXW], bsp = 0; int x2 = 0; int na = madt_aps(ids, MP_MAXW, &bsp, &x2);
+            if (na <= 0) return;
+            uint64_t cr3, pat = rdmsr(0x277); __asm__ volatile("mov %%cr3,%0" : "=r"(cr3));
+            if (mpworkers_open(BS, &g_wset, x2, rdmsr(0x1B) & 0x000FFFFFFFFFF000ull, cr3, pat)) return;
+            { extern const void *msx_midi_job_id; mp_role1 = msx_midi_job_id; }   /* 8.0.34 */
+            mpool_prepare(0); g_pool_direct = 1;
+            g_pl_n = 0; for (int i = na - 1; i >= 0 && g_pl_n < MP_MAXW; i--) g_pl_ids[g_pl_n++] = ids[i];
+            { uint32_t a_ = 1, b_, c_, d_; __asm__ volatile("cpuid" : "+a"(a_), "=b"(b_), "=c"(c_), "=d"(d_) : "c"(0)); mp_mwait_ok = mp_mwait_ini && ((c_ >> 3) & 1); }   /* 8.0.23: CPUID.1:ECX 비트 3 = MONITOR/MWAIT */
+            g_pl_i = 0; g_pool_nw = 0; g_pool_direct_started = 0; g_pool_launch = 1; g_pool_state = 1; return;   /* 8.0.18: 한 프레임에 코어 하나씩 띄움 (한꺼번에 띄우면 약 60 ms 멈춤) */
+        }
+        UINTN tot = 0, en = 0, me = 0; mp->GetNumberOfProcessors(mp, &tot, &en); mp->WhoAmI(mp, &me);
+        int rsv = -1; if (g_wifi_cfg) { for (UINTN i = 0; i < tot; i++) if (i != me) { rsv = (int)i; break; } }   /* 무선랜 코어는 건드리지 않음 */
+        mpool_prepare(0); int k = 0;
+        for (UINTN i = 0; i < tot && k < MP_MAXW; i++) {
+            if (i == me || (int)i == rsv) continue;
+            void *ev = 0; BS->CreateEvent(0, 0, 0, 0, &ev); if (!ev) continue;
+            g_pool_fin[k] = 0;
+            if (mp->StartupThisAP(mp, mpool_worker, i, ev, 0, &mp_slots[k], &g_pool_fin[k]) == EFI_SUCCESS) k++;
+        }
+        g_pool_nw = k; g_pool_reserved = rsv >= 0;
+        if (!k) return;
+        g_pool_t0 = plat_ms(); g_pool_state = 1; return;
+    }
+    if (g_pool_state == 1) {
+        if (mpool_idle() >= g_pool_nw) {
+            g_pool_tsc0 = rdtsc();
+            for (int i = 0; i < g_pool_nw; i++) { g_pj[i].a = 1000ull * (uint64_t)i; g_pj[i].b = g_pj[i].a + POOL_N; g_pj[i].out = g_pj[i].cyc = 0; g_pj_id[i] = mpool_submit(pool_job, &g_pj[i]); }
+            { PoolJob x = { 0, 1, 0, 0 }; if (mpool_submit(pool_job, &x) < 0) g_pool_rej++; }   /* 모두 바쁠 때 거절하는지 */
+            g_pool_state = 2; g_pool_t0 = plat_ms();
+        } else if (plat_ms() - g_pool_t0 > 3000) { g_pool_state = 6; pool_snap(); mpool_stop_all(); }
+    } else if (g_pool_state == 2) {
+        int all = 1;
+        for (int i = 0; i < g_pool_nw; i++) if (g_pj_id[i] >= 0 && __atomic_load_n(&mp_slots[g_pj_id[i]].state, __ATOMIC_ACQUIRE) != MPS_DONE) all = 0;   /* 일꾼이 DONE 으로 바꾼 뒤에야 결과를 읽음 */
+        if (all) {
+            g_pool_wall = rdtsc() - g_pool_tsc0; g_pool_cpu = 0;
+            for (int i = 0; i < g_pool_nw; i++) {
+                uint64_t a = g_pj[i].a, b = g_pj[i].b;
+                if (g_pj_id[i] >= 0 && g_pj[i].out == (a + b - 1) * (b - a) / 2) g_pool_ok++; else g_pool_bad++;
+                g_pool_cpu += g_pj[i].cyc;
+            }
+            for (int i = 0; i < g_pool_nw; i++) mpool_done(g_pj_id[i]);
+            { extern int mp_present, msx_mp_midi; if (g_pool_direct && !g_pool_bad && g_pool_ok == g_pool_nw && (mp_present || msx_mp_midi)) { g_pool_live = 1; g_pool_state = 4; return; } }   /* 8.0.25: 나눠 받을 일이 꺼져 있으면(MpPresent=0, MpMidi=0) 전처럼 일꾼을 끔 */   /* 8.0.23: 시험이 맞으면 일꾼을 끄지 않고 놀게 둠 → 화면 그리기 등을 나눠 받음 */
+            mpool_stop_all(); g_pool_state = 3; g_pool_t0 = plat_ms();
+        } else if (plat_ms() - g_pool_t0 > 20000) { g_pool_state = 6; pool_snap(); mpool_stop_all(); }
+    } else if (g_pool_state == 3) {
+        if (mpool_all_off()) { if (g_pool_direct) { int all = 1; for (int i = 0; i < g_pool_direct_started; i++) if (g_wctx[i].state != 2) all = 0; if (!all) return; mpworkers_close(&g_wset); } g_pool_state = g_pool_bad ? 7 : 4; }
+        else if (plat_ms() - g_pool_t0 > 3000) g_pool_state = 6;
+    }
+}
+/* 8.0.23: 일을 나눠 돌림. args[0] 과 일꾼이 못 받은 것은 메인이 직접, 나머지는 일꾼 코어. 모두 끝날 때까지 기다림 */
+static uint32_t g_par_calls, g_par_jobs, g_par_dead;
+static int plat_par_run(void (*fn)(void *), void **args, int n)
+{
+    int id[16], nw = 0;
+    if (n > 16) n = 16;
+    for (int i = 1; i < n; i++) { id[i] = g_pool_live ? mpool_submit(fn, args[i]) : -1; if (id[i] >= 0) nw++; }
+    fn(args[0]);
+    for (int i = 1; i < n; i++) if (id[i] < 0) fn(args[i]);
+    uint64_t t0 = rdtsc(), lim = tsc_per_ms * 200;
+    for (int i = 1; i < n; i++) if (id[i] >= 0) {
+        while (!mpool_done(id[i])) { __asm__ volatile("pause"); if (rdtsc() - t0 > lim) { g_pool_live = 0; g_par_dead++; break; } }   /* 일꾼이 200 ms 안에 안 끝내면 그 뒤로는 나누지 않음 (메인 혼자) */
+    }
+    g_par_calls++; g_par_jobs += (uint32_t)nw;
+    return nw;
+}
+/* 8.0.25: MIDI 음원 일 하나를 일꾼에게 (msx.c 의 msx_job_post/msx_job_wait) */
+static int plat_job_post(void (*fn)(void *), void *arg) { return g_pool_live ? mpool_submit(fn, arg) : -1; }
+static int plat_job_wait(int h)
+{
+    uint64_t t0 = rdtsc(), lim = tsc_per_ms * 500;
+    while (!mpool_done(h)) { __asm__ volatile("pause"); if (rdtsc() - t0 > lim) { g_par_dead++; return 0; } }   /* 0.5 초 넘게 안 끝나면 포기 (그 뒤로 메인 혼자) */
+    return 1;
+}
+static void pool_text(char *b, int *np, int max)
+{
+    static const char *const nm[] = { "off", "starting", "running", "stopping", "ok", "start_failed", "no_response", "WRONG_SUM" };
+    int n = *np; const char *s = "  pool="; while (*s && n < max - 120) b[n++] = *s++;
+    s = nm[g_pool_state]; while (*s && n < max - 100) b[n++] = *s++;
+    if (g_pool_state >= 1) {
+        uint64_t hz = tsc_hz ? tsc_hz / 1000 : 0;
+        uint64_t v[5] = { (uint64_t)g_pool_nw, (uint64_t)g_pool_ok, (uint64_t)g_pool_bad, hz ? g_pool_wall / hz : 0, hz ? g_pool_cpu / hz : 0 };
+        static const char *const lab[] = { " workers=", " ok=", " bad=", " wall_ms=", " cpu_ms=" };
+        for (int q = 0; q < 5 && n < max - 40; q++) {
+            s = lab[q]; while (*s) b[n++] = *s++;
+            char r[24]; int k = 0; uint64_t x = v[q]; if (!x) r[k++] = '0'; while (x) { r[k++] = (char)('0' + x % 10); x /= 10; } while (k) b[n++] = r[--k];
+        }
+        if (g_pool_wall) {   /* 병렬 이득 = 일꾼들이 쓴 시간의 합 / 실제로 걸린 시간 (×10 정수) */
+            uint64_t par = g_pool_cpu * 10 / g_pool_wall; s = " par="; while (*s) b[n++] = *s++;
+            b[n++] = (char)('0' + (par / 10) % 10); b[n++] = '.'; b[n++] = (char)('0' + par % 10); b[n++] = 'x';
+        }
+        s = g_pool_direct ? " via=apic" : ""; while (*s) b[n++] = *s++;
+        if (g_pool_direct) {                                                              /* 8.0.10: 일꾼마다 상태(ctx)/단계(C 함수에 들어왔나)/칸 상태 */
+            s = " ws="; while (*s) b[n++] = *s++;
+            for (int i = 0; i < g_pool_direct_started && i < 16; i++) { { uint32_t a = g_wapic[i]; if (a > 99) a = 99; if (a > 9) b[n++] = (char)('0' + a / 10); b[n++] = (char)('0' + a % 10); b[n++] = ':'; }
+                b[n++] = (char)('0' + (g_wctx[i].state == 0xDEAD ? 9 : g_wctx[i].state)); b[n++] = (char)('0' + g_wstage[i]); b[n++] = (char)('0' + mp_slots[i].state); b[n++] = ' '; }
+        }
+        if (g_pool_direct && g_wbeat_taken) {                                              /* 8.0.11: 멈춘 시점과 지금의 '기다리며 돈 횟수' (같으면 코어가 멈춘 것) */
+            s = " bt="; while (*s) b[n++] = *s++;
+            for (int i = 0; i < g_pool_direct_started && i < 16; i++) { uint64_t x = g_wbeat_snap[i], y = mp_slots[i].beat; b[n++] = x ? (y > x ? '+' : '=') : '0'; b[n++] = ' '; }
+        }
+        if (g_pool_direct) for (int i = 0; i < g_pool_direct_started; i++) {            /* 8.0.9: 일꾼이 예외로 멈췄으면 원인을 남김 */
+            if (g_wctx[i].state == 0xDEAD) {
+                const uint64_t v[3] = { g_wctx[i].fault_cr2, g_wctx[i].fault_s0, g_wctx[i].fault_s1 }; static const char *const lb[] = { " fault_cr2=", " fault_s0=", " fault_s1=" };
+                s = " w_fault"; while (*s) b[n++] = *s++;
+                { char r[4]; r[0] = (char)('0' + i / 10); r[1] = (char)('0' + i % 10); r[2] = 0; b[n++] = r[0]; b[n++] = r[1]; }
+                for (int q = 0; q < 3; q++) { s = lb[q]; while (*s) b[n++] = *s++; for (int h = 60; h >= 0; h -= 4) b[n++] = "0123456789ABCDEF"[(v[q] >> h) & 15]; }
+                break;
+            }
+        }
+        s = g_pool_reserved ? " wifi_core_reserved" : ""; while (*s) b[n++] = *s++;
+        if (g_pool_rej) { s = " full_reject_ok"; while (*s) b[n++] = *s++; }
+    }
+    b[n] = 0; *np = n;
+}
+
+/* 8.0.6: MADT 에서 깨울 코어(마지막으로 쓸 수 있는 코어, 지금 도는 코어 제외)와 지금 도는 코어의 APIC ID 를 고름. 못 고르면 0 */
+static int wake_pick(uint32_t *target, uint32_t *bsp, int *x2)
+{
+    const uint8_t *t; uint32_t a, b, c, d, mx;
+    __asm__ volatile("cpuid" : "=a"(mx), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
+    if (mx >= 0xB) { __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0xB), "c"(0)); *bsp = d; }
+    else { __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0)); *bsp = b >> 24; }
+    *x2 = (int)((rdmsr(0x1B) >> 10) & 1);
+    if (madt_find(&t)[0] != 'o' || !t) return 0;
+    uint32_t l = *(const uint32_t *)(t + 4); int found = 0;
+    for (uint32_t o = 44; o + 2 <= l;) {
+        uint8_t ty = t[o], ln = t[o + 1]; if (ln < 2 || o + ln > l) break;
+        if ((ty == 0 && ln >= 8) || (ty == 9 && ln >= 16)) {
+            uint32_t id, fl; if (ty == 0) { id = t[o + 3]; fl = *(const uint32_t *)(t + o + 4); } else { id = *(const uint32_t *)(t + o + 4); fl = *(const uint32_t *)(t + o + 8); }
+            if ((fl & 1) && id != *bsp) { *target = id; found = 1; }
+        }
+        o += ln;
+    }
+    return found;
+}
+/* 8.0.8: 허용 PC(시험에서 깨우기가 성공한 PC, kernel/pcdb.h 의 mp=1)인가. 한 번만 확인 */
+static int wake_allowed(void)
+{
+    static int v = -1;
+    if (v < 0) { uint32_t sg; const PcEntry *pe = pcdb_scan((uint32_t (*)(int, int, int, int))vs_pci_rd, &sg); v = (pe && pe->mp) ? 1 : 0; }
+    return v;
+}
+/* 8.0.31: 절전 켬 여부. ini PowerSave 0 = 끔, 1 = 켬, 2 = 자동 (기본: 시험을 마친 허용 PC 에서만 켬) */
+extern int power_save;
+static int ps_eff(void) { return power_save == 1 || (power_save == 2 && wake_allowed()); }
+/* 8.0.9: MADT 에서 쓸 수 있는 코어의 APIC ID 를 모두 모음 (지금 도는 코어 제외). 개수를 돌려줌 */
+static int madt_aps(uint32_t *ids, int max, uint32_t *bsp, int *x2)
+{
+    const uint8_t *t; uint32_t a, b, c, d, mx; int n = 0;
+    __asm__ volatile("cpuid" : "=a"(mx), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
+    if (mx >= 0xB) { __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0xB), "c"(0)); *bsp = d; }
+    else { __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0)); *bsp = b >> 24; }
+    *x2 = (int)((rdmsr(0x1B) >> 10) & 1);
+    if (madt_find(&t)[0] != 'o' || !t) return 0;
+    uint32_t l = *(const uint32_t *)(t + 4);
+    for (uint32_t o = 44; o + 2 <= l;) {
+        uint8_t ty = t[o], ln = t[o + 1]; if (ln < 2 || o + ln > l) break;
+        if ((ty == 0 && ln >= 8) || (ty == 9 && ln >= 16)) {
+            uint32_t id, fl; if (ty == 0) { id = t[o + 3]; fl = *(const uint32_t *)(t + o + 4); } else { id = *(const uint32_t *)(t + o + 4); fl = *(const uint32_t *)(t + o + 8); }
+            if ((fl & 1) && id != *bsp && n < max) ids[n++] = id;
+        }
+        o += ln;
+    }
+    return n;
+}
+static void mp_poll(void)
+{
+    pool_poll();
+    if (g_pool_state >= 4 && !mp_pool_done) mp_pool_done = 1;   /* 8.0.17: 일꾼 시험이 끝나면 DIAG.TXT 를 다시 저장 */
+    if (g_wake_state == 0 && plat_ms() > 7000 && g_rtw_state != 1 && (mp_wake_on || (mp_auto && wake_allowed()))) {   /* 8.0.6 코어 하나 깨우기 시험 (ini MpWake=1) */
+        uint32_t tg = 0, bsp = 0; int x2 = 0; g_wake_state = 1;
+        if (!wake_pick(&tg, &bsp, &x2)) { g_wake.status = MW_NOTARGET; g_wake.target = 0xFFFFFFFFu; g_wake.woke_id = 0xFFFFFFFFu; g_wake.x2apic = x2; }
+        else mpwake_run(BS, tg, x2, rdmsr(0x1B) & 0x000FFFFFFFFFF000ull, &g_wake);
+        mp_wake_done = 1;   /* 8.0.7: 시험이 끝났음을 알려 DIAG.TXT 를 다시 저장하게 함 */
+    }
+    if (g_mp_state == 0 && mp_test_on && plat_ms() > 6000 && g_rtw_state != 1) {
+        EFI_MP_SERVICES *mp = 0; g_mp_state = 6;
+        if (BS->LocateProtocol(&MP_SERVICES_GUID, 0, (void **)&mp) != EFI_SUCCESS || !mp) { g_mp_state = 4; return; }
+        UINTN tot = 0, en = 0, me = 0; mp->GetNumberOfProcessors(mp, &tot, &en); mp->WhoAmI(mp, &me);
+        UINTN ap = tot; while (ap > 0) { ap--; if (ap != me) break; }
+        if (tot < 2 || ap == me) { g_mp_state = 5; return; }
+        g_mp_ap = (int)ap; g_mp_t0 = plat_ms(); g_mp_done = 0;
+        void *ev = 0; BS->CreateEvent(0, 0, 0, 0, &ev);   /* 이벤트 없이 부르면 끝날 때까지 기다리므로 반드시 이벤트를 줌 (무선랜과 같은 방식) */
+        if (!ev) return;
+        if (mp->StartupThisAP(mp, mp_ap_main, ap, ev, 0, 0, &g_mp_fin) == EFI_SUCCESS) g_mp_state = 1;
+        return;
+    }
+    if (g_mp_state == 1) {
+        if (g_mp_done) { g_mp_ms = plat_ms() - g_mp_t0; g_mp_state = (g_mp_sum == MP_N * (MP_N - 1) / 2) ? 2 : 3; }
+        else if (plat_ms() - g_mp_t0 > 20000) g_mp_state = 7;
+    }
+}
+static int st_put(char *b, int q, int max, const char *t);
+static int dec_put(char *b, int q, int max, uint64_t v);
+static int plat_mp_text(char *b, int max)
+{
+    static const char *const nm[] = { "off", "running", "ok", "WRONG_SUM", "no_mp_services", "no_other_core", "start_failed", "no_response" };
+    int n = 0; const char *s = nm[g_mp_state];
+    while (*s && n < max - 40) b[n++] = *s++;
+    if (g_mp_state >= 1 && g_mp_state <= 3 || g_mp_state == 7) {
+        const char *a = "  ap="; while (*a) b[n++] = *a++;
+        { char r[12]; int k = 0, x = g_mp_ap; if (x <= 0) r[k++] = '0'; while (x > 0) { r[k++] = (char)('0' + x % 10); x /= 10; } while (k) b[n++] = r[--k]; }
+        if (g_mp_state == 2 || g_mp_state == 3) {
+            a = "  ms="; while (*a) b[n++] = *a++;
+            { char r[12]; int k = 0; uint32_t x = g_mp_ms; if (!x) r[k++] = '0'; while (x) { r[k++] = (char)('0' + x % 10); x /= 10; } while (k) b[n++] = r[--k]; }
+        }
+    }
+    pool_text(b, &n, max);
+    n += mpwake_text(&g_wake, b + n, max - n);   /* 8.0.6 */
+    { const char *t = " efi=" MSXEMU_VERSION; while (*t && n < max - 2) b[n++] = *t++; b[n] = 0; }   /* 8.0.15: 부팅 파일(EFI) 판 — BIN 과 다르면 옛 BOOTX64.EFI 가 남은 것 */
+    { const char *a = !mp_auto ? " auto=off" : wake_allowed() ? " auto=allowed" : " auto=not_listed"; while (*a && n < max - 2) b[n++] = *a++; b[n] = 0; }   /* 8.0.8 */
+    if (n < max - 160) { char t[160]; int q = 0; q = st_put(t, q, 160, mp_mwait_ok ? " mwait=1" : " mwait=0"); q = st_put(t, q, 160, g_pool_live ? " live=1 par=" : " live=0 par="); q = dec_put(t, q, 160, g_par_calls); q = st_put(t, q, 160, "/"); q = dec_put(t, q, 160, g_par_jobs); q = st_put(t, q, 160, " dead="); q = dec_put(t, q, 160, g_par_dead); { extern uint32_t msx_mp_midi_n; q = st_put(t, q, 160, " midi="); q = dec_put(t, q, 160, msx_mp_midi_n); }
+        { static uint64_t pb, pt; uint64_t bs = 0, now = rdtsc(); for (int i = 0; i < g_pool_direct_started && i < MP_MAXW; i++) bs += mp_slots[i].beat;   /* 8.0.25: 일꾼이 깨어난 횟수/초 (MWAIT 로 잠들면 작음, 돌면 수백만) */
+          if (pt && now > pt) { q = st_put(t, q, 160, " wake/s="); q = dec_put(t, q, 160, (bs - pb) * tsc_hz / (now - pt)); } pb = bs; pt = now; }
+        for (int i = 0; t[i] && n < max - 2; i++) b[n++] = t[i]; b[n] = 0; }   /* 8.0.23: 일꾼 살아 있음, 나눠 돌린 횟수/일꾼이 한 일 수, 시간 초과 */
+    b[n] = 0; return n;
+}
+
 static int plat_video_lost(void)       /* 4.0.74: HDMI를 뽑았으면 HDMI를 끄고 내부 모니터로 (fe가 화면·소리 선택도 기본으로 되돌림) */
 {
     { static int bl; if (!bl && plat_ms() > 2500) { bl = 1;   /* 켤 때마다 한 번 무조건 남기는 부팅 로그 (로그가 하나도 없는 상태를 없애려고) */
@@ -1579,6 +2011,7 @@ static int plat_video_lost(void)       /* 4.0.74: HDMI를 뽑았으면 HDMI를 �
                 } else { g_rtw_wn += rtwdet_loglen(); rtw_log_write(); }
             } } } }
     rtw_bg_poll();
+    mp_poll();   /* 8.0.1: 다른 코어 시험 (MpTest=1 일 때만) */
     intelhdmi_tick(plat_ms());
     if (g_hd_on >= 0 && hdmi_drv[g_hd_on].lost()) {
         hdmi_drv[g_hd_on].set(0); g_hd_on = -1; g_vo_act = 0; g_hd_lostflag = 1; g_want_hda = 0; g_hd_only = 0;
@@ -1974,11 +2407,20 @@ static void usb_watch(void)
 
 /* 4.0.15: USB(파일) 접근 계측 — 진단 화면에 횟수·마지막 경로·걸린 시간(time share의 file)을 보임 */
 static uint32_t io_cnt, io_cnt_sec, io_cnt_prev;
+static uint64_t g_io_ms_tot; static uint32_t g_io_r_n, g_io_w_n;   /* 8.0.34: 시스템 보기 > 성능 (누적) */
+static uint64_t g_busy_tot;                                         /* 8.0.34: 메인 코어가 일한 TSC 누적 */
 static char io_last[60];
 void fe_klog_io(const char *path, int w, uint32_t ms);
+/* 8.0.21: 마지막 파일 쓰기(및 20 ms 넘게 걸린 읽기) 12개 — 시각(ms)·걸린 시간·경로. 소리 모자람 시각(ur)과 맞춰 보려는 진단 */
+#define IOR_N 12
+static struct { uint32_t at, ms; uint8_t w; char path[40]; } io_ring[IOR_N]; static uint32_t io_ring_n;
 static void io_note(const char *path, int w, uint64_t t0)
 {
     io_cnt++;
+    { uint64_t dt_ = rdtsc() - t0; g_io_ms_tot += dt_ / tsc_per_ms; if (w) g_io_w_n++; else g_io_r_n++; }
+    { uint32_t ms = (uint32_t)((rdtsc() - t0) / tsc_per_ms);
+      if (w || ms >= 20) { int k = (int)(io_ring_n++ % IOR_N); io_ring[k].at = plat_ms(); io_ring[k].ms = ms; io_ring[k].w = (uint8_t)w;
+          const char *q = path ? path : "?"; int l = 0; while (q[l]) l++; if (l > 39) q += l - 39; int i = 0; while (q[i] && i < 39) { io_ring[k].path[i] = q[i]; i++; } io_ring[k].path[i] = 0; } }
     fe_klog_io(path, w, (uint32_t)((rdtsc() - t0) / tsc_per_ms));
     fe_pf_add(9, rdtsc() - t0);
     int i = 0;
@@ -1990,6 +2432,47 @@ extern void fe_trace_plat(const char *what, const char *x);
 static const char *ptail(const char *p) { int l = 0; while (p && p[l]) l++; return l > 23 ? p + l - 23 : p; }
 #define IOTR_B(path) fe_trace_plat("io begin", ptail(path))
 #define IOTR_E() fe_trace_plat("io end", 0)
+/* 8.0.34: 시스템 보기 > 성능 — 읽기만 한다 (메모리 지도는 펌웨어에 물어 보고, 그 밖은 이미 세던 누적값) */
+static int plat_sys_sample(FeSysSample *o)
+{
+    for (unsigned i = 0; i < sizeof *o; i++) ((uint8_t *)o)[i] = 0;
+    { uint32_t a, b, c, d; int n = 0;
+      __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0x80000000u), "c"(0));
+      if (a >= 0x80000004u) {
+          for (uint32_t L = 0x80000002u; L <= 0x80000004u; L++) {
+              __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(L), "c"(0));
+              uint32_t r[4] = { a, b, c, d };
+              for (int k = 0; k < 4; k++) for (int j = 0; j < 4; j++) { char ch = (char)(r[k] >> (8 * j)); if (n < (int)sizeof o->cpu_name - 1 && !(ch == ' ' && (n == 0 || o->cpu_name[n - 1] == ' '))) o->cpu_name[n++] = ch; }
+          }
+          while (n > 0 && (o->cpu_name[n - 1] == ' ' || o->cpu_name[n - 1] == 0)) n--;
+          o->cpu_name[n] = 0;
+      } }
+    { int t = 0, e = 0; if (plat_cpu_cores(&t, &e)) o->logical = (uint32_t)t; }
+    o->workers = g_pool_live ? (uint32_t)g_pool_ok : 0;
+    o->tsc = rdtsc(); o->tsc_hz = tsc_hz; o->main_busy = g_busy_tot;
+    for (int i = 0; i < FE_SYS_WK && i < MP_MAXW; i++) { o->wk_busy[0][i] = mp_slots[i].busy[0]; o->wk_busy[1][i] = mp_slots[i].busy[1]; }
+    { static uint8_t mm[65536] __attribute__((aligned(16))); UINTN sz = sizeof mm, key = 0, ds = 0; uint32_t dv = 0;
+      if (BS->GetMemoryMap(&sz, (EFI_MEMORY_DESCRIPTOR *)mm, &key, &ds, &dv) == EFI_SUCCESS && ds >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
+          for (UINTN off = 0; off + ds <= sz; off += ds) {
+              EFI_MEMORY_DESCRIPTOR *m = (EFI_MEMORY_DESCRIPTOR *)(mm + off); uint64_t by = m->NumberOfPages * 4096ull;
+              switch (m->Type) {
+              case 0: case 8: case 11: case 12: case 13: break;       /* 예약·못 쓰는 곳·장치 주소: 메모리 양에 넣지 않음 */
+              case 7: o->mem_free += by; o->mem_total += by; break;      /* 비어 있음 */
+              case 1: o->mem_prog += by; o->mem_total += by; break;      /* 프로그램 (LoaderCode) */
+              case 2: o->mem_data += by; o->mem_total += by; break;      /* 작업 메모리 (LoaderData) */
+              default: o->mem_fw += by; o->mem_total += by; break;       /* 펌웨어·ACPI 등 */
+              }
+          }
+      } }
+    o->io_ms = g_io_ms_tot; o->io_r = g_io_r_n; o->io_w = g_io_w_n;
+    { uint32_t cnt = io_ring_n < IOR_N ? io_ring_n : IOR_N, first = io_ring_n - cnt; int n = 0;
+      for (uint32_t q = first + (cnt > FE_SYS_IO ? cnt - FE_SYS_IO : 0); q < io_ring_n && n < FE_SYS_IO; q++, n++) {
+          int k = (int)(q % IOR_N); o->io[n].at = io_ring[k].at; o->io[n].ms = io_ring[k].ms; o->io[n].w = io_ring[k].w;
+          for (int i = 0; i < 40; i++) { o->io[n].path[i] = io_ring[k].path[i]; if (!io_ring[k].path[i]) break; }
+      }
+      o->io_n = n; }
+    return 1;
+}
 static int io_list(const char *path, FeDirEntry *out, int max) { uint64_t t = rdtsc(); IOTR_B(path); fw_in_io = 1; int r = plat_list(path, out, max); fw_in_io = 0; IOTR_E(); io_note(path, 0, t); return r; }
 static int io_list_all(const char *path, FeDirEntry *out, int max) { uint64_t t = rdtsc(); IOTR_B(path); fw_in_io = 1; int r = plat_list_all(path, out, max); fw_in_io = 0; IOTR_E(); io_note(path, 0, t); return r; }
 static int io_read(const char *path, uint8_t *buf, uint32_t max, uint32_t *size) { uint64_t t = rdtsc(); IOTR_B(path); fw_in_io = 1; int r = plat_read(path, buf, max, size); fw_in_io = 0; IOTR_E(); io_note(path, 0, t); return r; }
@@ -2144,6 +2627,46 @@ static int plat_gpu_try(int run)
     if (run == 2) { ih_ready(); return intelhdmi_try(1) > 0; }   /* 4.0.58: 2 = Intel Gen9 HDMI 미러 (켜기/끄기 토글) */
     return 0;
 }
+/* 5.3.18 PowerSave: 프레임 사이에 CPU 를 쉬게 함 (기존 루틴은 그대로, ini PowerSave=1 일 때만).
+ * hlt 는 인터럽트(펌웨어 타이머)가 와야 깨므로, 먼저 타이머 간격을 재고 "남은 시간 > 간격 + 1 ms" 일 때만 쉰다.
+ * 인터럽트가 꺼져 있으면(IF=0) 절대 hlt 하지 않음 (영영 멈춤 방지) */
+extern int power_save;
+static uint64_t ps_tick_tsc; static int ps_measured; static uint32_t ps_hlts, ps_hlts_sec;
+static int ps_if_on(void) { uint64_t f; __asm__ volatile("pushfq; popq %0" : "=r"(f)); return (f >> 9) & 1; }
+static int ps_dead;                                     /* 펌웨어 타이머가 안 도는 PC: 절대 hlt 안 함 (깨워 줄 인터럽트가 없음) */
+/* 8.0.27: AMD MONITORX/MWAITX (CPUID 8000_0001 ECX 비트 29) — EBX 시간(TSC 단위)이 지나거나 지켜보는 줄이 바뀌거나 인터럽트가 오면 깸 */
+static int ps_mwx = -1; static volatile uint64_t ps_mwx_line[8] __attribute__((aligned(64)));
+static void ps_mwx_wait(uint32_t tsc_cycles)
+{
+    __asm__ volatile(".byte 0x0f, 0x01, 0xfa" : : "a"((const void *)ps_mwx_line), "c"(0), "d"(0) : "memory");                 /* monitorx */
+    __asm__ volatile(".byte 0x0f, 0x01, 0xfb" : : "a"(0), "b"(tsc_cycles), "c"(2) : "memory");                               /* mwaitx (ECX 비트 1 = 시간 제한 켬) */
+}
+static void ps_mwx_detect(void)
+{
+    uint32_t a = 0x80000000u, b, c, d; __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "=c"(c), "=d"(d) : "c"(0));
+    if (a < 0x80000001u) { ps_mwx = 0; return; }
+    a = 0x80000001u; __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "=c"(c), "=d"(d) : "c"(0));
+    ps_mwx = (c >> 29) & 1;
+}
+static int ps_can_hlt(uint64_t target)
+{
+    static uint32_t last_fw; static uint64_t last_chg;
+    uint64_t now = rdtsc();
+    if (ps_dead || !ps_if_on()) return 0;
+    if (fw_ticks != last_fw) { last_fw = fw_ticks; last_chg = now; }
+    else if (last_chg && now - last_chg > tsc_per_ms * 200) { ps_dead = 1; return 0; }   /* 0.2초 동안 타이머가 안 움직임 */
+    if (!last_chg) return 0;                            /* 타이머가 한 번이라도 움직인 뒤에만 */
+    if (!ps_measured) {                                 /* 타이머 간격 재기: hlt 3번의 가장 긴 간격 (한 번만) */
+        if (now - last_chg > tsc_per_ms * 50) return 0;  /* 방금 움직였을 때만 (안 깨어날 위험을 줄임) */
+        ps_measured = 1;
+        uint64_t worst = 0;
+        for (int i = 0; i < 3; i++) { uint64_t t0 = rdtsc(); __asm__ volatile("hlt"); uint64_t dt = rdtsc() - t0; if (dt > worst) worst = dt; }
+        ps_tick_tsc = worst > tsc_per_ms * 60 ? tsc_per_ms * 60 : worst;
+        return 0;
+    }
+    return target > now && target - now > ps_tick_tsc + tsc_per_ms;
+}
+
 static int plat_info(char (*lines)[64], int max)
 {
     int n = 0;
@@ -2156,6 +2679,15 @@ static int plat_info(char (*lines)[64], int max)
         while (*t) *q++ = *t++;
         *q = 0;
         if (n < max) put_line(lines[n++], tl);
+    }
+    if (n < max) {   /* 5.3.18 절전: 켬 여부, 타이머 간격, 초당 hlt 수 */
+        char pl[64] = "power save: "; int k = 12;
+        const char *t = !ps_eff() ? (power_save == 2 ? "off (auto: PC not listed)" : "off") : power_save == 2 && ps_mwx <= 0 && ps_measured == 0 ? "on (auto, measuring)" : ps_mwx > 0 ? "on mwaitx" : ps_dead ? "on (no timer: never sleeps)" : !ps_measured ? "on (measuring)" : "on";
+        while (*t) pl[k++] = *t++;
+        if (ps_mwx > 0) { uint32_t h = ps_hlts_sec; char nb[12]; int nn = 0; t = "  sleeps/s "; while (*t) pl[k++] = *t++; do { nb[nn++] = (char)('0' + h % 10); h /= 10; } while (h && nn < 11); while (nn) pl[k++] = nb[--nn]; }
+        else if (ps_measured && !ps_dead) { uint32_t us = (uint32_t)(ps_tick_tsc * 1000 / (tsc_per_ms ? tsc_per_ms : 1)); char nb[12]; int nn = 0; t = "  tick us "; while (*t) pl[k++] = *t++; do { nb[nn++] = (char)('0' + us % 10); us /= 10; } while (us && nn < 11); while (nn) pl[k++] = nb[--nn];
+            uint32_t h = ps_hlts_sec; nn = 0; t = "  hlt "; while (*t) pl[k++] = *t++; do { nb[nn++] = (char)('0' + h % 10); h /= 10; } while (h && nn < 11); while (nn) pl[k++] = nb[--nn]; }
+        pl[k] = 0; put_line(lines[n++], pl);
     }
     if (n < max) {   /* 파일 만들기·쓰기의 마지막 EFI 상태 (0 = 성공) — 로그가 안 생기는 원인 확인용 */
         char wl[64] = "file create/write status: "; static const char hx[] = "0123456789ABCDEF"; int k = (int)strlen(wl);
@@ -2178,6 +2710,10 @@ static int plat_info(char (*lines)[64], int max)
         *q = 0; put_line(lines[n++], il);
     }
     if (n < max && io_last[0]) put_line(lines[n++], io_last);
+    for (uint32_t q = io_ring_n > IOR_N ? io_ring_n - IOR_N : 0; q < io_ring_n && n < max; q++) {   /* 8.0.21: 최근 쓰기 (sec W ms path) */
+        int k = (int)(q % IOR_N); char il[80]; int i = 0; i = st_put(il, i, 80, "io "); i = dec_put(il, i, 80, io_ring[k].at / 1000); i = st_put(il, i, 80, "."); i = dec_put(il, i, 80, (io_ring[k].at / 100) % 10);
+        i = st_put(il, i, 80, io_ring[k].w ? " W " : " R "); i = dec_put(il, i, 80, io_ring[k].ms); i = st_put(il, i, 80, "ms "); i = st_put(il, i, 80, io_ring[k].path); put_line(lines[n++], il);
+    }
     if (n < max) {             /* 화면 모드와 EDID 크기 → PC 점 모양 (1.00 이 아니면 가로 비율을 그만큼 보정함) */
         char sl[80]; int q = 0; q = st_put(sl, q, 80, "display: "); q = dec_put(sl, q, 80, g_w); q = st_put(sl, q, 80, "x"); q = dec_put(sl, q, 80, g_h);
         if (g_mm_w && g_mm_h) {
@@ -2231,6 +2767,10 @@ static int plat_info(char (*lines)[64], int max)
         uint32_t m = vs_vmax; nn = 0; do { nb[nn++] = (char)('0' + m % 10); m /= 10; } while (m);
         while (nn) *q++ = nb[--nn];
         *q = 0; n++;
+    }
+    for (int pt = 0; pt < 3 && vs_dsl; pt++) if (n < max && cb_s[pt][4]) {   /* 8.0.21: copy beam 시작->끝 rows 위~아래 */
+        char cl[80]; int i = 0; i = st_put(cl, i, 80, pt == 2 ? "copy low beam " : pt ? "copy part beam " : "copy full beam "); i = dec_put(cl, i, 80, cb_s[pt][0]); i = st_put(cl, i, 80, "->"); i = dec_put(cl, i, 80, cb_s[pt][1]);
+        i = st_put(cl, i, 80, " rows "); i = dec_put(cl, i, 80, cb_s[pt][2]); i = st_put(cl, i, 80, "-"); i = dec_put(cl, i, 80, cb_s[pt][3]); i = st_put(cl, i, 80, " n "); i = dec_put(cl, i, 80, cb_s[pt][4]); put_line(lines[n++], cl);
     }
     for (int k = 0; k < vs_dbgn && n < max; k++) put_line(lines[n++], vs_dbg[k]);
     if (n < max) put_line(lines[n++], !have_8042 ? "8042 keyboard controller: not present"
@@ -2346,6 +2886,7 @@ int uefi_net_poll(void)   /* 프레임마다 (fe.c). 5.0.157: 무선 PC 는 lwIP
     }
     return netuefi_poll(&g_netuefi);
 }
+
 void uefi_net_rehost(NetCard *nc) { if (g_host_dirty) { g_host_dirty = 0; netcard_set_host(nc, msx_net_host); } }   /* 무선이 켜지면 카트리지의 호스트를 lwIP 쪽으로 바꿈 */
 
 EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
@@ -2536,13 +3077,14 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     uint32_t vb_size = 0;
     for (uint32_t mb = 512; mb >= 64; mb /= 2)
         if (alloc_wb((UINTN)mb * 256, &vb) == 1) { vb_size = mb << 20; break; } else if (vb) { BS->FreePages(vb, (UINTN)mb * 256); vb = 0; }   /* WB 자리만 */
-    FePlatform p = { .ms = plat_ms, .key_poll = plat_key_poll, .hp_state = hda_headphone, .snd_gpio = hda_gpio_next, .boot_failed = g_boot_failed, .boot_ok = plat_boot_ok, .reboot = plat_reboot, .poweroff = plat_poweroff, .audio = plat_audio, .audio2 = plat_audio2, .video_outputs = plat_video_outputs, .video_rescan = plat_video_rescan, .video_diag = plat_video_diag, .gpu_try = plat_gpu_try, .acpi_mode = plat_acpi_mode, .video_switch = plat_video_switch, .video_lost = plat_video_lost, .hdmi_active = plat_hdmi_active, .audio_select = plat_audio_select, .flush = plat_flush,
-                     .info = plat_info, .diag_save = plat_diag_save, .vs_adj = plat_vs_adj, .sound_diag = hda_sound_diag, .silence = hda_silence, .pad_read = pad_usb_read, .pad_view = pad_usb_view, .mouse_read = io_mouse_read, .mouse_dev = plat_mouse_dev, .mouse_set = plat_mouse_set, .midi_read = midi_usb_read, .midi_write = midi_usb_write, .mouse_driver = mouse_usb_driver, .make_file = plat_make_file, .now = efi_now, .list_dir = io_list, .list_dir_all = io_list_all, .read_file = io_read, .write_file = io_write, .write_at = io_write_at, .append = io_append, .create = plat_create, .delete_file = plat_delete,
+    FePlatform p = { .ms = plat_ms, .key_poll = plat_key_poll, .hp_state = hda_headphone, .snd_gpio = hda_gpio_next, .boot_failed = g_boot_failed, .boot_ok = plat_boot_ok, .reboot = plat_reboot, .poweroff = plat_poweroff, .audio = plat_audio, .audio2 = plat_audio2, .video_outputs = plat_video_outputs, .usb_rescan = plat_usb_rescan, .video_rescan = plat_video_rescan, .video_diag = plat_video_diag, .gpu_try = plat_gpu_try, .acpi_mode = plat_acpi_mode, .video_switch = plat_video_switch, .video_lost = plat_video_lost, .hdmi_active = plat_hdmi_active, .audio_select = plat_audio_select, .flush = plat_flush, .cpu_cores = plat_cpu_cores, .cpu_why = plat_cpu_why, .mp_text = plat_mp_text,
+                     .info = plat_info, .diag_save = plat_diag_save, .vs_adj = plat_vs_adj, .par_run = plat_par_run, .sys_sample = plat_sys_sample, .sound_diag = hda_sound_diag, .snd_stat = hda_stat, .silence = hda_silence, .pad_read = pad_usb_read, .pad_view = pad_usb_view, .mouse_read = io_mouse_read, .mouse_dev = plat_mouse_dev, .mouse_set = plat_mouse_set, .midi_read = midi_usb_read, .midi_write = midi_usb_write, .mouse_driver = mouse_usb_driver, .make_file = plat_make_file, .now = efi_now, .list_dir = io_list, .list_dir_all = io_list_all, .read_file = io_read, .write_file = io_write, .write_at = io_write_at, .append = io_append, .create = plat_create, .delete_file = plat_delete,
                      .scratch = (uint8_t *)(uintptr_t)scr, .scratch_size = scr ? 32u << 20 : 0, .vhd_mem = (uint8_t *)(uintptr_t)vh, .vhd_mem_size = vh ? 24u << 20 : 0, .xram = (uint8_t *)(uintptr_t)xr, .v9990 = (void *)(uintptr_t)v9,
                      .vbuf = vb_size ? (uint8_t *)(uintptr_t)vb : 0, .vbuf_size = vb_size,
                      .read_at = io_read_at, .hd_open = plat_hd_open, .hd_close = plat_hd_close, .hd_read = io_hd_read, .hd_write = io_hd_write, .hd_flush = plat_hd_flush,
                      .grow_query = boot_disk ? plat_grow_query : 0, .grow_run = boot_disk ? plat_grow_run : 0 };
     blog("fe_init start");
+    { extern int (*msx_job_post)(void (*)(void *), void *); extern int (*msx_job_wait)(int); msx_job_post = plat_job_post; msx_job_wait = plat_job_wait; }   /* 8.0.25 */
     fe_init(&d, &p, &m, FE_ROMS, FE_DISP_STORE " > ROMS");
     blog("fe_init done");
     fe_set_default_machine(first_machine);
@@ -2618,13 +3160,29 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         fe_pf_add(5, rdtsc() - f0);
         fe_frame();
         if (g_back) {                                   /* 바뀐 줄만 화면으로 */
-            if ((vs_port || vs_dsl) && fe_speed_pct() > 0) { uint64_t w0 = rdtsc(); int wok = vs_wait(); vs_wt += rdtsc() - w0; if (wok) vs_fail = 0; else if (++vs_fail >= 5) { vs_port = 0; vs_dsl = 0; } }   /* 5번 연속 안 오면 끔 */   /* 귀선이 안 오면 끔 */
+            if ((vs_port || vs_dsl) && fe_speed_pct() > 0) { uint64_t w0 = rdtsc();
+                if (ps_eff() && ps_mwx < 0) ps_mwx_detect();
+                if (ps_eff() && vs_last_ret && vs_hz100) {   /* 8.0.26: 다음 화면 시작 2 ms 앞까지는 hlt 로 쉼 (전엔 화면 맞추기를 기다리는 동안 메인 코어가 계속 돌아 팬이 돎). 나머지는 전처럼 줄 번호를 보며 기다림 */
+                    uint64_t per = tsc_hz * 100 / vs_hz100, tgt = vs_last_ret + per - tsc_per_ms * 2;
+                    if (ps_mwx) { while (rdtsc() + tsc_per_ms / 4 < tgt) { uint64_t left = tgt - rdtsc(); ps_mwx_wait(left > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)left); vs_hlts++; ps_hlts++; } }   /* 8.0.27: AMD MWAITX — 타이머 인터럽트 없이 정한 시간만큼 쉼 (펌웨어 타이머 10 ms 라 hlt 로는 절반만 쉬었음) */
+                    else while (ps_can_hlt(tgt)) { __asm__ volatile("hlt"); ps_hlts++; vs_hlts++; }
+                }
+                int wok = vs_wait(); vs_last_ret = rdtsc(); vs_wt += rdtsc() - w0; if (wok) vs_fail = 0; else if (++vs_fail >= 5) { vs_port = 0; vs_dsl = 0; } }   /* 5번 연속 안 오면 끔 */   /* 귀선이 안 오면 끔 */
             uint64_t b0 = rdtsc();
             FeRect rr[8];                               /* 3.5.5: 바뀐 사각형만 */
             int nr = fe_take_dirty_rects(rr, 8);
+            uint32_t cb0 = vs_dsl ? (*vs_dsl >> vs_shift) & vs_mask : 0;
             for (int k = 0; k < nr; k++) present_rect(rr[k].x0, rr[k].y0, rr[k].x1, rr[k].y1);
+            if (vs_dsl && nr) {                         /* 8.0.21: 복사하는 동안 화면 줄 번호(빔 위치)와 복사한 줄 범위 — 아래쪽 글씨가 비뚤게 보이는(찢김) 원인 확인용 */
+                uint32_t cb1 = (*vs_dsl >> vs_shift) & vs_mask, u0 = rr[0].y0, u1 = rr[0].y1;
+                for (int k = 1; k < nr; k++) { if (rr[k].y0 < u0) u0 = rr[k].y0; if (rr[k].y1 > u1) u1 = rr[k].y1; }
+                int part = u1 - u0 < g_h / 2;
+                cb_s[part][0] = cb0; cb_s[part][1] = cb1; cb_s[part][2] = u0; cb_s[part][3] = u1; cb_s[part][4]++;
+                if (part && u0 >= g_h / 2) { cb_s[2][0] = cb0; cb_s[2][1] = cb1; cb_s[2][2] = u0; cb_s[2][3] = u1; cb_s[2][4]++; }
+            }
             fe_pf_add(6, rdtsc() - b0);
         }
+        g_busy_tot += rdtsc() - f0 - vs_wt;
         busy += rdtsc() - f0 - vs_wt; vs_wt = 0;    /* 화면 맞추기 기다린 시간은 일한 시간이 아님 */
         frames++;
         { static int bl_n; if (bl_n < 121 && (++bl_n == 1)) blog("frame 1"); else if (bl_n == 120) blog("frame 120 ok"); }
@@ -2641,7 +3199,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             while (rdtsc() < target) {
                 kbc_poll();
                 input_poll(1);
-                __asm__ volatile("pause");
+                if (ps_eff() && ps_mwx > 0 && rdtsc() + tsc_per_ms / 4 < target) { uint64_t left = target - rdtsc(); ps_mwx_wait(left > tsc_per_ms ? (uint32_t)tsc_per_ms : (uint32_t)left); ps_hlts++; }   /* 8.0.27: 1 ms 씩 (키·USB 를 계속 봄) */
+                else if (ps_eff() && ps_can_hlt(target)) { __asm__ volatile("hlt"); ps_hlts++; }   /* 5.3.18: 남은 시간이 넉넉하면 펌웨어 타이머가 깨울 때까지 쉼 */
+                else __asm__ volatile("pause");
             }
             fe_pf_add(8, rdtsc() - i0); }
         }
@@ -2653,6 +3213,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             io_cnt_sec = io_cnt - io_cnt_prev; io_cnt_prev = io_cnt;
             fe_set_vsync(vs_dsl ? "GPU scanline" : vs_port ? "VGA port" : 0, (vs_dsl || vs_port) && g_back ? vs_hz100 : 0, lock_n, frames); lock_n = 0;   /* 5.2.17 */
             sec_start = now; busy = 0; frames = 0;
+            ps_hlts_sec = ps_hlts; ps_hlts = 0;              /* 5.3.18 */
             bench_tick();                                /* 5.2.28 */
             nk = kbd_usb_count();
             if (nk != last_nk) { usb_line[9] = (char)('0' + nk); fe_set_usb_text(usb_line); last_nk = nk; }

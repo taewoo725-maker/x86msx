@@ -367,11 +367,11 @@ static void mt_short_status(const MidiDev *d, int di, char *b, int max, uint32_t
         int sl = mt_slot_of(di), st = sl >= 0 ? mt_st[sl] : -8;
         if (st == 1) { copy_str(b, max, nt("롬 확인됨", "ROM OK", "ROM確認")); if (gmi_mode(di) != GM_MT32) { *col = C_WARN; copy_str(b, max, nt("다른 음원", "other synth", "別音源")); } }
         else if (st == 0) { *col = C_MUTED; copy_str(b, max, nt("읽는 중", "loading", "読込中")); }
-        else { *col = C_BAD; copy_str(b, max, st == -8 ? nt("엔진 2대까지", "2 engines max", "2台まで") : st == -1 ? nt("롬 없음", "no ROM", "ROMなし") : st == -4 ? nt("메모리 부족", "no memory", "メモリ不足") : st == -9 ? nt("이 판에 없음", "not in build", "非対応") : nt("롬 오류", "ROM error", "ROMエラー")); }
+        else { *col = C_BAD; copy_str(b, max, st == -8 ? nt("엔진 2대까지", "2 engines max", "2台まで") : st == -1 ? (rs_usb_bad ? nt("USB 못 읽음", "USB unreadable", "USB不可") : nt("롬 없음", "no ROM", "ROMなし")) : st == -4 ? nt("메모리 부족", "no memory", "メモリ不足") : st == -9 ? nt("이 판에 없음", "not in build", "非対応") : nt("롬 오류", "ROM error", "ROMエラー")); }
     } else if (d->kind == MDK_GM) { if (!d->opt && sf_state != 1) { *col = C_WARN; copy_str(b, max, nt("FM으로", "using FM", "FMで")); } }
     else if (d->kind == MDK_GS) {
         if (gmi_mode(di) == GM_SC55) copy_str(b, max, nt("롬 확인됨", "ROM OK", "ROM確認"));
-        else if (!d->opt) { *col = C_BAD; copy_str(b, max, sc55_state == -9 ? nt("이 판에 없음", "not in build", "非対応") : sc55_state == -1 ? nt("롬 없음", "no ROM", "ROMなし") : sc55_state < 0 ? nt("롬 오류", "ROM error", "ROMエラー") : nt("엔진 1대만", "1 engine only", "1台のみ")); }
+        else if (!d->opt) { *col = C_BAD; copy_str(b, max, sc55_state == -9 ? nt("이 판에 없음", "not in build", "非対応") : sc55_state == -1 ? (rs_usb_bad ? nt("USB 못 읽음", "USB unreadable", "USB不可") : nt("롬 없음", "no ROM", "ROMなし")) : sc55_state < 0 ? nt("롬 오류", "ROM error", "ROMエラー") : nt("엔진 1대만", "1 engine only", "1台のみ")); }
         else if (gmi_mode(di) != GM_SF2) { *col = C_WARN; copy_str(b, max, nt("FM으로", "using FM", "FMで")); }
     }
     else if (d->kind == MDK_USB) { if (!(midi_out_name[0] && usb_midi_ok)) { *col = C_MUTED; copy_str(b, max, nt("찾는 중", "searching", "検索中")); } else copy_str(b, max, nt("연결됨", "connected", "接続")); }
@@ -382,10 +382,12 @@ static void mt_status_text(const MidiDev *d, int di, char *b, int max, uint32_t 
     mt_short_status(d, di, b, max, col);
     if (d->kind == MDK_MT32) {
         int sl = mt_slot_of(di), st = sl >= 0 ? mt_st[sl] : -8;
-        if (st == -1) copy_str(b, max, nt("MidiSound\\MT32 에서 제어 롬과 소리 롬(PCM)을 찾지 못했습니다 — 롬 칸에서 고르거나 F5 로 다시 찾으세요", "MT-32 control/PCM ROM not found in MidiSound\\MT32 - pick one or press F5", "MidiSound\\MT32 にROMがありません — 選択またはF5"));
+        if (st == -1 && rs_usb_bad) copy_str(b, max, nt("USB 를 읽지 못했습니다 (롬 파일 문제가 아님) — USB 를 다시 꽂고 F5 를 누르세요", "Cannot read the USB (not a ROM problem) - replug it and press F5", "USBを読めません(ROMの問題ではありません) — 挿し直してF5"));
+        else if (st == -1) copy_str(b, max, nt("MidiSound\\MT32 에서 제어 롬과 소리 롬(PCM)을 찾지 못했습니다 — 롬 칸에서 고르거나 F5 로 다시 찾으세요", "MT-32 control/PCM ROM not found in MidiSound\\MT32 - pick one or press F5", "MidiSound\\MT32 にROMがありません — 選択またはF5"));
         else if (st == -8) copy_str(b, max, nt("MT-32 엔진은 두 대까지 쓸 수 있습니다", "At most two MT-32 engines", "MT-32エンジンは2台まで"));
     } else if (d->kind == MDK_GS && !d->opt && gmi_mode(di) != GM_SC55) {
-        if (sc55_state == -1) copy_str(b, max, nt("MidiSound\\SC55 에서 SC-55 롬 파일을 찾지 못했습니다", "SC-55 ROM files not found in MidiSound\\SC55", "MidiSound\\SC55 にROMがありません"));
+        if (sc55_state == -1 && rs_usb_bad) copy_str(b, max, nt("USB 를 읽지 못했습니다 (롬 파일 문제가 아님) — USB 를 다시 꽂고 F5 를 누르세요", "Cannot read the USB (not a ROM problem) - replug it and press F5", "USBを読めません(ROMの問題ではありません) — 挿し直してF5"));
+        else if (sc55_state == -1) copy_str(b, max, nt("MidiSound\\SC55 에서 SC-55 롬 파일을 찾지 못했습니다", "SC-55 ROM files not found in MidiSound\\SC55", "MidiSound\\SC55 にROMがありません"));
         else if (sc55_state >= 0) copy_str(b, max, nt("SC-55 엔진은 지금 한 대만 쓸 수 있어 다른 SC-55 가 쓰는 중입니다", "Only one SC-55 engine for now; another SC-55 is using it", "SC-55エンジンは現在1台のみ"));
     }
 }
@@ -782,7 +784,7 @@ static void miditab_key(int key)
     if (key == 0x03) { if (mt_sub != 1) mt_set_sub(1); return; }                                      /* 2 */
     if (key == 0x0F || key == 0xD1 || key == 0xC9) { mt_set_sub(!mt_sub); return; }                   /* Tab · PgDn · PgUp */        /* [ ] = 하위 탭 */
     if (key == 0x1B) { if (mt_sub != 1) mt_set_sub(1); return; }
-    if (key == 0x3F) { rs_scanned = 0; rs_scan(); toast(nt("롬 폴더를 다시 찾았습니다", "ROM folders rescanned", "ROMフォルダを再検索しました"), 0); for (int q = 0; q < MT_N; q++) if (mt_st[q] != 1) mt_st[q] = 0; if (sc55_state < 0) sc55_state = 0; return; }   /* F5 */
+    if (key == 0x3F) { if (P.usb_rescan) P.usb_rescan(); rs_scanned = 0; rs_scan(); toast(nt("롬 폴더를 다시 찾았습니다", "ROM folders rescanned", "ROMフォルダを再検索しました"), 0); for (int q = 0; q < MT_N; q++) if (mt_st[q] != 1) mt_st[q] = 0; if (sc55_state < 0) sc55_state = 0; return; }   /* F5 */
     if (mt_sub == 1) {                                  /* 공간 음향 */
         switch (key) {
         case 0xC8: if (mt_fx > 0) mt_fx--; return;

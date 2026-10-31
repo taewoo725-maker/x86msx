@@ -82,6 +82,11 @@ static int rg_disk(MSX *m, int i, const ProfileRegion *r, const RomImage *img)
         m->dos2_ps = r->slot; m->dos2_ss = r->subslot; m->dos2_tr = 1; m->rom[i] = *img;
         return 0;
     }
+    /* 5.3.59: 디스크 롬(16 KiB)이 칸(32 KiB)보다 작으면 반복(거울) 배치하지 않음 — 8000h 에 롬 머리글(AB)이 또 생겨 BIOS 가 디스크 롬을 두 번 초기화(드라이브 표 중복·HIMEM 약 3 KB 낮아짐)했고, FRAY K 가 A1WSX·CPC-400S 에서 검은 화면 */
+    if (img->data && img->size && !(img->size % 8192) && img->size < (uint32_t)r->block_count * 8192) {
+        ProfileRegion rr = *r; rr.block_count = (int)(img->size / 8192);
+        return rg_rom(m, i, &rr, img);
+    }
     return rg_rom(m, i, r, img);
 }
 

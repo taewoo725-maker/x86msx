@@ -19,7 +19,8 @@ import hashlib, os, shlex, subprocess, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RD = os.path.join(ROOT, 'tests', 'regress')
 OUT = os.path.join(ROOT, 'build', 'regress')
-MSXRUN = os.path.join(ROOT, 'build', 'msxrun')
+MSXRUN = os.environ.get('MSXRUN') or os.path.join(ROOT, 'build', 'msxrun')
+if not os.path.isabs(MSXRUN): MSXRUN = os.path.join(ROOT, MSXRUN)
 FIXED_ENV = {'RTC_NOW': '2026-01-01 00:00:00'}   # 시계 고정 (결정성)
 
 def load_cases():

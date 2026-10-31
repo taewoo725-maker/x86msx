@@ -37178,4 +37178,19 @@ This MSX games database is conceived for blueMSX, although it's 99% compatible w
 			</rom>
 		</dump>
 	</software>
+	<software>
+		<title xml:lang="en">Goonies, The (Datasoft, 128 KiB)</title>
+		<system>MSX</system>
+		<company>Datasoft</company>
+		<dump>
+			<original value="false" />
+			<megarom>
+				<type>Konami</type>
+				<hash algo="sha1">fa52666b98126662fa3127e2f3c28972ed89714b</hash>
+				<remark>
+					<text>X86MSX 8.0.33: bank register only at 7000h (Konami mapper, 6000h window). Auto-detect picked ASCII16 and showed a blank screen.</text>
+				</remark>
+			</megarom>
+		</dump>
+	</software>
 </softwaredb>

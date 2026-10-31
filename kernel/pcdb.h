@@ -7,11 +7,14 @@
 #ifndef MSX_PCDB_H
 #define MSX_PCDB_H
 #include <stdint.h>
-typedef struct { uint16_t ven, dev; uint8_t pc; const char *name; } PcEntry;
+typedef struct { uint16_t ven, dev; uint8_t pc; const char *name; uint8_t mp; } PcEntry;   /* mp=1: 8.0.8 코어 깨우기 시험이 성공한 PC (여러 코어 허용 목록) */
 static const PcEntry pcdb[] = {
-    { 0x1002, 0x1636, 1, "Lenovo V14-ARE (AMD Renoir)" },
-    { 0x8086, 0x5916, 2, "Lenovo IdeaPad 310-15IKB (Intel HD 620)" },
+    { 0x1002, 0x1636, 1, "Lenovo V14-ARE (AMD Renoir)" , 1 },
+    { 0x8086, 0x5916, 2, "Lenovo IdeaPad 310-15IKB (Intel HD 620)" , 1 },
     { 0x8086, 0x0166, 5, "Acer Aspire V5-171 (Intel HD 4000)" },
+    { 0x8086, 0x7D55, 0, "LG gram 16Z90S (Intel Meteor Lake)" , 1 },          /* 8.0.3: 2026-10-30 진단 로그에서 확인된 ID (표시용) */
+    { 0x1002, 0x15BF, 7, "GPD G1619-04 (AMD Ryzen, 이지형컴퓨터)" },
+    { 0x8086, 0x5912, 9, "ASRock H110M-HDV (Intel HD 630급, 회사 2번 데스크탑)" , 1 },
     /* #3 ASUS B860M + RTX 4060 Ti: 시험 결과가 없어 ID 미확정 — 넣지 않음 */
 };
 static inline const PcEntry *pcdb_find(uint32_t id)   /* id = PCI 설정 공간 0번 dword (장치<<16 | 제조사) */

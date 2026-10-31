@@ -77,5 +77,6 @@ int  midibus_any_soft_on(void);                             /* 켜진 소프트�
 void midibus_feed(uint8_t b, uint32_t t, int src);          /* MSX 가 보낸 바이트 하나 (본체 소리 만들 때 시각 순서로 부름). src = 보낸 단자 MDP_* */
 int  midibus_take(int i, uint8_t *out, uint32_t *out_t, int max);   /* 바깥 기계 큐 비우기 (프런트엔드) */
 int  midibus_gm_mode(const MidiDev *d);
+void midibus_replay(int i);                                 /* 5.3.49: 새로 켜진·롬을 다시 읽은 음원 i 에 곡이 보낸 설정(SysEx·음색·음량·패닝…)을 다시 보냄 */
 void midibus_sysex_done(MidiDev *d);                        /* 받은 SysEx 하나 풀기 (화면 글자·점 그림) — midibus_feed 가 부름, 시험용으로 밖에도 */                     /* 소프트웨어 기계가 바라는 gmsynth 방식 (GM_MT32 / GM_SF2 / GM_FM), 아니면 GM_OFF */
 #endif

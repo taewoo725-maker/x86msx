@@ -7,11 +7,12 @@
 #include <stdint.h>
 
 typedef struct { uint32_t cp; uint32_t off; uint8_t adv, bpr; } FontGlyph;
-typedef struct {
+typedef struct UiFont {
     int height, ascent, count;
     const FontGlyph *glyphs;
     const uint8_t *bits;
     int aa;                        /* 1이면 4비트 알파(부드러운 글꼴), 0이면 1비트 점글꼴 */
+    const struct UiFont *hd;       /* 5.3.34: 두 배 크기 글꼴 (1080p 에서 배율 2로 그릴 때 대신 씀). 없으면 0 */
 } UiFont;
 
 /* 글자 g의 r줄 c칸 진하기 0..15 (1비트 글꼴은 0 또는 15) */
@@ -28,7 +29,8 @@ extern UiFont font_btn;       /* 13 px 단추 글씨 (줄 높이 16) */
 extern UiFont font_head;      /* 16 px 굵게: 소제목 (줄 높이 21) */
 extern UiFont font_title;     /* 20 px 굵게: 창 제목 (줄 높이 21) */
 extern UiFont font_tiny;      /* 칸 안 값 글씨 (Noto 11px, 줄 높이 16). 내장은 작은 글꼴과 같음 */
-extern UiFont font_bold;      /* 굵은 글꼴: 이름 (MIDI 창 시안). 내장은 큰 글꼴과 같음 */
+extern UiFont font_bold;
+extern UiFont font_mini;      /* 9px: 아주 작은 글 (USB 확장 화면). 내장은 작은 글꼴과 같음 */      /* 굵은 글꼴: 이름 (MIDI 창 시안). 내장은 큰 글꼴과 같음 */
 
 /* UTF-8 한 글자 읽기. *s를 다음 글자로 옮긴다 */
 uint32_t utf8_next(const char **s);

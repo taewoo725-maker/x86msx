@@ -18,6 +18,7 @@
  *   줄 중간에 바꾼 레지스터는 다음 줄부터 보인다 (사이클 단위 그리기는 아님).
  */
 #include "vdp.h"
+#include "vdpk.h"
 #ifdef VDP_TRACE
 #include <stdio.h>
 #include <stdlib.h>
@@ -227,6 +228,13 @@ static void vdp_check_il(VDP *v)
     v->il = (uint8_t)il;
 }
 
+/* 5.3.43 줄 중간 동기화 (5.3.45부터 항상 켬 - 옵션 없음).
+ * 줄 중간에 모드·화면 주소·색 레지스터(R#0,2~8,12,13)를 처음 바꾼 가로 위치를 적어 두고, 그 줄은 "줄 시작 값"으로 한 번,
+ * "줄 끝 값"으로 한 번 그려 왼쪽은 앞것, 오른쪽은 뒤것을 쓴다 (두 번째 변경 이후는 뒤것으로 통일). 팔레트는 아직 줄 단위. */
+static int ml_pos = -1;
+static uint8_t ml_reg[48];
+static int ml_watch(int r) { return r == 0 || (r >= 2 && r <= 8) || r == 12 || r == 13; }
+
 static void write_reg(VDP *v, int r, uint8_t val)
 {
     if (!v->v9938) {
@@ -242,6 +250,13 @@ static void write_reg(VDP *v, int r, uint8_t val)
     if (r == 1 && ((val ^ v->reg[1]) & 0x40)) {     /* 4.0.29: 줄 중간에 표시를 켜고 끄면 그 위치부터 바뀜 (Aleste 2 상태 표시줄) */
         int x = (v->line_t * 6 - 270) / 4;
         v->de_pos = x < 0 ? 0 : x > 256 ? 256 : x;
+        /* 5.3.46: R800 은 상태 확인 반복문 때문에 쓰기 위치가 줄마다 흔들려, 줄 끝을 넘겨 끄면 다음 줄이 통째로 비었다 (Aleste 2 Morente 상태 표시줄 아랫글자 깜박임).
+           Z80 에서 쓰는 위치(다음 줄 x≈190)로 옮긴다. */
+        if (v->late_defer && !(val & 0x40)) { if (x >= 256) v->pend_off = 1; else if (x < 190) v->de_pos = 190; }
+    }
+    if (ml_pos < 0 && ml_watch(r) && v->reg[r] != val) {
+        int x = (v->line_t * 6 - 270) / 4;
+        ml_pos = x < 0 ? 0 : x > 256 ? 256 : x;
     }
     v->reg[r] = val;
     if (r == 14) v->addr = (v->addr & 0x3FFF) | ((uint32_t)(val & 7) << 14);
@@ -306,7 +321,9 @@ void vdp_line_start(VDP *v, int line)
 #ifdef VDP_TRACE
     vdp_trace_line = line;
 #endif
+    ml_pos = -1; memcpy(ml_reg, v->reg, sizeof ml_reg);
     (void)line; v->de_pos = -1; v->de_start = (uint8_t)((v->reg[1] >> 6) & 1);
+    if (v->pend_off) { v->pend_off = 0; if (!(v->reg[1] & 0x40)) { v->de_start = 1; v->de_pos = 190; } }
     if (!v->v9938) return;
     /* 가로 스크롤은 줄이 시작할 때 값으로 (프로그램은 앞 줄의 수평 귀선(HR) 동안 다음 줄 값을 쓴다) */
     v->hs25 = v->reg[25]; v->hs26 = v->reg[26]; v->hs27 = v->reg[27];
@@ -352,8 +369,6 @@ static void render_sprites(VDP *v, int y, uint8_t *line, int mode2, int g7)
     uint32_t sct = sat - 512;
     int max_per_line = mode2 ? 8 : 4, end_y = mode2 ? 216 : 208;
     int sy_line = v->v9938 ? (y + v->reg[23]) & 0xFF : y;   /* 4.0.29: V9938 스프라이트는 R#23 세로 스크롤을 따라감 (openMSX SpriteChecker와 같음). 4.0에서 잘못 뺐다가 되돌림 — MSX2 세로 스크롤 게임에서 스프라이트가 어긋남 */
-    uint8_t occupied[256 + 64];
-    memset(occupied, 0, sizeof occupied);
     int list[32], n = 0, over = 0;
     for (int i = 0; i < 32; i++) {
         int sy = VR(sat + i * 4);
@@ -368,6 +383,9 @@ static void render_sprites(VDP *v, int y, uint8_t *line, int mode2, int g7)
         list[n++] = i;
     }
     if (!over && !(v->stat[0] & 0x40)) v->stat[0] = (uint8_t)((v->stat[0] & 0xE0) | (n ? list[n - 1] : 0));
+    if (!n) return;                                 /* 5.3.38: 이 줄에 스프라이트가 없으면 아래 배열 5개(약 1.6 KB)를 비우고 도는 일을 통째로 건너뜀 (그림·충돌·상태는 위에서 이미 끝남) */
+    uint8_t occupied[256 + 64];
+    memset(occupied, 0, sizeof occupied);
     static const uint8_t g7spr[16] = { 0x00, 0x02, 0x10, 0x12, 0x80, 0x82, 0x90, 0x92, 0x49, 0x0B, 0x59, 0x4B, 0xD9, 0xCB, 0xDB, 0xFF };
     /* 4.0: 앞 번호(우선순위 높은 것)부터 그림. CC(비트 6) 스프라이트는 바로 앞 번호 스프라이트와 겹친 점에서 색을 OR한다 (MSX2 스프라이트 색 합치기) */
     uint8_t acc[256 + 64], shown[256 + 64], chainvis[256 + 64];
@@ -410,9 +428,13 @@ static void render_sprites(VDP *v, int y, uint8_t *line, int mode2, int g7)
     }
 }
 
-static void put256(uint8_t *o, const uint8_t *l256)
+static void put256(uint8_t *o, const uint8_t *l256) { vdpk->put256(o, l256); }   /* 7단계: C판·어셈블러판 함수표 (src/vdpk.h) */
+
+/* 점 번호 → 색 번호 표 (col0b 를 16개 한 번에). 4비트 모드 펼치기 커널이 씀 */
+static void colmap16(const VDP *v, uint8_t bd, uint8_t *m)
 {
-    for (int x = 0; x < 256; x++) o[2 * x] = o[2 * x + 1] = l256[x];
+    for (int i = 0; i < 16; i++) m[i] = (uint8_t)i;
+    m[0] = col0b(v, bd, 0);
 }
 
 /* V9958 가로 스크롤 (R#26 8점 단위, R#27 1점 단위): 배경 줄을 돌리고, MSK면 왼쪽 8점을 테두리로 */
@@ -512,12 +534,14 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
         nt = v->v9938 ? ((uint32_t)v->reg[2] << 10) & 0x1FC00 : (uint32_t)(v->reg[2] & 0x0F) << 10;
         uint32_t pg = v->v9938 ? ((uint32_t)v->reg[4] << 11) & 0x1F800 : (uint32_t)(v->reg[4] & 7) << 11;
         uint32_t ct = v->v9938 ? (((uint32_t)v->reg[10] << 14) | ((uint32_t)v->reg[3] << 6)) : (uint32_t)v->reg[3] << 6;
+        uint8_t gp[32], gf[32], gb[32];
         for (int c = 0; c < 32; c++) {
             uint8_t name = VR(nt + row * 32 + c);
-            uint8_t p = VR(pg + name * 8u + (uint32_t)yy), cb = VR(ct + (name >> 3));
-            uint8_t f = col0b(v, bd, cb >> 4), b = col0b(v, bd, cb & 15);
-            for (int k = 0; k < 8; k++) l[c * 8 + k] = (p & (0x80 >> k)) ? f : b;
+            uint8_t cb = VR(ct + (name >> 3));
+            gp[c] = VR(pg + name * 8u + (uint32_t)yy);
+            gf[c] = col0b(v, bd, cb >> 4); gb[c] = col0b(v, bd, cb & 15);
         }
+        vdpk->glyph8(l, gp, gf, gb, 32);                /* 7단계: 칸 32개 × 8점 펼치기 (C판·어셈블러판) */
         hscroll(v, l, 256, bd);
         render_sprites(v, y, l, 0, 0);
         put256(out, l);
@@ -529,12 +553,14 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
         uint32_t ct = v->v9938 ? (((uint32_t)v->reg[10] << 14) | ((uint32_t)(v->reg[3] & 0x80) << 6)) : (uint32_t)(v->reg[3] & 0x80) << 6;
         uint32_t pmask = ((uint32_t)(v->reg[4] & 3) << 8) | 0xFF, cmask = ((uint32_t)(v->reg[3] & 0x7F) << 3) | 7;
         uint32_t third = (uint32_t)(sy >> 6) << 8;
+        uint8_t gp[32], gf[32], gb[32];
         for (int c = 0; c < 32; c++) {
             uint32_t ch = VR(nt + row * 32 + c) + third;
-            uint8_t p = VR(pg + ((ch & pmask) << 3) + (uint32_t)yy), cb = VR(ct + ((ch & cmask) << 3) + (uint32_t)yy);
-            uint8_t f = col0b(v, bd, cb >> 4), b = col0b(v, bd, cb & 15);
-            for (int k = 0; k < 8; k++) l[c * 8 + k] = (p & (0x80 >> k)) ? f : b;
+            uint8_t cb = VR(ct + ((ch & cmask) << 3) + (uint32_t)yy);
+            gp[c] = VR(pg + ((ch & pmask) << 3) + (uint32_t)yy);
+            gf[c] = col0b(v, bd, cb >> 4); gb[c] = col0b(v, bd, cb & 15);
         }
+        vdpk->glyph8(l, gp, gf, gb, 32);                /* 7단계 */
         hscroll(v, l, 256, bd);
         render_sprites(v, y, l, m == M_G3, 0);
         put256(out, l);
@@ -542,11 +568,8 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
     }
     case M_G4: {                                    /* 256 x 212, 4비트 */
         uint32_t base = ((uint32_t)(v->reg[2] & 0x60) << 10) + (uint32_t)sy * 128;
-        for (int x = 0; x < 128; x++) {
-            uint8_t b = VR(base + x);
-            l[2 * x] = col0b(v, bd, b >> 4);
-            l[2 * x + 1] = col0b(v, bd, b & 15);
-        }
+        uint8_t cm[16]; colmap16(v, bd, cm);
+        vdpk->nib16(l, &v->vram[vpa(v, base)], 128, cm);     /* 줄은 128 바이트 경계라 마스크 안에서 이어짐 */
         if (sp2_on(v)) {
             uint8_t o[256];
             for (int x = 0; x < 128; x++) { uint8_t b = VR((base ^ 0x8000) + x); o[2 * x] = col0b(v, bd, b >> 4); o[2 * x + 1] = col0b(v, bd, b & 15); }
@@ -559,10 +582,8 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
     }
     case M_G5: {                                    /* 512 x 212, 2비트 */
         uint32_t base = ((uint32_t)(v->reg[2] & 0x60) << 10) + (uint32_t)sy * 128;
-        for (int x = 0; x < 128; x++) {
-            uint8_t b = VR(base + x);
-            for (int k = 0; k < 4; k++) out[4 * x + k] = col0b(v, bd, (b >> (6 - 2 * k)) & 3);
-        }
+        uint8_t cm4[4] = { col0b(v, bd, 0), col0b(v, bd, 1), col0b(v, bd, 2), col0b(v, bd, 3) };
+        vdpk->crumb4(out, &v->vram[vpa(v, base)], 128, cm4);
         if (sp2_on(v)) {
             uint8_t o[512];
             for (int x = 0; x < 128; x++) { uint8_t b = VR((base ^ 0x8000) + x); for (int k = 0; k < 4; k++) o[4 * x + k] = col0b(v, bd, (b >> (6 - 2 * k)) & 3); }
@@ -579,11 +600,8 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
     }
     case M_G6: {                                    /* 512 x 212, 4비트 */
         uint32_t base = ((uint32_t)(v->reg[2] & 0x20) << 11) + (uint32_t)sy * 256;
-        for (int x = 0; x < 256; x++) {
-            uint8_t b = VR(base + x);
-            out[2 * x] = col0b(v, bd, b >> 4);
-            out[2 * x + 1] = col0b(v, bd, b & 15);
-        }
+        uint8_t cm[16]; colmap16(v, bd, cm);
+        vdpk->nib16(out, &v->vram[vpa(v, base)], 256, cm);   /* 줄은 256 바이트 경계 */
         if (sp2_on(v)) {
             uint8_t o[512];
             for (int x = 0; x < 256; x++) { uint8_t b = VR((base ^ 0x10000) + x); o[2 * x] = col0b(v, bd, b >> 4); o[2 * x + 1] = col0b(v, bd, b & 15); }
@@ -622,6 +640,8 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
 
 void vdp_render_line(VDP *v, int y)
 {
+    static int vdpk_seen;
+    if (vdpk_seen != vdpk_asm_on + 1) { vdpk_seen = vdpk_asm_on + 1; vdpk_apply(); }   /* ini VdpAsm 이 바뀌면 표를 바꿈 */
     if (y >= VDP_H) return;
     if (y == 0) { v->pal_nsnap = 1; v->pal_cur = 0; memcpy(v->pal_snap[0], v->palette, sizeof v->pal_snap[0]); v->pal_changed = 0; }
     else if (v->pal_changed) {                            /* 4.0.30: 이 줄부터 새 팔레트 */
@@ -641,14 +661,33 @@ void vdp_render_line(VDP *v, int y)
     if (!eo) {
         int de_cur = (v->reg[1] >> 6) & 1;
         if (v->de_pos >= 0 && v->de_start != de_cur && m != M_G7) {     /* 줄 중간에 표시가 바뀜: 켜진 쪽만 그림 */
-            uint8_t r1 = v->reg[1];
+            uint8_t r1 = v->reg[1], sv[48];
+            int old = !de_cur;                            /* 5.3.43: 줄 중간에 꺼지면 보이는 왼쪽은 줄 시작 때 레지스터(R#2·R#23 등)로 (Aleste 2 Morente 판 상태 표시줄) */
+            if (old) { memcpy(sv, v->reg, sizeof sv); memcpy(v->reg, ml_reg, sizeof sv); }
             v->reg[1] = (uint8_t)(r1 | 0x40);
             render_into(v, y, v->fb[y], &v->line_direct[y]);
+            if (old) memcpy(v->reg, sv, sizeof sv);
             v->reg[1] = r1;
             int px = v->de_pos * (VDP_W / 256);
             uint8_t bd = v->line_bd[y];
             if (de_cur) memset(v->fb[y], bd, (size_t)px);                    /* 꺼져 있다가 켜짐: 앞쪽은 테두리색 */
             else memset(v->fb[y] + px, bd, (size_t)(VDP_W - px));            /* 켜져 있다가 꺼짐: 뒤쪽 */
+            return;
+        }
+        if (ml_pos > 0 && ml_pos < 256) {             /* 줄 중간에 레지스터가 바뀜: 왼쪽 앞것, 오른쪽 뒤것 */
+            uint8_t cur[48], dnew;
+            memcpy(cur, v->reg, sizeof cur);
+            memcpy(v->reg, ml_reg, sizeof cur);
+            uint8_t dold;
+            static uint8_t tmp[VDP_W];
+            render_into(v, y, tmp, &dold);                              /* 앞것 */
+            memcpy(v->reg, cur, sizeof cur);
+            render_into(v, y, v->fb[y], &dnew);                         /* 뒤것 */
+            v->line_direct[y] = dnew;
+            if (dold == dnew) {                                         /* 색 표현이 같을 때만 합침 */
+                int px = ml_pos * (VDP_W / 256);
+                memcpy(v->fb[y], tmp, (size_t)px);
+            }
             return;
         }
         render_into(v, y, v->fb[y], &v->line_direct[y]); return;
@@ -993,3 +1032,5 @@ void vdp_yjk_line(const uint8_t *raw, int yae, uint8_t rgb[256][3], uint8_t pal_
         }
     }
 }
+
+#include "vdpk.inc"

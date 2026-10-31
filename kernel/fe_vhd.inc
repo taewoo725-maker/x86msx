@@ -335,7 +335,9 @@ static const uint16_t vw_sizes[] = { 1, 2, 4, 8, 15, 16, 24, 32, 48, 64, 100, 12
 #define VW_NS ((int)(sizeof vw_sizes / sizeof vw_sizes[0]))
 static int16_t vb_mb[DIR_MAX];                          /* 목록 폴더마다 설정 파일의 용량 (0 = 하드 폴더 아님) */
 static int8_t vb_kind[DIR_MAX];
-static int vb_new, vb_field;           /* 묻기 창, 설정 창, 새로 만들기, 고른 칸 (0 이름 1 용량 2 형식) */
+static int vb_lock;                    /* 5.3.43: 1 = 쓰던 가상 하드 폴더 → 용량·형식은 못 고름 (5.3.47, 보이기만) */
+static int vb_new, vb_field;           /* 묻기 창, 설정 창, 새로 만들기, 고른 칸 (0 이름 1 용량 2 형식, 5.3.33: 3 저장 단추 4 취소 단추) */
+static int vb_btn;                      /* 5.3.33 묻기 창에서 고른 단추 (0 이 폴더로 1 신규 2 취소) */
 static char vb_name[41], vb_path[PATH_MAX_FE];
 static int vb_mbv = 32, vb_kindv = VF_AUTO; static uint32_t vb_fy;
 static void vb_dd_open(void)                            /* 형식 풀다운 (자동·DOS1·FAT12·FAT16) */
@@ -417,7 +419,7 @@ static void open_vhd_browser(int drv)
 }
 static void vb_form_open(int isnew, const char *path, int mb, int kind)
 {
-    vb_new = isnew; vb_form = 1; vb_ask = 0;
+    vb_new = isnew; vb_form = 1; vb_ask = 0; vb_lock = 0;
     vb_field = isnew ? 0 : 1;
     copy_str(vb_path, sizeof vb_path, path);
     if (isnew) copy_str(vb_name, sizeof vb_name, "NEWHARD");
@@ -465,6 +467,10 @@ static int vb_key_i(int key)
 {
     menu_dirty = 1;
     if (vb_ask) {                                       /* 하드 폴더로 만들까요? */
+        if (key == 0xCD) { if (vb_btn < 2) vb_btn++; return 1; }      /* 5.3.33: →/← 로 단추 옮기기 */
+        if (key == 0xCB) { if (vb_btn > 0) vb_btn--; return 1; }
+        if (key == 0x1C && vb_btn == 1) key = 0x31;                    /* Enter = 고른 단추 (마우스는 0x9C = 이 폴더로) */
+        else if (key == 0x1C && vb_btn == 2) key = 0x01;
         if (key == 0x31) { vb_form_open(1, cur_path, 32, VF_AUTO); return 1; }   /* N: 새 가상 하드 */
         if (key == 0x1C || key == 0x9C) { int m = 32; vb_form_open(0, vb_path, m, VF_AUTO);
             int fm = vf_folder_mb(&vhd_host, vb_path);       /* 파일보다 크게 */
@@ -476,14 +482,16 @@ static int vb_key_i(int key)
         if (dd_on) { dd_key_event(key); if (!dd_on) vb_clamp(); menu_dirty = 1; return 1; }   /* 5.0.38 */
         switch (key) {
         case 0x01: vb_form = 0; return 1;                       /* 취소 */
-        case 0x1C: if (vb_field == 2) { vb_dd_open(); return 1; } vb_save(); return 1;   /* 형식 줄에서 Enter = 풀다운 */
+        case 0x1C: if (vb_field == 2) { vb_dd_open(); return 1; } if (vb_field == 4) { vb_form = 0; return 1; } vb_save(); return 1;   /* 형식 줄에서 Enter = 풀다운, 5.3.33 취소 단추 = 닫기 */
         case 0x9C: vb_save(); return 1;                         /* 저장 (단추) */
-        case 0xC8: if (vb_field > (vb_new ? 0 : 1)) vb_field--; return 1;
-        case 0xD0: case 0x0F: vb_field = vb_field >= 2 ? (vb_new ? 0 : 1) : vb_field + 1; return 1;
+        case 0xC8: if (vb_field == 4) vb_field = 3; else if (vb_field > (vb_new ? 0 : vb_lock ? 3 : 1)) vb_field--; return 1;
+        case 0xD0: if (vb_field < 3) vb_field++; return 1;                      /* 5.3.33: 아래로 [저장]까지 */
+        case 0x0F: vb_field = vb_field >= 4 ? (vb_new ? 0 : vb_lock ? 3 : 1) : vb_field + 1; return 1;   /* Tab: 한 바퀴 (단추 포함) */
         case 0xCB: case 0xCD: {
             int d = key == 0xCD ? 1 : -1;
+            if (vb_field >= 3) { vb_field = d > 0 ? 4 : 3; return 1; }       /* 단추 줄: 저장 ↔ 취소 */
             if (vb_field == 2) { }
-            else if (vb_field == 1) {
+            else if (vb_field == 1 && !vb_lock) {
                 if (mods & 0x03) vb_mbv += d;                       /* Shift: 1 MB씩 */
                 else {
                     int k = 0;
@@ -515,9 +523,9 @@ static int vb_key_i(int key)
     case 0xD2: {                                        /* Ins */
         if (!nlist || it < 0 || !entries[it].is_dir) { vb_form_open(1, cur_path, 32, VF_AUTO); return 1; }   /* 폴더가 없거나 ".." = 새로 */
         char p[PATH_MAX_FE]; entry_path(it, p, sizeof p);
-        { int l = vb_letter_of(p); if (l >= 0 && l != vb_drv()) { toast(T(S_VHD_TAKEN), vhd_dir[l]); return 1; } }   /* 4.0.30: 다른 드라이브에 이미 잡힌 폴더는 못 씀 */
-        if (vb_mb[it]) vb_form_open(0, p, vb_mb[it], vb_kind[it]);
-        else { copy_str(vb_path, sizeof vb_path, p); vb_ask = 1; }
+        { int l = vb_letter_of(p); if (l >= 0) { toast(l != vb_drv() ? T(S_VHD_TAKEN) : T(S_VHD_CONN), vhd_dir[l]); return 1; } }   /* 4.0.30: 다른 드라이브에 이미 잡힌 폴더는 못 씀. 5.3.47: 이 드라이브에 잡힌 폴더도 Ins 로 설정 창을 열지 않음 (이미 만든 가상 하드의 형식·용량은 못 바꿈) */
+        if (vb_mb[it]) { vb_form_open(0, p, vb_mb[it], vb_kind[it]); vb_lock = 1; vb_field = 3; }   /* 5.3.43: 쓰던 폴더는 용량 고르기 없음. 5.3.47: 형식도 못 고름 → [저장]부터 (형식·용량은 새로 만드는 폴더만) */
+        else { copy_str(vb_path, sizeof vb_path, p); vb_ask = 1; vb_btn = 0; }
         return 1;
     }
     case 0xD3: {                                        /* Del: 이 드라이브 연결 끊기 */
@@ -590,12 +598,13 @@ static void vb_draw_pop(uint32_t X, uint32_t W, uint32_t py0)
         ty += LH + 10 * S;                              /* 4.0.29: [이 폴더로] [신규] [취소] 단추 (누르거나 Enter / N / Esc) */
         {
             const char *bl[3] = { T(S_VHD_BTN_THIS), T(S_VHD_BTN_NEW), T(S_VHD_CANCEL) };
-            static const int bk[3] = { 0x1C, 0x31, 0x01 };
+            static const int bk[3] = { 0x9C, 0x31, 0x01 };       /* 5.3.33: 마우스로 [이 폴더로] = 0x9C (Enter 0x1C 는 고른 단추) */
             uint32_t bh = LH + 12 * S, bx = px + 16 * S;
             for (int i = 0; i < 3; i++) {
                 uint32_t bw = text_w(bl[i]) + 32 * S;
-                ui_rframe(bx, ty, bw, bh, 7 * S, i == 0 ? C_ACC : C_LINE, i == 0 ? C_ACC : C_FIELD);
-                text_f(F, S, bx + 16 * S, ui_ty(ty, bh), bl[i], i == 0 ? 15 : C_TEXT, 0xFF, 0, 1);
+                int fo = i == vb_btn;                   /* 5.3.33: 고른 단추가 파랗게 */
+                ui_rframe(bx, ty, bw, bh, 7 * S, fo ? C_ACC : C_LINE, fo ? C_ACC : C_FIELD);
+                text_f(F, S, bx + 16 * S, ui_ty(ty, bh), bl[i], fo ? 15 : C_TEXT, 0xFF, 0, 1);
                 hit_add(hc_key, bk[i], 0, 0, (uint16_t)bk[i], bx, ty, bw, bh);
                 bx += bw + 10 * S;
             }
@@ -618,7 +627,7 @@ static void vb_draw_pop(uint32_t X, uint32_t W, uint32_t py0)
         int on = f == vb_field;
         text_f(F, S, lx, ui_ty(ty, rh), T(f == 0 ? S_VHD_NAME : f == 1 ? S_VHD_SIZE : S_VHD_FMT), on ? C_ACC : C_MUTED, 0xFF, 0, 1);
         ui_rframe(vx, ty, vw, rh, 6 * S, on ? C_ACC : C_LINE, C_FIELD);
-        if (f == 2) hit_add(hc_vbfmt, 0, 2, 0, 0, vx, ty, vw, rh); else hit_add(hc_sel, (intptr_t)&vb_field, f, 0, 0xCD, vx, ty, vw, rh);
+        if (f == 2) { if (!vb_lock) hit_add(hc_vbfmt, 0, 2, 0, 0, vx, ty, vw, rh); } else if (!(f == 1 && vb_lock)) hit_add(hc_sel, (intptr_t)&vb_field, f, 0, 0xCD, vx, ty, vw, rh);
         if (f == 2) vb_fy = ty;
         char v[72] = "";
         if (f == 0) { copy_str(v, sizeof v, vb_name); if (on) str_append(v, sizeof v, "_"); }
@@ -629,11 +638,11 @@ static void vb_draw_pop(uint32_t X, uint32_t W, uint32_t py0)
         }
         if (f == 2) {
             uint32_t ch = SLH + 6 * S, cw = ui_sw("Enter ▼") + 26 * S;
-            text_ell(vx + 12 * S, ui_ty(ty, rh), v, C_ACC, 0xFF, vw > cw + 30 * S ? vw - cw - 30 * S : vw - 24 * S);
-            if (on) ui_keychip(vx + vw - cw - 6 * S, ty + (rh - ch) / 2, ch, "Enter ▼", 0);
+            text_ell(vx + 12 * S, ui_ty(ty, rh), v, vb_lock ? C_MUTED : C_ACC, 0xFF, vw > cw + 30 * S ? vw - cw - 30 * S : vw - 24 * S);
+            if (on && !vb_lock) ui_keychip(vx + vw - cw - 6 * S, ty + (rh - ch) / 2, ch, "Enter ▼", 0);
         } else {
-            if (f && on) { text_f(F, S, vx + 10 * S, ui_ty(ty, rh), "‹", C_ACC, 0xFF, 0, 1); text_f(F, S, vx + vw - 22 * S, ui_ty(ty, rh), "›", C_ACC, 0xFF, 0, 1); }
-            text_ell(vx + (f ? 30 * S : 12 * S), ui_ty(ty, rh), v, C_TEXT, 0xFF, vw - 60 * S);
+            if (f && on && !(f == 1 && vb_lock)) { text_f(F, S, vx + 10 * S, ui_ty(ty, rh), "‹", C_ACC, 0xFF, 0, 1); text_f(F, S, vx + vw - 22 * S, ui_ty(ty, rh), "›", C_ACC, 0xFF, 0, 1); }
+            text_ell(vx + (f ? 30 * S : 12 * S), ui_ty(ty, rh), v, (f == 1 && vb_lock) ? C_MUTED : C_TEXT, 0xFF, vw - 60 * S);   /* 잠긴 용량은 흐리게 */
         }
     }
     small_ell(lx, ty, T(S_VHD_NOTE), C_MUTED, C_CARD, pw - 32 * S);
@@ -641,11 +650,11 @@ static void vb_draw_pop(uint32_t X, uint32_t W, uint32_t py0)
     /* [저장] [취소] */
     const char *bs = T(S_VHD_SAVE), *bc = T(S_VHD_CANCEL);
     uint32_t bw1 = text_w(bs) + 40 * S, bw2 = text_w(bc) + 40 * S, bh = LH + 12 * S, bx = px + pw - 16 * S - bw1 - bw2 - 10 * S;
-    ui_rframe(bx, ty, bw1, bh, 7 * S, C_ACC, C_ACC);
+    ui_rframe(bx, ty, bw1, bh, 7 * S, vb_field == 3 ? 15 : C_ACC, C_ACC);   /* 5.3.33: 고른 단추는 흰 테두리 */
     text_f(F, S, bx + 20 * S, ui_ty(ty, bh), bs, 15, 0xFF, 0, 1);
     hit_add(hc_key, 0x9C, 0, 0, 0x9C, bx, ty, bw1, bh);
-    ui_rframe(bx + bw1 + 10 * S, ty, bw2, bh, 7 * S, C_LINE, C_FIELD);
-    text_f(F, S, bx + bw1 + 30 * S, ui_ty(ty, bh), bc, C_TEXT, 0xFF, 0, 1);
+    ui_rframe(bx + bw1 + 10 * S, ty, bw2, bh, 7 * S, vb_field == 4 ? C_ACC : C_LINE, C_FIELD);
+    text_f(F, S, bx + bw1 + 30 * S, ui_ty(ty, bh), bc, vb_field == 4 ? C_ACC : C_TEXT, 0xFF, 0, 1);
     hit_add(hc_key, 0x01, 0, 0, 0x01, bx + bw1 + 10 * S, ty, bw2, bh);
     ui_cmdbar(px + S, py0 + ph - ui_cmdbar_h() - 6 * S, pw - 2 * S, T(S_VHD_FORM_KEYS));
     if (dd_on && dd_id == 3001) dd_draw_at(vx, vb_fy + rh, vw, py0 + ph);

@@ -24,3 +24,8 @@ real_a1wsx   | tests/regress/local/machines/a1wsx   | 2900 | 1200,2899 | | | --t
 real_a1gt    | tests/regress/local/machines/a1gt    | 2900 | 1200,2899 | | | --type 1300 '10 call music:screen 7:line(0,0)-(511,211),4,bf:circle(256,100),90,15:play#2,"cdefgab"\n20 goto 20\nrun\n'
 real_a1wsx_dsk | tests/regress/local/machines/a1wsx | 1200 | 1199 | DISKA=$ROOT/tests/carts/boot.dsk | |
 real_a1gt_dsk  | tests/regress/local/machines/a1gt  | 1200 | 1199 | DISKA=$ROOT/tests/carts/boot.dsk | |
+# 7단계(5.3.40): 글자 그림 커널 (SCREEN 1·2·3, 칸 8점 펼치기) — C판·어셈블러판 모두 같은 해시여야 함
+real_a1wsx_g1 | tests/regress/local/machines/a1wsx | 2400 | 2399 | | | --type 1300 '10 screen 1:color 15,4,1:for i=1 to 20:print "HELLO MSX ";i;:next:locate 3,5:print "GLYPH"\n20 goto 20\nrun\n'
+real_a1wsx_g2 | tests/regress/local/machines/a1wsx | 2400 | 2399 | | | --type 1300 '10 screen 2:open "grp:" for output as #1:preset(10,10):print #1,"Hello 123":preset(10,40):color 6:print #1,"ABC":circle(128,120),50,8\n20 goto 20\nrun\n'
+real_a1wsx_g3 | tests/regress/local/machines/a1wsx | 2400 | 2399 | | | --type 1300 '10 screen 3:for i=0 to 40:pset(i*6,i*4),i mod 15+1:next\n20 goto 20\nrun\n'
+cb2p_midline     | tests/machines/cbios2p | 700 | 650 | | tests/regress/midline.rom |

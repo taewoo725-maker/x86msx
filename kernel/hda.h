@@ -37,6 +37,7 @@ void hda_silence(void);                 /* 3.8.1: 재생 버퍼를 비우고 스
 /* 진단 정보: 찾은 HD Audio 장치와 코덱, 쓰는 출력 핀 */
 int hda_info(char (*lines)[64], int max);
 /* 소리 진단 (2.8.1): 스트림 상태, 쓰는 핀과 DAC까지 경로의 전원·앰프·EAPD (코덱에서 읽음) */
+int hda_stat(uint32_t *under, uint32_t *over, int *last_d, int *tgt);   /* 5.3.51: 소리 끊김(모자람 건너뜀·넘침) 횟수 */
 int hda_sound_diag(char (*lines)[64], int max);
 int hda_gpio_next(void);                /* 소리 진단 G 키: GPIO 값 돌리기 (-1 못 함) */
 

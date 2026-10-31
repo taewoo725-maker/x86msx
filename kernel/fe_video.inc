@@ -15,7 +15,8 @@ static uint32_t vrec_movi, vrec_sc, vrec_step;   /* 화면 줄임 배수, 몇 �
 typedef struct { uint32_t id, flags, off, size; } VrIdx;
 #define VR_IDX_BYTES ((uint32_t)VR_IDX_MAX * 16u)
 #define vrec_idx ((VrIdx *)(void *)(P.vbuf + P.vbuf_size - VR_IDX_BYTES))   /* 색인은 버퍼 맨 끝 (BSS를 줄이려고) */
-#define VR_LIMIT (P.vbuf_size - VR_IDX_BYTES)
+static uint32_t vr_pool;                           /* 8.0.35: 일꾼 압축 작업 자리 (버퍼 끝, 색인 앞). 0 = 일꾼 없이 메인이 압축 */
+#define VR_LIMIT (P.vbuf_size - VR_IDX_BYTES - vr_pool)
 static int16_t vrec_abuf[4096];
 static int vrec_an;
 #define vrec_rgb (P.scratch + (10u << 20))         /* 화면 RGB 650 KB: 작업 메모리 10 MiB~ (화면 저장·소리 녹음과 안 겹침) */
@@ -54,6 +55,72 @@ static void vrec_audio(const int16_t *s, int n)
 }
 
 /* 매 프레임 MSX가 돈 뒤: 두 프레임에 한 번 화면을 JPEG로, 쌓인 소리와 함께 */
+/* 5.3.28: 녹화 한 장을 MSX 화면(VDP 줄)만으로 채움. 화면 비율을 지켜 가운데에 놓고 나머지는 검정. 창이 열려 MSX가 멈춰 있어도 마지막 그림 */
+static void vrec_fill_msx(uint8_t *rgb, uint32_t row)
+{
+    uint32_t lines = disp_lines ? disp_lines : 192, sw = VDP_W, sh = lines * 2;
+    uint32_t dw = vrec_w, dh = (uint32_t)((uint64_t)dw * sh / sw);
+    if (dh > vrec_h) { dh = vrec_h; dw = (uint32_t)((uint64_t)dh * sw / sh); }
+    uint32_t x0 = (vrec_w - dw) / 2, y0 = (vrec_h - dh) / 2;
+    static uint8_t lb[VDP_W * 3 + 8];
+    int cur = -1;
+    memset(rgb, 0, (size_t)row * vrec_h);
+    if (run_state == RUN_STOPPED || !dw || !dh) return;
+    for (uint32_t y = 0; y < dh; y++) {
+        uint32_t sy = (uint32_t)((uint64_t)y * sh / dh);
+        if ((int)sy != cur) { int ly = (int)(sy / 2), odd = (sy & 1) && M->vdp.line_eo[ly]; shot_line(ly, odd, lb); cur = (int)sy; }
+        uint8_t *o = rgb + (y0 + y) * row + x0 * 3;
+        for (uint32_t x = 0; x < dw; x++, o += 3) { const uint8_t *q = lb + (uint32_t)((uint64_t)x * sw / dw) * 3; o[0] = q[0]; o[1] = q[1]; o[2] = q[2]; }
+    }
+}
+/* ---- 8.0.35 일꾼 압축 파이프라인 ----
+ * 전에는: 메인이 화면을 줄이고 JPEG 압축까지 한 프레임 안에 끝냄 (960x536 한 장에 약 30 ms → 그 프레임마다 MSX 가 멈춤).
+ * 지금은: 메인은 줄인 화면(RGB)과 그 사이 소리를 칸에 담아 일꾼에 올리기만 하고, 압축은 일꾼이. 결과는 올린 차례대로 AVI 에 붙임.
+ * 일꾼이 없거나(ini MpPresent/MpMidi 모두 끔·풀 없음) 자리가 모자라면 전과 똑같이 메인이 직접 (vr_pool = 0). */
+#define VR_K 3
+typedef struct { uint8_t *rgb, *out; uint32_t outmax, len; int h, an, busy; int16_t ab[4096]; } VrSlot;
+static VrSlot vr_slot[VR_K];
+static int vr_head, vr_cnt, vr_pipe;
+static uint32_t vr_rgbsz;
+extern int (*msx_job_post)(void (*fn)(void *), void *arg);
+extern int (*msx_job_wait)(int h);
+static void vrec_probe(void *a) { (void)a; }
+static void vrec_job(void *a)                           /* 일꾼에서도 도는 함수: 메모리 안에서만 계산 (파일·펌웨어 호출 없음) */
+{
+    VrSlot *t = (VrSlot *)a;
+    t->len = (uint32_t)jpeg_encode_rgb(t->rgb, (int)vrec_w, (int)vrec_h, (int)(vrec_w * 3), 80, t->out, (int)t->outmax);   /* 모자라면 0 */
+}
+/* 압축 결과 한 장 + 소리 한 덩이를 AVI 뒤에 붙임. 실패 -1 */
+static int vrec_emit(const uint8_t *jpg, uint32_t jl, const int16_t *ab, int an)
+{
+    if (!jl || vrec_chunk("00dc", jpg, jl) || vrec_chunk("01wb", (const uint8_t *)ab, (uint32_t)an * 2)) return -1;
+    vrec_frames++; vrec_samples += (uint32_t)an;
+    return 0;
+}
+/* 가장 오래된 칸 하나를 끝내고 붙임 (일꾼이 끝날 때까지 기다림). 실패하면 녹화를 멈춤 */
+static int vrec_drain_one(void)
+{
+    if (!vr_cnt) return 0;
+    VrSlot *t = &vr_slot[vr_head];
+    int ok = 1;
+    if (t->h >= 0) ok = msx_job_wait(t->h);
+    t->busy = 0; vr_head = (vr_head + 1) % VR_K; vr_cnt--;
+    if (!ok) { vr_pipe = 0; return -1; }                /* 시간 초과: 이 장은 버리고 이후는 메인이 직접 (칸은 다시 쓰지 않음) */
+    if (!t->len) {                                      /* 칸 출력 자리가 모자랐던 장: 메인이 버퍼 끝까지 써서 다시 압축 */
+        uint8_t *dst = P.vbuf + vrec_n + 8;
+        uint32_t used = vrec_n + 8 + 16u * (vrec_idx_n + 2) + 64 + (uint32_t)t->an * 2 + 16, room = VR_LIMIT > used ? VR_LIMIT - used : 0;
+        int jl = room > 1024 ? jpeg_encode_rgb(t->rgb, (int)vrec_w, (int)vrec_h, (int)(vrec_w * 3), 80, dst, (int)(room > 0x7FFFFFFF ? 0x7FFFFFFF : room)) : 0;
+        return vrec_emit(dst, (uint32_t)jl, t->ab, t->an);
+    }
+    return vrec_emit(t->out, t->len, t->ab, t->an);
+}
+static void vrec_drain_all(void)
+{
+    int bad = 0;
+    while (vr_cnt) if (vrec_drain_one()) bad = 1;
+    (void)bad;
+}
+
 static void vrec_frame(void)
 {
     if (!vrec_on) return;
@@ -61,6 +128,12 @@ static void vrec_frame(void)
     if (++vrec_tick % vrec_step) return;
     /* 보이는 화면 전체(메뉴·팝업·진단창 포함)를 vrec_sc분의 1로 줄여 담음. 한 줄은 가로 두 점 평균, 세로는 vrec_sc줄마다 한 줄 (프레임 버퍼는 읽기가 느림) */
     if (!vrec_an) { int n = (int)vrec_step * frame_samples(); if (n > 4096) n = 4096; memset(vrec_abuf, 0, (size_t)n * 2); vrec_an = n; }   /* 창이 열려 MSX가 멈추면 소리가 없음 → 그 시간만큼 무음 (소리 0개인 AVI는 윈도우 플레이어가 못 엽니다) */
+    VrSlot *slot = 0;
+    uint8_t *rgb = vrec_rgb;
+    if (vr_pipe) {
+        if (vr_cnt == VR_K && vrec_drain_one()) { vrec_stop(); return; }   /* 자리가 없으면 가장 오래된 것부터 끝냄 */
+        if (vr_pipe) { slot = &vr_slot[(vr_head + vr_cnt) % VR_K]; rgb = slot->rgb; }
+    }
     uint32_t row = vrec_w * 3, N = vrec_sc;
     static uint8_t srow[16384], vpal[256 * 3];
     if (D.bpp == 1) {
@@ -71,9 +144,11 @@ static void vrec_frame(void)
             for (int i = 0; i < 16; i++) memcpy(vpal + (UI_DAC + i) * 3, ui_rgb[i], 3);
         }
     }
+    if (!shot_full) vrec_fill_msx(rgb, row);                  /* 5.3.28 스위치 끔: MSX 화면만 */
+    else {
     int ri = D.bgr ? 2 : 0, bi = D.bgr ? 0 : 2;
     for (uint32_t y = 0; y < vrec_h; y++) {
-        uint8_t *o = vrec_rgb + y * row;
+        uint8_t *o = rgb + y * row;
         memcpy(srow, D.fb + (uintptr_t)(y * N) * D.pitch, D.w * (uint32_t)D.bpp);
         for (uint32_t x = 0; x < vrec_w; x++, o += 3) {
             uint32_t sx = x * N, sx2 = N > 1 ? sx + 1 : sx;
@@ -86,24 +161,49 @@ static void vrec_frame(void)
             }
         }
     }
+    }
+    if (slot) {
+        memcpy(slot->ab, vrec_abuf, (size_t)vrec_an * 2); slot->an = vrec_an; slot->len = 0; slot->busy = 1;
+        slot->h = msx_job_post(vrec_job, slot);          /* -1 = 놀고 있는 일꾼 없음 → 메인이 지금 직접 */
+        if (slot->h < 0) vrec_job(slot);
+        vr_cnt++; vrec_an = 0;
+        return;
+    }
     uint8_t *dst = P.vbuf + vrec_n + 8;
     uint32_t used = vrec_n + 8 + 16u * (vrec_idx_n + 2) + 64 + (uint32_t)vrec_an * 2 + 16;
     uint32_t room = VR_LIMIT > used ? VR_LIMIT - used : 0;
-    int jl = room > 1024 ? jpeg_encode_rgb(vrec_rgb, (int)vrec_w, (int)vrec_h, (int)row, 80, dst, (int)(room > 0x7FFFFFFF ? 0x7FFFFFFF : room)) : 0;
-    if (!jl || vrec_chunk("00dc", dst, (uint32_t)jl) || vrec_chunk("01wb", (const uint8_t *)vrec_abuf, (uint32_t)vrec_an * 2)) { vrec_stop(); return; }
-    vrec_frames++; vrec_samples += (uint32_t)vrec_an; vrec_an = 0;
+    int jl = room > 1024 ? jpeg_encode_rgb(rgb, (int)vrec_w, (int)vrec_h, (int)(vrec_w * 3), 80, dst, (int)(room > 0x7FFFFFFF ? 0x7FFFFFFF : room)) : 0;
+    if (vrec_emit(dst, (uint32_t)jl, vrec_abuf, vrec_an)) { vrec_stop(); return; }
+    vrec_an = 0;
 }
-
 static void vrec_start_rec(void)
 {
     bgw_finish();                                       /* 5.2.69 */
     if (!P.vbuf || P.vbuf_size < (16u << 20) || !P.scratch || P.scratch_size < (12u << 20)) { toast(T(S_VID_NOMEM), 0); return; }
     if (!P.create || !P.write_file) { toast(T(S_VID_FAIL), 0); return; }
     if (!D.fb || D.w * (uint32_t)D.bpp > 16384u) { toast(T(S_VID_FAIL), 0); return; }
+    int native = !shot_full;                            /* 8.0.35: MSX 화면만 담을 때는 영상 크기도 MSX 원본 (전에는 스위치를 꺼도 화면 크기 960x536 으로 압축해서 빨라지지 않았음) */
+    if (native) { uint32_t ln = disp_lines ? disp_lines : 192; vrec_sc = 1; vrec_w = VDP_W & ~7u; vrec_h = (ln * 2) & ~7u; }
+    else {
     vrec_sc = (D.w + 959u) / 960u; if (!vrec_sc) vrec_sc = 1;                 /* 가로 960 이하로 줄임 (1920x1080 → 960x536) */
     vrec_w = (D.w / vrec_sc) & ~7u; vrec_h = (D.h / vrec_sc) & ~7u;
+    }
     if (vrec_w < 64 || vrec_h < 64 || vrec_w * vrec_h * 3u > (2u << 20)) { toast(T(S_VID_NOMEM), 0); return; }
-    vrec_step = vrec_w * vrec_h > 200000u ? 4 : 2;                             /* 큰 화면은 15장/초 (프레임 버퍼 읽기·JPEG 부담) */
+    vr_pipe = 0; vr_pool = 0; vr_head = vr_cnt = 0;                            /* 8.0.35: 일꾼이 지금 살아 있고 자리가 넉넉하면 압축을 일꾼에 */
+    { uint8_t d[8 * 8 * 3] = { 0 }, o[2048]; jpeg_encode_rgb(d, 8, 8, 24, 80, o, (int)sizeof o); }   /* 압축표를 메인에서 먼저 만들어 둠 (일꾼들이 처음에 동시에 만들지 않게) */
+    if (msx_job_post && msx_job_wait) {
+        vr_rgbsz = (vrec_w * vrec_h * 3u + 63u) & ~63u;
+        uint32_t pool = VR_K * 2u * vr_rgbsz;
+        if (P.vbuf_size >= pool + VR_IDX_BYTES + (24u << 20)) {
+            int h = msx_job_post(vrec_probe, 0);                               /* 일꾼이 정말 돌고 있는지 한 번 확인 */
+            if (h >= 0 && msx_job_wait(h)) {
+                vr_pool = pool; vr_pipe = 1;
+                uint8_t *base = P.vbuf + P.vbuf_size - VR_IDX_BYTES - pool;
+                for (int i = 0; i < VR_K; i++) { vr_slot[i].rgb = base + (uintptr_t)i * 2u * vr_rgbsz; vr_slot[i].out = vr_slot[i].rgb + vr_rgbsz; vr_slot[i].outmax = vr_rgbsz; vr_slot[i].busy = 0; vr_slot[i].h = -1; }
+            }
+        }
+    }
+    vrec_step = (native && vr_pipe) ? 2 : vrec_w * vrec_h > 200000u ? 4 : 2;   /* 큰 화면은 15장/초 (프레임 버퍼 읽기·JPEG 부담). 일꾼이 압축하는 MSX 원본 크기는 30장/초 */
     vrec_n = VR_HDR; vrec_movi = VR_HDR - 4;            /* LIST size 'movi' 의 'movi' 자리 */
     vrec_frames = vrec_samples = vrec_idx_n = vrec_maxchunk = vrec_tick = 0; vrec_an = 0;
     vrec_on = 1; vrec_start = P.ms(); margin_bd = -1;
@@ -116,6 +216,7 @@ static void vrec_stop(void)
 {
     if (!vrec_on) return;
     vrec_on = 0; margin_bd = -1;
+    vrec_drain_all(); vr_pipe = 0;                       /* 8.0.35: 일꾼이 아직 압축 중인 장이 있으면 마저 받아서 붙임 */
     if (!vrec_frames) { toast(T(S_VID_FAIL), 0); return; }   /* 한 장도 못 담았으면 알림 (전에는 말없이 끝났음) */
     toast(T(S_VID_SAVING), 0);
     if (!P.append) { draw_toast_center(); fe_flush_now(); }   /* 한 번에 쓰는 판(레거시)만 먼저 알림을 보임 */

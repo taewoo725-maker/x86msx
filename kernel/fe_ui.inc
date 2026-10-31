@@ -274,7 +274,7 @@ static void ui_tabs(uint32_t x, uint32_t y, uint32_t w, const char *const *label
     if (RTL) {                                          /* 3.4.4: 오른쪽부터, 탭 안은 [이름][번호] */
         uint32_t tr = x + w - 14 * S;
         for (int t = 0; t < n; t++) {
-            char num[4] = { (char)(t == 9 ? '0' : '1' + t), 0 };
+            char num[4] = { (char)(t == 9 ? '0' : t == 10 ? '-' : '1' + t), 0 };
             int on = t == sel;
             uint32_t lw = text_w(labels[t]), cw = ui_sw(num) + 10 * S, tw = cw + 8 * S + lw + 20 * S;
             if (tr < x + tw) break;
@@ -296,19 +296,19 @@ static void ui_tabs(uint32_t x, uint32_t y, uint32_t w, const char *const *label
         if (pass == 1) { pad = 8 * S; gap = 2 * S; }
         if (pass == 2) small = 1;
         total = 0;
-        for (int t = 0; t < n; t++) { char num[4] = { (char)(t == 9 ? '0' : '1' + t), 0 }; total += ui_sw(num) + 10 * S + 8 * S + (small ? ui_sw(labels[t]) : text_w(labels[t])) + pad + gap; }
+        for (int t = 0; t < n; t++) { char num[4] = { (char)(t == 9 ? '0' : t == 10 ? '-' : '1' + t), 0 }; total += ui_sw(num) + 10 * S + 8 * S + (small ? ui_sw(labels[t]) : text_w(labels[t])) + pad + gap; }
         if (total <= avail) break;
     }
     if (total > avail && sel > 0) {                      /* 고른 탭까지 들어가도록 앞을 건너뜀 */
         for (first = 0; first < sel; first++) {
             uint32_t need = 0;
-            for (int t = first; t <= sel; t++) { char num[4] = { (char)(t == 9 ? '0' : '1' + t), 0 }; need += ui_sw(num) + 18 * S + (small ? ui_sw(labels[t]) : text_w(labels[t])) + pad + gap; }
+            for (int t = first; t <= sel; t++) { char num[4] = { (char)(t == 9 ? '0' : t == 10 ? '-' : '1' + t), 0 }; need += ui_sw(num) + 18 * S + (small ? ui_sw(labels[t]) : text_w(labels[t])) + pad + gap; }
             if (need + 16 * S <= avail) break;
         }
         if (first > 0) { text_f(SF, 1, x + 2 * S, ui_sty(y + (h - ch) / 2, ch), "<", C_MUTED, 0xFF, 0, 1); tx += 8 * S; }
     }
     for (int t = first; t < n; t++) {
-        char num[4] = { (char)(t == 9 ? '0' : '1' + t), 0 };
+        char num[4] = { (char)(t == 9 ? '0' : t == 10 ? '-' : '1' + t), 0 };
         int on = t == sel;
         uint32_t lw = small ? ui_sw(labels[t]) : text_w(labels[t]), cw = ui_sw(num) + 10 * S, tw = cw + 8 * S + lw + pad;
         if (tx + tw > x + w) { text_f(SF, 1, x + w - 10 * S, ui_sty(y + (h - ch) / 2, ch), ">", C_MUTED, 0xFF, 0, 1); break; }
@@ -339,7 +339,8 @@ static uint32_t ui_section(uint32_t x, uint32_t y, uint32_t w, const char *label
 
 /* 값의 모양 */
 enum { UV_CHOICE, UV_TOGGLE, UV_SLIDER, UV_ACTION, UV_TEXT, UV_SEG2, UV_DROP };   /* UV_DROP = 값 ▾ (누르면 풀다운) */
-static uint32_t ui_row_h(void) { return LH + 12 * S; }
+static int ui_tight;                                    /* 5.3.32 출력장치 창: 한 화면에 안 들어가면 줄 사이를 좁힘 (그 창을 그리는 동안만 1) */
+static uint32_t ui_row_h(void) { return LH + (ui_tight ? 7 : 12) * S; }
 
 /* 스위치 (켜기/끄기) */
 static void ui_switch(uint32_t x, uint32_t y, uint32_t h, int on, int en)

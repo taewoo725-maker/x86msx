@@ -28,6 +28,12 @@ static const struct { const char *sha, *label; uint8_t model; } rs_ctl_tab[] = {
     { "73683d585cd6948cc19547942ca0e14a0319456d", "CM-32L v1.00", 1 }, { "a439fbb390da38cada95a7cbb1d6ca199cd66ef8", "CM-32L v1.02", 1 },
     { "dc1c5b1b90a4646d00f7daf3679733c7badc7077", "CM-32LN v1.00", 1 },
 };
+static uint8_t rs_usb_bad;                              /* 5.3.53: 1 = USB(0:\\)를 못 읽음 — 롬이 "없다"가 아니라 USB 문제 */
+static void rs_usb_probe(void)
+{
+    FeDirEntry pe[1];
+    rs_usb_bad = (uint8_t)(P.list_dir && P.list_dir("0:\\", pe, 1) < 0);
+}
 static const char *rs_path(int k, const char *nm) { static char b[FE_PATH_MAX]; midi_path(b, sizeof b, k, nm); return b; }
 
 static int rs_is_rom(const char *nm) { int l = (int)strlen(nm); return l > 4 && nm[l - 4] == '.' && has_ci(nm + l - 4, ".rom"); }
@@ -91,7 +97,7 @@ static void rs_scan_sc(void)
         if (have < SC55_NFILE) { copy_str(s->why, sizeof s->why, have ? nt("파일 모자람: ", "missing: ", "不足: ") : nt("파일 없음", "not found", "なし")); if (have) str_append(s->why, sizeof s->why, miss); }
     }
 }
-static void rs_scan(void) { rs_scan_mt(); rs_sort_mt(); rs_scan_sc(); rs_scanned = 1; }
+static void rs_scan(void) { rs_usb_probe(); rs_scan_mt(); rs_sort_mt(); rs_scan_sc(); rs_scanned = 1; }
 /* 이 MT-32/CM-32L 기계가 고른 묶음: -1 = 자동, -2 = 목록에 없는 파일 (5.2.173: 롬 이름은 기계마다) */
 static int rs_mt_cur(const MidiDev *d)
 {

@@ -34,7 +34,7 @@ const MsxStField msx_st_core[] = {
     CF(mwr_arg), CF(dos2), CF(dos2_size), CF(dos2_ps), CF(dos2_ss), CF(dos2_bank),
     CF(ch_vol), CF(opll), CF(y8950), CF(opll_on), CF(opll_acc), CF(opll_quiet),
     CF(opll_last), CF(opll_prev), CF(dos2_tr), CF(s1990_reg), CF(s1990_cpu), CF(s1990_switch), CF(r800_pct),
-    CF(trtimer_base), CF(f4_status), CF(trpause_reg), CF(pause_sw), CF(pcm_ctrl), CF(pcm_da),
+    CF(trtimer_base), CF(f4_status), CF(trpause_reg), CF(pause_sw), CF(pcm_ctrl), CF(pcm_da), CF(pcm_ref),
     CF(pcm_n), CF(pcm_t), CF(pcm_v), CF(frame_start), CF(ms_on), CF(ds_head),
     CF(ds_pending), CF(ds_click), CF(ds_motor), CF(ds_rng), CF(ds_phase), CF(sfg_on),
     CF(opm_t), CF(opm_acc), CF(opm_l), CF(opm_r), CF(opm_pl), CF(opm_pr), CF(sfg_kbd), CF(sfg_vec),

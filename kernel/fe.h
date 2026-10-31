@@ -43,6 +43,20 @@ typedef struct {
     uint8_t mon, day, hour, min;
 } FeDirEntry;
 
+/* 8.0.34: 시스템 보기 > 성능 — 플랫폼이 내주는 누적 수치 (창이 1초마다 읽어 차이로 그래프를 그림). 호스트 시험판은 흉내 값 */
+#define FE_SYS_WK 16
+#define FE_SYS_IO 8
+typedef struct {
+    char cpu_name[56];
+    uint32_t logical, workers;                       /* PC 전체 논리 프로세서 수 / 지금 살아 있는 일꾼 수 */
+    uint64_t tsc, tsc_hz;
+    uint64_t main_busy;                              /* 메인 코어가 일한 시간(TSC 누적, 화면 맞추기 기다림 뺌) */
+    uint64_t wk_busy[2][FE_SYS_WK];                  /* 일꾼 칸별 일한 시간(TSC 누적): [0] 화면 등, [1] MIDI 합성 */
+    uint64_t mem_total, mem_free, mem_prog, mem_data, mem_fw;   /* 바이트: 전체·여유·프로그램(LoaderCode)·작업 메모리(LoaderData)·펌웨어(그 밖) */
+    uint64_t io_ms; uint32_t io_r, io_w;             /* USB 파일 접근에 쓴 시간(ms 누적)·읽은 횟수·쓴 횟수 */
+    int io_n; struct { uint32_t at, ms; uint8_t w; char path[40]; } io[FE_SYS_IO];   /* 최근 쓰기·20 ms 넘은 읽기 (오래된 것부터) */
+} FeSysSample;
+
 typedef struct {
     uint32_t (*ms)(void);                                   /* 밀리초 단위 단조 시간 */
     int (*hp_state)(void);                                  /* 4.0.34: 헤드폰 꽂힘 1 / 빠짐 0 / 모름 -1 */
@@ -62,9 +76,10 @@ typedef struct {
     int (*acpi_mode)(int on, char *out, int outsz);                  /* ACPI 모드 켜기 (SCI_EN) — 노트북 EC 키 스캔 실험. 0 = 켜짐, 결과 글 out (UEFI 전용, 없으면 NULL) */
     int (*gpu_try)(int run);                                            /* 4.0.34: 진단 Video 탭 Enter — GPU HDMI 실험 1회 (UEFI 전용, 없으면 NULL) */
     int (*video_diag)(char (*lines)[64], int max);                   /* 4.0.34: 진단 화면 출력 목록 (줄 수) */
+    void (*usb_rescan)(void);                                        /* 5.3.49: USB 를 뺐다 꽂은 뒤 저장장치를 다시 찾음 (파일 선택창 F5) */
     void (*video_rescan)(void);                                      /* 4.0.34: 모니터를 다시 찾음 (꽂은 뒤) */
     int (*video_outputs)(char (*lines)[64], int max, int *active);   /* 4.0.34 화면 출력 목록 (UEFI GOP 핸들마다 한 줄). 없으면 NULL */
-    void (*vs_adj)(int d);                                  /* 4.0.29 화면 맞추기 시점 옮기기 (진단 Video 탭 ←/→, 없으면 NULL) */
+    int (*vs_adj)(int d, int set);                          /* 8.0.22: set=0 이면 d 만큼 옮김, 1 이면 d 로 정함(0x7FFF = 자동). 지금 값(자동이면 0x7FFF) 돌려줌 */                                  /* 4.0.29 화면 맞추기 시점 옮기기 (진단 Video 탭 ←/→, 없으면 NULL) */
     /* 폴더 목록: path ""는 최상위(드라이브 목록). 항목 수, 실패 -1 */
     int (*list_dir)(const char *path, FeDirEntry *out, int max);
     /* 3.0.2 디스크 파일 복사: 확장자를 가리지 않고 모든 파일. 없으면 list_dir를 씀 */
@@ -81,6 +96,7 @@ typedef struct {
     int (*delete_file)(const char *path);
     /* 소리 출력 장치 고르기 (0 자동, 1 아날로그, 2 HDMI). status에 결과. 성공 0, 없으면 NULL */
     int (*audio_select)(int pref, char *status, int len);
+    int (*snd_stat)(uint32_t *under, uint32_t *over, int *last_d, int *tgt);   /* 5.3.51: 소리 버퍼 끊김 횟수 (없으면 NULL) */
     int (*snd_gpio)(void);                          /* 소리 진단 G 키: 코덱 GPIO 값 돌리기 (-1 못 함, 없으면 0) */
     void (*flush)(void);                                    /* 뒤 버퍼를 지금 화면에 (UEFI Blt). 없으면 NULL */
     const char *browse_note;                                /* 탐색기 안내 (없으면 NULL) */
@@ -127,6 +143,11 @@ typedef struct {
     /* 3.7.1 가상 하드: 파일의 off부터 len바이트 (파일 끝 뒤는 0). 성공 0. 없으면 NULL */
     int (*read_at)(const char *path, uint32_t off, uint8_t *buf, uint32_t len);
     uint8_t *vhd_mem;                                       /* 3.7.1 가상 하드 작업 메모리 (24 MiB, 없으면 NULL) */
+    int (*mp_text)(char *buf, int max);                     /* 8.0.1: 다른 코어 시험 결과 한 줄 (없으면 NULL) */
+    int (*cpu_why)(char *buf, int max);                      /* 8.0.4: 코어 수 조회 결과 코드·CPUID 코어/스레드 수 한 줄 (없으면 NULL) */
+    int (*cpu_cores)(int *total, int *enabled);              /* 5.3.56: PC 코어 수 조회(읽기 전용). MP Services 있으면 1, 없으면 0. 없으면 NULL */
+    int (*par_run)(void (*fn)(void *), void **args, int n);  /* 8.0.23: args[1..n-1] 을 놀고 있는 일꾼 코어에, 나머지는 메인이 직접 → 모두 끝날 때까지 기다림. 일꾼이 한 개수를 돌려줌. 없으면 NULL */
+    int (*sys_sample)(FeSysSample *out);                     /* 8.0.34: 시스템 보기 > 성능 수치 (성공 1). 없으면 NULL */
     uint32_t vhd_mem_size;   /* 3.5.4: USB MIDI 출력 (n = 0이면 확인만, 없으면 -1). 없으면 NULL */
 } FePlatform;
 

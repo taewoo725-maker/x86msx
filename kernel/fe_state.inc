@@ -452,9 +452,57 @@ static void bgw_step(uint32_t budget_ms)
 }
 static void bgw_finish(void) { while (bgw.buf) bgw_step(1000); }
 
+/* 5.3.28: 메뉴·창이 열려 있을 때는 보이는 화면 그대로 (프레임 버퍼 전체) 를 PNG 로. 창이 없을 때의 MSX 화면 스크린샷(아래 do_screenshot)은 그대로 둠 */
+static int do_screenshot_ui(void)
+{
+    if (!D.fb || rec_on || P.scratch_size < (24u << 20)) return 0;      /* 소리 녹음 중이면 작업 메모리가 겹쳐 옛 방식으로 */
+    char path[160];
+    if (!st_ready() || next_free_name("Screenshots", "X86MSX_", ".png", path, sizeof path)) { toast(T(S_SHOT_FAIL), 0); return 1; }
+    uint32_t N = 1;
+    while ((D.w / N) * (D.h / N) * 3 + D.h / N > (14u << 20)) N++;
+    uint32_t w = D.w / N, h = D.h / N, row = w * 3 + 1;
+    uint8_t *raw = P.scratch + (16u << 20), *png = P.scratch + (4u << 20);
+    static uint8_t srow[16384], vpal[256 * 3];
+    if (D.w * (uint32_t)D.bpp > sizeof srow) return 0;
+    if (D.bpp == 1) {
+        if (P.pal_get) P.pal_get(vpal);
+        else {
+            for (int i = 0; i < 16; i++) memcpy(vpal + i * 3, &mon_rgb[i][0], 3);
+            for (int i = 0; i < 210; i++) { vpal[(16 + i) * 3] = (uint8_t)(i / 35 * 255 / 5); vpal[(16 + i) * 3 + 1] = (uint8_t)(i / 5 % 7 * 255 / 6); vpal[(16 + i) * 3 + 2] = (uint8_t)(i % 5 * 255 / 4); }
+            for (int i = 0; i < 16; i++) memcpy(vpal + (UI_DAC + i) * 3, ui_rgb[i], 3);
+        }
+    }
+    int ri = D.bgr ? 2 : 0, bi = D.bgr ? 0 : 2;
+    for (uint32_t y = 0; y < h; y++) {
+        uint8_t *o = raw + y * row; *o++ = 0;
+        memcpy(srow, D.fb + (uintptr_t)(y * N) * D.pitch, D.w * (uint32_t)D.bpp);
+        for (uint32_t x = 0; x < w; x++, o += 3) {
+            uint32_t sx = x * N;
+            if (D.bpp == 1) { const uint8_t *a = vpal + srow[sx] * 3; o[0] = a[0]; o[1] = a[1]; o[2] = a[2]; }
+            else { const uint8_t *a = srow + sx * 4; o[0] = a[ri]; o[1] = a[1]; o[2] = a[bi]; }
+        }
+    }
+    uint32_t n = 0;
+    static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', 13, 10, 26, 10 };
+    memcpy(png, sig, 8); n = 8;
+    be32w(png + n, 13); memcpy(png + n + 4, "IHDR", 4);
+    be32w(png + n + 8, w); be32w(png + n + 12, h);
+    png[n + 16] = 8; png[n + 17] = 2; png[n + 18] = 0; png[n + 19] = 0; png[n + 20] = 0;
+    be32w(png + n + 21, crc32_upd(0, png + n + 4, 17)); n += 25;
+    uint32_t idat = n;
+    uint32_t zl = zlib_fixed(raw, row * h, row, png + idat + 8, (12u << 20) - 1024);   /* 4~16 MiB */
+    if (!zl) { toast(T(S_SHOT_FAIL), 0); return 1; }
+    be32w(png + idat, zl); memcpy(png + idat + 4, "IDAT", 4);
+    n = idat + 8 + zl;
+    be32w(png + n, crc32_upd(0, png + idat + 4, zl + 4)); n += 4;
+    be32w(png + n, 0); memcpy(png + n + 4, "IEND", 4); be32w(png + n + 8, crc32_upd(0, png + n + 4, 4)); n += 12;
+    bgw_start(path, png, n, S_SHOT_SAVED, S_SHOT_FAIL, path_base(path));
+    return 1;
+}
 static void do_screenshot(void)
 {
     bgw_finish();
+    if (shot_full && do_screenshot_ui()) return;   /* 5.3.28: 보이는 화면 그대로 (끄면 아래 MSX 화면만) */
     char path[160];
     if (!st_ready() || next_free_name("Screenshots", "X86MSX_", ".png", path, sizeof path)) { toast(T(S_SHOT_FAIL), 0); return; }
     uint32_t lines = disp_lines ? disp_lines : 192;

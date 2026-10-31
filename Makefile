@@ -41,6 +41,8 @@ build/sttest: $(CORE) tests/sttest.c src/*.h src/*.inc src/mappers/*.inc | build
 
 build/schedtest: $(CORE) tests/schedtest.c src/*.h src/*.inc src/mappers/*.inc | build
 	$(CC) $(CFLAGS) -o $@ $(CORE) tests/schedtest.c -lm
+build/mpooltest: tests/mpooltest.c src/mpool.h | build
+	$(CC) -O2 -std=gnu11 -Wall -Wextra -o $@ tests/mpooltest.c -lpthread
 
 build/msxrun: $(CORE) host/headless.c src/*.h src/*.inc src/mappers/*.inc | build
 	$(CC) $(CFLAGS) -o $@ $(CORE) host/headless.c -lm
@@ -67,12 +69,12 @@ build/psgtest: src/psg.c src/psg.h tests/psgtest.c | build
 	$(CC) $(CFLAGS) -o $@ src/psg.c tests/psgtest.c
 
 FEHOST  = kernel/fe.c kernel/diag.c kernel/smbios.c kernel/keymap.c kernel/kbdmaps.c kernel/input.c kernel/machine.c kernel/medit.c kernel/sha1.c kernel/romdb.c kernel/png.c kernel/zipx.c kernel/basictxt.c kernel/jpegw.c \
-          kernel/font_data.c kernel/icons.c kernel/icons_hd.c kernel/hidmouse.c kernel/dskimg.c kernel/msxfat.c kernel/vfat.c kernel/badges.c kernel/hidpad.c kernel/fat.c kernel/usbgrow.c src/tinf_all.c
+          kernel/font_data.c kernel/gt_photo.c kernel/icons.c kernel/icons_hd.c kernel/hidmouse.c kernel/dskimg.c kernel/msxfat.c kernel/vfat.c kernel/badges.c kernel/hidpad.c kernel/fat.c kernel/usbgrow.c src/tinf_all.c
 build/fehost: $(CORE) $(FEHOST) tests/fehost.c kernel/*.h kernel/*.inc src/*.h src/*.inc src/mappers/*.inc | build
-	$(CC) $(CFLAGS) -D_DEFAULT_SOURCE -Wno-unused-function -o $@ $(CORE) $(FEHOST) tests/fehost.c -lm
+	$(CC) $(CFLAGS) -D_DEFAULT_SOURCE -Wno-unused-function -o $@ $(CORE) $(FEHOST) tests/fehost.c -lm -lpthread
 
 build/fehost_asan: $(CORE) $(FEHOST) tests/fehost.c kernel/*.h kernel/*.inc src/*.h src/*.inc src/mappers/*.inc | build
-	$(CC) $(CFLAGS) -fsanitize=address -g -D_DEFAULT_SOURCE -Wno-unused-function -o $@ $(CORE) $(FEHOST) tests/fehost.c -lm
+	$(CC) $(CFLAGS) -fsanitize=address -g -D_DEFAULT_SOURCE -Wno-unused-function -o $@ $(CORE) $(FEHOST) tests/fehost.c -lm -lpthread
 
 build/medittest: kernel/medit.c kernel/medit.h tests/medittest.c src/profile.c src/devcat.c | build
 	$(CC) $(CFLAGS) -o $@ kernel/medit.c tests/medittest.c src/profile.c src/devcat.c
@@ -169,14 +171,18 @@ tests/zex/zexdoc.com tests/zex/zexall.com:
 	sh tests/zex/fetch.sh
 
 # 빠른 시험: 타이밍 단위 시험 + DPC-200 BASIC 부팅 확인
-test: build/vsrctest build/iochaintest build/memchaintest build/mediatest build/persisttest build/statustest build/devcattest build/flashtest build/diagtest build/sttest build/schedtest build/midipkttest build/cputest build/msxrun build/inputtest build/carttest build/psgtest build/fattest build/scctest build/sccmaptest build/romdbtest build/pngtest build/tapetest build/yjktest build/r800test build/medittest build/hidpadtest build/mousetest build/dskimgtest build/msxfattest build/vfattest build/opl4test build/ziptest build/bastest build/opmtest build/iltest build/msirqtest build/hbi55test build/mfrptest build/frscctest build/rs232test build/midijacktest build/midibustest build/miditest build/gmtest build/sndrstest build/corefuzz build/fatstress build/fehost_asan build/fehost tests/carts/expected.txt
+test: build/vsrctest build/iochaintest build/memchaintest build/mediatest build/persisttest build/statustest build/devcattest build/flashtest build/diagtest build/sttest build/schedtest build/mpooltest build/midipkttest build/cputest build/msxrun build/inputtest build/carttest build/psgtest build/fattest build/scctest build/sccmaptest build/romdbtest build/pngtest build/tapetest build/yjktest build/r800test build/medittest build/hidpadtest build/mousetest build/dskimgtest build/msxfattest build/vfattest build/opl4test build/ziptest build/bastest build/opmtest build/iltest build/msirqtest build/hbi55test build/mfrptest build/frscctest build/rs232test build/midijacktest build/midibustest build/miditest build/gmtest build/sndrstest build/corefuzz build/vdpktest build/vdpktest_ms build/fatstress build/fehost_asan build/fehost tests/carts/expected.txt
 	./build/cputest
 	./build/sndrstest | tail -1
 	./build/corefuzz 40 20000 | tail -1   # 현재 코어 = 기준 코어 (7단계 안전망)
+	./build/vdpktest 20000                # 7단계: VDP 그리기 커널 C판 = 어셈블러판
+	./build/vdpktest_ms                   # 같은 어셈블러를 UEFI(MS x64) 레지스터 배치로
 	sh tests/initest.sh
 	bash tests/spcarttest.sh   # 특수 카트리지 68종 꽂기·빼기 (5.2.86~89 에 17종이 안 꽂히던 회귀)
+	bash tests/vrectest.sh     # 8.0.35 영상 녹화: 일꾼이 압축한 AVI = 메인이 혼자 압축한 AVI (바이트 단위)
 	@rm -rf build/feasan_root && mkdir -p build/feasan_root/Machines && cp -r machines/C-BIOS build/feasan_root/Machines/ && ROOT=build/feasan_root MACHINE=C-BIOS W=1920 H=1080 INFO=1 INFOFILE=tests/data/diag_gram_5223.txt FEACT=diagsum START=30 KEYS=2,3,4,5,4,3,2,1,esc TAIL=60 GAP=20 ASAN_OPTIONS=halt_on_error=1:detect_leaks=0 ./build/fehost_asan > build/feasan.log 2>&1 && echo "fehost asan diag: OK" || (grep -m3 ERROR build/feasan.log; exit 1)   # 진단 창 dirty 사각형 넘침 (LG gram 멈춤) 회귀 시험
 	./build/schedtest machines/C-BIOS | tail -1
+	./build/mpooltest | tail -1
 	./build/mediatest | tail -1
 	./build/persisttest | tail -1
 	./build/statustest | tail -1
@@ -208,6 +214,7 @@ test: build/vsrctest build/iochaintest build/memchaintest build/mediatest build/
 	./build/psgtest
 	./build/mousetest
 	@sh tests/msxfat.sh
+	@bash tests/growtest.sh
 	./build/scctest | tail -1
 	./build/inputtest $(PROFILE)
 	./build/carttest $(PROFILE)
@@ -245,7 +252,7 @@ zex: build/zextest tests/zex/zexdoc.com tests/zex/zexall.com
 clean:
 	rm -rf build
 
-.PHONY: all test zex clean regress regress-update check
+.PHONY: all test zex clean regress regress-update regress-asm check
 
 # ---------------------------------------------------------------------
 # 베어메탈 부팅 이미지 (레거시 BIOS/CSM, 대상: Acer Aspire V5-171)
@@ -262,7 +269,7 @@ build/net/%.o: %.c kernel/net/lwipopts.h kernel/net/arch/cc.h
 	@mkdir -p $(dir $@)
 	$(KCC) $(NETFLAGS) -c $< -o $@
 
-KSRC    = src/z80.c src/vdp.c src/psg.c src/msx.c src/cart.c src/netcard.c src/scc.c src/flash.c src/msxstate.c src/vsrc.c src/persist.c src/media.c src/status.c src/spcat.c src/mididev.c src/fdc.c src/fdc765.c src/ide.c src/wd33c93.c src/mb89352.c src/ym64.c src/opl4.c src/v9990.c src/gmsynth.c src/sc55_all.c kernel/kmain.c kernel/acpi.c kernel/fe.c kernel/diag.c kernel/smbios.c kernel/keymap.c kernel/kbdmaps.c kernel/input.c kernel/hda.c kernel/bios.c kernel/fat.c kernel/usbgrow.c kernel/machine.c src/profile.c src/devcat.c kernel/font_data.c kernel/icons.c kernel/icons_hd.c kernel/hidmouse.c kernel/dskimg.c kernel/msxfat.c kernel/vfat.c kernel/badges.c kernel/medit.c kernel/sha1.c kernel/romdb.c kernel/png.c kernel/zipx.c kernel/basictxt.c kernel/jpegw.c src/tinf_all.c kernel/libc.c kernel/amddet.c
+KSRC    = src/z80.c src/vdp.c src/psg.c src/msx.c src/cart.c src/netcard.c src/scc.c src/flash.c src/msxstate.c src/vsrc.c src/persist.c src/media.c src/status.c src/spcat.c src/mididev.c src/fdc.c src/fdc765.c src/ide.c src/wd33c93.c src/mb89352.c src/ym64.c src/opl4.c src/v9990.c src/gmsynth.c src/sc55_all.c kernel/kmain.c kernel/acpi.c kernel/fe.c kernel/diag.c kernel/smbios.c kernel/keymap.c kernel/kbdmaps.c kernel/input.c kernel/hda.c kernel/bios.c kernel/fat.c kernel/usbgrow.c kernel/machine.c src/profile.c src/devcat.c kernel/font_data.c kernel/gt_photo.c kernel/icons.c kernel/icons_hd.c kernel/hidmouse.c kernel/dskimg.c kernel/msxfat.c kernel/vfat.c kernel/badges.c kernel/medit.c kernel/sha1.c kernel/romdb.c kernel/png.c kernel/zipx.c kernel/basictxt.c kernel/jpegw.c src/tinf_all.c kernel/libc.c kernel/amddet.c
 ROMS   ?= machines/DPC-200/200bios.rom machines/DPC-200/200han.rom
 
 build/loader.bin: boot/loader.asm boot/mbr.inc | build
@@ -275,9 +282,9 @@ build/kernel.elf: $(KSRC) $(NETOBJ) kernel/entry.asm kernel/link.ld src/*.h src/
 	nasm -f elf32 kernel/entry.asm -o build/entry.o
 	$(KCC) $(KFLAGS) -c $(KSRC)
 	$(KCC) $(subst -mgeneral-regs-only,-mfpmath=387 -mno-sse,$(KFLAGS)) -c src/opll.c src/y8950.c src/y8950a.c kernel/libm.c
-	mv -f z80.o vdp.o psg.o msx.o cart.o netcard.o scc.o flash.o msxstate.o vsrc.o persist.o media.o status.o spcat.o mididev.o devcat.o fdc.o fdc765.o ide.o wd33c93.o mb89352.o ym64.o opl4.o v9990.o gmsynth.o sc55_all.o kmain.o acpi.o fe.o diag.o smbios.o keymap.o kbdmaps.o input.o hda.o bios.o fat.o usbgrow.o machine.o profile.o font_data.o icons.o icons_hd.o hidmouse.o dskimg.o msxfat.o vfat.o badges.o medit.o sha1.o romdb.o png.o zipx.o basictxt.o jpegw.o tinf_all.o libc.o opll.o y8950.o y8950a.o libm.o amddet.o build/
+	mv -f z80.o vdp.o psg.o msx.o cart.o netcard.o scc.o flash.o msxstate.o vsrc.o persist.o media.o status.o spcat.o mididev.o devcat.o fdc.o fdc765.o ide.o wd33c93.o mb89352.o ym64.o opl4.o v9990.o gmsynth.o sc55_all.o kmain.o acpi.o fe.o diag.o smbios.o keymap.o kbdmaps.o input.o hda.o bios.o fat.o usbgrow.o machine.o profile.o font_data.o gt_photo.o icons.o icons_hd.o hidmouse.o dskimg.o msxfat.o vfat.o badges.o medit.o sha1.o romdb.o png.o zipx.o basictxt.o jpegw.o tinf_all.o libc.o opll.o y8950.o y8950a.o libm.o amddet.o build/
 	ld -m elf_i386 -T kernel/link.ld -nostdlib -z noexecstack --no-warn-rwx-segments -o $@ build/entry.o \
-	   build/z80.o build/vdp.o build/psg.o build/msx.o build/cart.o build/netcard.o build/scc.o build/flash.o build/msxstate.o build/vsrc.o build/persist.o build/media.o build/status.o build/spcat.o build/mididev.o build/devcat.o build/fdc.o build/fdc765.o build/ide.o build/wd33c93.o build/mb89352.o build/ym64.o build/opl4.o build/v9990.o build/gmsynth.o build/sc55_all.o build/kmain.o build/acpi.o build/fe.o build/diag.o build/smbios.o build/keymap.o build/kbdmaps.o build/input.o build/hda.o build/bios.o build/fat.o build/usbgrow.o build/machine.o build/profile.o build/font_data.o build/icons.o build/icons_hd.o build/hidmouse.o build/dskimg.o build/msxfat.o build/vfat.o build/badges.o build/medit.o build/sha1.o build/romdb.o build/png.o build/zipx.o build/basictxt.o build/jpegw.o build/tinf_all.o build/libc.o build/opll.o build/y8950.o build/y8950a.o build/libm.o build/amddet.o $(NETOBJ)
+	   build/z80.o build/vdp.o build/psg.o build/msx.o build/cart.o build/netcard.o build/scc.o build/flash.o build/msxstate.o build/vsrc.o build/persist.o build/media.o build/status.o build/spcat.o build/mididev.o build/devcat.o build/fdc.o build/fdc765.o build/ide.o build/wd33c93.o build/mb89352.o build/ym64.o build/opl4.o build/v9990.o build/gmsynth.o build/sc55_all.o build/kmain.o build/acpi.o build/fe.o build/diag.o build/smbios.o build/keymap.o build/kbdmaps.o build/input.o build/hda.o build/bios.o build/fat.o build/usbgrow.o build/machine.o build/profile.o build/font_data.o build/gt_photo.o build/icons.o build/icons_hd.o build/hidmouse.o build/dskimg.o build/msxfat.o build/vfat.o build/badges.o build/medit.o build/sha1.o build/romdb.o build/png.o build/zipx.o build/basictxt.o build/jpegw.o build/tinf_all.o build/libc.o build/opll.o build/y8950.o build/y8950a.o build/libm.o build/amddet.o $(NETOBJ)
 
 build/kernel.bin: build/kernel.elf
 	@end=$$(nm $< | awk '$$3=="__bss_end"{print $$1}'); \
@@ -296,11 +303,11 @@ image: build/msx1.img
 # UEFI 버전: \EFI\BOOT\BOOTX64.EFI (x86_64, clang + lld-link)
 # ---------------------------------------------------------------------
 UCC     = clang
-UFLAGS  = -target x86_64-unknown-windows -O2 -gcodeview -g -std=c11 -Wall -Wextra -ffreestanding -fshort-wchar -DFE_UEFI \
+UFLAGS  = -target x86_64-unknown-windows -O2 -gcodeview -g -std=c11 -Wall -Wextra -ffreestanding -fshort-wchar -DFE_UEFI -DVDPK_ASM \
           -mno-red-zone -fno-stack-protector -mno-stack-arg-probe -fno-builtin-memset \
           -nostdinc -isystem $(shell $(UCC) -print-resource-dir)/include -Ikernel/include
 USRC    = src/z80.c src/vdp.c src/psg.c src/msx.c src/cart.c src/scc.c src/flash.c src/msxstate.c src/vsrc.c src/persist.c src/media.c src/status.c src/spcat.c src/mididev.c src/fdc.c src/fdc765.c src/ide.c src/wd33c93.c src/mb89352.c src/ym64.c src/opl4.c src/v9990.c src/gmsynth.c src/sc55_all.c kernel/fe.c kernel/diag.c kernel/smbios.c kernel/keymap.c kernel/kbdmaps.c kernel/input.c \
-          kernel/hda.c kernel/machine.c kernel/usbgrow.c kernel/fat.c src/profile.c src/devcat.c kernel/font_data.c kernel/icons.c kernel/icons_hd.c kernel/hidmouse.c kernel/dskimg.c kernel/msxfat.c kernel/vfat.c kernel/badges.c kernel/medit.c kernel/sha1.c kernel/romdb.c kernel/png.c kernel/zipx.c kernel/basictxt.c kernel/jpegw.c src/tinf_all.c kernel/libc.c kernel/libm.c src/opll.c src/y8950.c src/y8950a.c src/netcard.c uefi/netuefi.c uefi/main.c uefi/usbkbd.c uefi/usbpad.c uefi/usbmouse.c uefi/i2cdiag.c uefi/rtwdet.c uefi/usbnic_r8152.c uefi/usbnic_asix.c uefi/wpa.c uefi/amdedid.c uefi/amddisp.c uefi/intelhdmi.c uefi/ivbhdmi.c uefi/amdhdmi.c uefi/hdadiag.c uefi/vtd.c uefi/vfctdet.c uefi/usbmidi.c kernel/hidpad.c kernel/amddet.c
+          kernel/hda.c kernel/machine.c kernel/usbgrow.c kernel/fat.c src/profile.c src/devcat.c kernel/font_data.c kernel/gt_photo.c kernel/icons.c kernel/icons_hd.c kernel/hidmouse.c kernel/dskimg.c kernel/msxfat.c kernel/vfat.c kernel/badges.c kernel/medit.c kernel/sha1.c kernel/romdb.c kernel/png.c kernel/zipx.c kernel/basictxt.c kernel/jpegw.c src/tinf_all.c kernel/libc.c kernel/libm.c src/opll.c src/y8950.c src/y8950a.c src/netcard.c uefi/netuefi.c uefi/main.c uefi/usbkbd.c uefi/usbpad.c uefi/usbmouse.c uefi/i2cdiag.c uefi/rtwdet.c uefi/usbnic_r8152.c uefi/usbnic_asix.c uefi/wpa.c uefi/amdedid.c uefi/amddisp.c uefi/intelhdmi.c uefi/ivbhdmi.c uefi/amdhdmi.c uefi/hdadiag.c uefi/vtd.c uefi/mpwake.c uefi/vfctdet.c uefi/usbmidi.c kernel/hidpad.c kernel/amddet.c
 
 # UEFI 판에도 lwIP + netstack(무선 Nic 연결) — 무선 PC(1번 Lenovo V14-ARE)용. 설정은 kernel/net 것을 같이 씀
 UNETSRC = $(wildcard third_party/lwip/src/core/*.c) $(wildcard third_party/lwip/src/core/ipv4/*.c) third_party/lwip/src/netif/ethernet.c kernel/net/netstack.c kernel/net/nethost_lwip.c kernel/net/nicdb.c
@@ -310,16 +317,38 @@ UMT     = $(filter-out third_party/mt32emu/c_interface%,$(wildcard third_party/m
 UCXXFLAGS = -target x86_64-unknown-windows -O2 -std=c++11 -ffreestanding -fshort-wchar -DFE_UEFI -mno-red-zone -fno-stack-protector -mno-stack-arg-probe \
           -fno-exceptions -fno-rtti -fno-threadsafe-statics -nostdinc -nostdinc++ -isystem $(shell $(UCC) -print-resource-dir)/include \
           -I../../third_party/mt32emu/shim -I../../kernel/include -I../../third_party/mt32emu -I../../third_party/mt32emu/sha1 -w
-build/BOOTX64.EFI: $(USRC) $(UNETSRC) $(UMT) third_party/mt32emu/*.h third_party/mt32emu/*.inc uefi/*.h kernel/*.h kernel/*.inc src/*.h src/*.inc src/mappers/*.inc kernel/net/*.h | build
+build/BOOTX64.EFI: build/vdpk_x64_win.obj uefi/mpwake_tramp.inc $(USRC) $(UNETSRC) $(UMT) third_party/mt32emu/*.h third_party/mt32emu/*.inc uefi/*.h kernel/*.h kernel/*.inc src/*.h src/*.inc src/mappers/*.inc kernel/net/*.h | build
 	mkdir -p build/uefi && rm -f build/uefi/*.o   # 3.7.0: 지운 소스의 옛 .o가 링크되지 않게
 	cd build/uefi && for f in $(USRC); do $(UCC) $(UFLAGS) -I../../kernel/include -c ../../$$f -o $$(basename $$f .c).o || exit 1; done
 	cd build/uefi && for f in $(UMT); do clang++ $(UCXXFLAGS) -c ../../$$f -o mt_$$(basename $$f .cpp).o || exit 1; done
 	cd build/uefi && for f in $(UNETSRC); do $(UCC) $(UFLAGS) -I../../kernel/include $(UNETFLAGS) -c ../../$$f -o $$(basename $$f .c).o || exit 1; done
-	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /map:build/BOOTX64.map /debug /pdb:build/BOOTX64.pdb /out:$@ build/uefi/*.o
+	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /map:build/BOOTX64.map /debug /pdb:build/BOOTX64.pdb /out:$@ build/uefi/*.o build/vdpk_x64_win.obj
+
+# 8.0.6: 깨운 코어가 처음 실행하는 코드 (NASM → C 배열). 생성물 uefi/mpwake_tramp.inc 도 소스에 같이 둠 (nasm 없는 곳에서도 빌드되게)
+uefi/mpwake_tramp.inc: uefi/mpwake_tramp.asm
+	nasm -f bin -w+all $< -o build/mpwake_tramp.bin
+	python3 tools/bin2c.py build/mpwake_tramp.bin 2192 mpwake_tramp > $@
 
 efi: build/BOOTX64.EFI
 
 .PHONY: efi
+
+# 7단계: 어셈블러 부품 (NASM, x86-64). 호스트는 elf64(System V), UEFI는 win64. C판이 기준이고 기본으로 쓰임 (src/vdpk.h)
+build/vdpk_x64.o: src/asm/vdpk_x64.asm | build
+	nasm -f elf64 $< -o $@
+build/vdpk_x64_win.obj: src/asm/vdpk_x64.asm | build
+	nasm -f win64 $< -o $@
+build/vdpk_ms.o: src/asm/vdpk_x64.asm | build
+	nasm -f elf64 -DFORCE_MSABI $< -o $@
+build/vdpktest_ms: tests/vdpktest_ms.c src/vdpk.inc src/vdpk.h build/vdpk_ms.o | build
+	$(CC) -O2 -std=c11 -Wall -Wextra -x c src/vdpk.inc -x none -o $@ tests/vdpktest_ms.c build/vdpk_ms.o -Wl,-z,noexecstack
+build/vdpktest: tests/vdpktest.c src/vdpk.inc src/vdpk.h build/vdpk_x64.o | build
+	$(CC) -O2 -std=c11 -Wall -Wextra -DVDPK_ASM -x c src/vdpk.inc -x none -o $@ tests/vdpktest.c build/vdpk_x64.o -Wl,-z,noexecstack
+# 어셈블러판을 켜서(VDPASM=1) 같은 회귀 시험을 돌리는 msxrun:  MSXRUN=build/msxrun_asm VDPASM=1 python3 tests/regress.py
+build/msxrun_asm: $(CORE) host/headless.c src/*.h src/*.inc src/mappers/*.inc build/vdpk_x64.o | build
+	$(CC) $(CFLAGS) -DVDPK_ASM -o $@ $(CORE) host/headless.c build/vdpk_x64.o -lm -Wl,-z,noexecstack
+regress-asm: build/msxrun_asm
+	MSXRUN=build/msxrun_asm VDPASM=1 python3 tests/regress.py
 
 build/memchaintest: $(CORE) tests/memchaintest.c src/*.h src/*.inc src/mappers/*.inc | build
 	$(CC) $(CFLAGS) -Ihost -o $@ $(CORE) tests/memchaintest.c -lm
@@ -334,3 +363,6 @@ build/corefuzz: tests/corefuzz/corefuzz.c tests/corefuzz/cf_wrap.c tests/corefuz
 	$(CC) -O2 -std=c11 -w -Isrc -c src/z80.c -o build/cf_z80.o
 	$(CC) -O2 -std=c11 -w -Itests/ref $(COREFUZZ_REN) -c tests/ref/z80_ref.c -o build/cf_z80r.o
 	$(CC) -O2 -std=c11 -w -Itests/corefuzz -o $@ tests/corefuzz/corefuzz.c build/cf_cur.o build/cf_ref.o build/cf_z80.o build/cf_z80r.o
+
+build/mpmiditest: $(CORE) tests/mpmiditest.c src/*.h src/*.inc src/mappers/*.inc | build
+	$(CC) $(CFLAGS) -o $@ $(CORE) tests/mpmiditest.c -lm -lpthread

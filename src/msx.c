@@ -22,6 +22,7 @@
 
 /* 소프트웨어 MIDI 음원 렌더에 쓴 시간(TSC 틱) 합계 — 프런트엔드가 프레임마다 가져가 진단 "synth" 칸에 더함 */
 uint64_t msx_synth_cyc;
+uint64_t msx_synth_wcyc;                         /* 8.0.32: 일꾼 코어가 MIDI 합성에 쓴 시간 (메인 시간과 따로 셈) */
 #if defined(__i386__) || defined(__x86_64__)
 static inline uint64_t synth_tsc(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
 #else
@@ -30,6 +31,8 @@ static inline uint64_t synth_tsc(void) { return 0; }
 /* OUT 명령의 쓰기는 명령 시작보다 약 10 T-state 뒤(M1 4+1 · 주소 읽기 3 · I/O 끝). cpu.cycles 는 명령 시작 시각이라 그만큼 더해 줄 안 위치(line_t)를 구함.
  * 이 값이 없으면 Aleste 2 가 상태 표시줄 오른쪽(LEV2 의 2)을 가려 프레임마다 글자 아랫줄이 깜박였음 (실측: 9 이상이면 24프레임 모두 온전, 7 은 일부 잘림) */
 #define VDP_IO_DELAY 10
+/* 5.3.45: R800은 같은 일을 줄 앞쪽에서 끝내므로 VDP 쓰기의 줄 안 위치는 Z80 시간으로 환산 (Aleste 2 상태 표시줄) */
+#define VDP_LINE_T(m) ((int)(m->cpu.cycles - m->line_start) * (m->cpu.r800 ? 3 : 1) + VDP_IO_DELAY)
 int msx_vdp_cmd_timing = 1;                  /* 3.2.15 VID-04: VDP 명령 시간 흉내 (0 = 명령이 바로 끝남) */
 #if defined(IO_TRACE) || defined(PC_TRACE) || defined(IO_TRACE2) || defined(VDP_TRACE)
 #include <stdio.h>
@@ -1389,7 +1392,7 @@ static int ior_s1990(MSX *m, int p, uint8_t *v)                  /* turbo R S199
 static int ior_trtimer(MSX *m, int p, uint8_t *v) { uint32_t t = (uint32_t)((m->cpu.cycles - m->trtimer_base) / 14); *v = (p & 1) ? (uint8_t)(t >> 8) : (uint8_t)t; return 1; }
 static int ior_f4(MSX *m, int p, uint8_t *v) { (void)p; *v = m->f4_status; return 1; }
 static int ior_trpause(MSX *m, int p, uint8_t *v) { (void)p; *v = (uint8_t)(m->pause_sw ? 1 : 0); return 1; }
-static int ior_pcm(MSX *m, int p, uint8_t *v) { *v = p == 0xA4 ? (uint8_t)((m->cpu.cycles / 228) & 3) : (uint8_t)(m->pcm_ctrl & 0x1F); return 1; }   /* A4h: 15.7 kHz 카운터 */
+static int ior_pcm(MSX *m, int p, uint8_t *v) { *v = p == 0xA4 ? (uint8_t)(((m->cpu.cycles - m->pcm_ref) / 228) & 3) : (uint8_t)(m->pcm_ctrl & 0x1F); return 1; }   /* A4h: 15.7 kHz 카운터 */
 static int ior_midi(MSX *m, int p, uint8_t *v)
 {
     switch (p) {
@@ -1565,6 +1568,7 @@ static void dac_push(MSX *m, uint8_t v)
 static int iow_pcm(MSX *m, int p, uint8_t v)
 {
     if (p == 0xA5) { m->pcm_ctrl = v; return 1; }
+    m->pcm_ref = m->cpu.cycles;                         /* A4h 쓰면 15.75 kHz 카운터 0부터 다시 */
     m->pcm_da = v;                                      /* DA 값 (프레임 안 시간과 함께 기록) */
     if (m->pcm_n < 2048) { m->pcm_t[m->pcm_n] = (uint32_t)(m->cpu.cycles - m->frame_start); m->pcm_v[m->pcm_n++] = v; }
     return 1;
@@ -1612,12 +1616,12 @@ static int iow_vdp(MSX *m, int p, uint8_t v)
 #ifdef VDP_TRACE
         if (m->frame < 100) fprintf(stderr, "OUT99 %02X pc %04X a8 %02X f %llu\n", v, m->cpu.pc, m->primary, (unsigned long long)m->frame);
 #endif
-        m->vdp.line_t = (int)(m->cpu.cycles - m->line_start) + VDP_IO_DELAY; vdp_write_ctrl(&m->vdp, v); sync_int(m);
+        m->vdp.line_t = VDP_LINE_T(m); m->vdp.late_defer = m->cpu.r800; vdp_write_ctrl(&m->vdp, v); sync_int(m);
         if (m->vdp.cmd_cost) { if (msx_vdp_cmd_timing) m->vdp_busy_until = vdp_cmd_end(m); m->vdp.cmd_cost = 0; }
         vdp_job_arm(m);
         break;
     case 0x9A: vdp_write_palette(&m->vdp, v); break;
-    case 0x9B: m->vdp.line_t = (int)(m->cpu.cycles - m->line_start) + VDP_IO_DELAY; vdp_write_indirect(&m->vdp, v); sync_int(m);
+    case 0x9B: m->vdp.line_t = VDP_LINE_T(m); m->vdp.late_defer = m->cpu.r800; vdp_write_indirect(&m->vdp, v); sync_int(m);
         if (m->vdp.cmd_cost) { if (msx_vdp_cmd_timing) m->vdp_busy_until = vdp_cmd_end(m); m->vdp.cmd_cost = 0; }
         vdp_job_arm(m);
         break;
@@ -2131,6 +2135,53 @@ static uint8_t chip_activity(MSX *m)
     return act;
 }
 
+/* 8.0.25 다중CPU: MIDI 소프트웨어 음원(GM·MT-32) 그리기 — 한 프레임의 MIDI 바이트를 보낸 시각에 맞춰 넣으며 합성.
+ * 다른 음원(PSG·SCC·FM…)을 메인이 섞는 동안 일꾼 코어가 이것을 하고, 섞기 끝에서 메인이 기다려 더한다 (같은 프레임, 늦어짐 없음).
+ * 그동안 음원(gmsynth·midibus)은 이 일만 만진다 (메인은 다른 음원만). 결과·계기는 혼자 할 때와 같다 */
+static int32_t ml[PSG_FRAME_MAX], mr[PSG_FRAME_MAX], dl[PSG_FRAME_MAX], dr[PSG_FRAME_MAX];
+typedef struct { MSX *m; int n, def_on, soft; uint64_t cyc; } MidiJob;
+static void midi_mix_job(void *arg)
+{
+        MidiJob *mj = (MidiJob *)arg; MSX *m = mj->m; int n = mj->n;
+        int def_on = midibus_def(); mj->def_on = def_on;                     /* GT 기본 음원은 GTMIDI 띠 (음량은 Note On 세기로 이미 들어감) — MIDI 띠 음량을 곱하지 않음 */
+        if (def_on) for (int i = 0; i < n; i++) { dl[i] = 0; dr[i] = 0; }
+        uint32_t frame_t = (uint32_t)(m->cpu.cycles - m->frame_start);
+        int at = 0, soft = midibus_any_soft_on() && n > 0; mj->soft = soft;
+        for (int d = 0; d < MIDI_DEV_MAX; d++) midi_bus.dev[d].lvl = 0;
+        for (int j = 0; j <= m->midi_n; j++) {
+            uint32_t tj = j < m->midi_n ? (m->midi_t[j] & ~MIDI_T_SRC) : 0;
+            int to = j < m->midi_n ? (frame_t ? (int)((uint64_t)tj * (uint32_t)n / frame_t) : 0) : n;
+            if (to > n) to = n;
+            if (soft && to > at) {                      /* 꽂힌 소프트웨어 기계(음원 인스턴스) 모두 더함. 5.2.52: 기계마다 음량·좌우·끄기·계기 (믹서의 기계 띠) */
+                static int32_t tl[PSG_FRAME_MAX], tr[PSG_FRAME_MAX];
+                for (int i = at; i < to; i++) { ml[i] = 0; mr[i] = 0; }
+                if (midibus_def()) {                    /* 꽂힌 기계 없음 + GT 내장 MIDI = 기본 음원 */
+                    { uint64_t t0_ = synth_tsc(); gmi_render(GM_INST_GT, tl, tr, to - at); mj->cyc += synth_tsc() - t0_; }
+                    for (int i = 0; i < to - at; i++) { dl[at + i] += tl[i]; dr[at + i] += tr[i]; }
+                }
+                for (int d = 0; d < midi_bus.n; d++) {
+                    MidiDev *dv = &midi_bus.dev[d];
+                    if (!dv->active || gmi_mode(d) == GM_OFF) continue;
+                    { uint64_t t0_ = synth_tsc(); gmi_render(d, tl, tr, to - at); mj->cyc += synth_tsc() - t0_; }
+                    int g = dv->mute ? 0 : dv->vol, p = dv->pan;
+                    int gl2 = g * (100 - (p > 0 ? p : 0)) / 100, gr2 = g * (100 + (p < 0 ? p : 0)) / 100;
+                    for (int i = 0; i < to - at; i++) {
+                        int32_t l = tl[i] * gl2 / 100, r = tr[i] * gr2 / 100, mo = (l + r) / 2;
+                        ml[at + i] += l; mr[at + i] += r;
+                        uint32_t a_ = (uint32_t)(mo < 0 ? -mo : mo); if (a_ > dv->lvl) dv->lvl = (uint16_t)(a_ > 65535 ? 65535 : a_);
+                    }
+                }
+                at = to;
+            }
+            if (j < m->midi_n) midibus_feed(m->midi_q[j], tj, (m->midi_t[j] & MIDI_T_SFG) ? MDP_SFG : (m->midi_t[j] & MIDI_T_MM) ? MDP_MM : MDP_MSXMIDI);
+        }
+}
+const void *msx_midi_job_id = (const void *)midi_mix_job;   /* 8.0.34: 일꾼이 이 함수를 돌리면 MIDI 합성 시간으로 셈 (시스템 보기 > 성능) */
+int (*msx_job_post)(void (*fn)(void *), void *arg);    /* 8.0.25: 일꾼 코어에 일 올리기 (없거나 -1 이면 메인이 직접) — 플랫폼이 정함 */
+int (*msx_job_wait)(int h);                             /* 올린 일이 끝날 때까지 기다림. 시간 초과면 0 */
+int msx_mp_midi = 1;                                    /* ini MpMidi */
+uint32_t msx_mp_midi_n;                                 /* 일꾼이 MIDI 를 그린 프레임 수 (DIAG) */
+
 void msx_run_frame(MSX *m)
 {
     m->psg.vol_tone = (uint8_t)m->ch_vol[MSX_CH_PSG];   /* 채널 음량 → PSG (리셋 뒤에도 믹서 값 그대로) */
@@ -2158,6 +2209,10 @@ void msx_run_frame(MSX *m)
     static int16_t tmp[PSG_FRAME_MAX];
     int n = m->psg.buf_n;
     if (n > PSG_FRAME_MAX) n = PSG_FRAME_MAX;
+    static MidiJob mj; int mjh = -1;                    /* 8.0.25: MIDI 음원은 먼저 일꾼에게 (다른 음원을 섞는 동안) */
+    mj.m = m; mj.n = n; mj.cyc = 0;
+    if (msx_mp_midi && msx_job_post && msx_job_wait && midibus_any_soft_on() && n > 0) mjh = msx_job_post(midi_mix_job, &mj);
+    if (mjh < 0) midi_mix_job(&mj);
     int gl[MSX_CH_N], gr[MSX_CH_N];
     for (int c = 0; c < MSX_CH_N; c++) {
         int p = m->stereo ? m->pan[c] : 0;
@@ -2284,40 +2339,10 @@ void msx_run_frame(MSX *m)
             ADDC(i, v * m->ch_vol[MSX_CH_IO] / 100, MSX_CH_IO);
         }
     }
-    {                                                   /* 3.4.5 SND3-07: MIDI 바이트를 보낸 시각에 맞춰 — 5.2.50: 단자의 기계들(midibus)로, 소프트웨어 음원은 gmsynth */
-        static int32_t ml[PSG_FRAME_MAX], mr[PSG_FRAME_MAX], dl[PSG_FRAME_MAX], dr[PSG_FRAME_MAX];
-        int def_on = midibus_def();                     /* GT 기본 음원은 GTMIDI 띠 (음량은 Note On 세기로 이미 들어감) — MIDI 띠 음량을 곱하지 않음 */
-        if (def_on) for (int i = 0; i < n; i++) { dl[i] = 0; dr[i] = 0; }
-        uint32_t frame_t = (uint32_t)(m->cpu.cycles - m->frame_start);
-        int at = 0, soft = midibus_any_soft_on() && n > 0;
-        for (int d = 0; d < MIDI_DEV_MAX; d++) midi_bus.dev[d].lvl = 0;
-        for (int j = 0; j <= m->midi_n; j++) {
-            uint32_t tj = j < m->midi_n ? (m->midi_t[j] & ~MIDI_T_SRC) : 0;
-            int to = j < m->midi_n ? (frame_t ? (int)((uint64_t)tj * (uint32_t)n / frame_t) : 0) : n;
-            if (to > n) to = n;
-            if (soft && to > at) {                      /* 꽂힌 소프트웨어 기계(음원 인스턴스) 모두 더함. 5.2.52: 기계마다 음량·좌우·끄기·계기 (믹서의 기계 띠) */
-                static int32_t tl[PSG_FRAME_MAX], tr[PSG_FRAME_MAX];
-                for (int i = at; i < to; i++) { ml[i] = 0; mr[i] = 0; }
-                if (midibus_def()) {                    /* 꽂힌 기계 없음 + GT 내장 MIDI = 기본 음원 */
-                    { uint64_t t0_ = synth_tsc(); gmi_render(GM_INST_GT, tl, tr, to - at); msx_synth_cyc += synth_tsc() - t0_; }
-                    for (int i = 0; i < to - at; i++) { dl[at + i] += tl[i]; dr[at + i] += tr[i]; }
-                }
-                for (int d = 0; d < midi_bus.n; d++) {
-                    MidiDev *dv = &midi_bus.dev[d];
-                    if (!dv->active || gmi_mode(d) == GM_OFF) continue;
-                    { uint64_t t0_ = synth_tsc(); gmi_render(d, tl, tr, to - at); msx_synth_cyc += synth_tsc() - t0_; }
-                    int g = dv->mute ? 0 : dv->vol, p = dv->pan;
-                    int gl2 = g * (100 - (p > 0 ? p : 0)) / 100, gr2 = g * (100 + (p < 0 ? p : 0)) / 100;
-                    for (int i = 0; i < to - at; i++) {
-                        int32_t l = tl[i] * gl2 / 100, r = tr[i] * gr2 / 100, mo = (l + r) / 2;
-                        ml[at + i] += l; mr[at + i] += r;
-                        uint32_t a_ = (uint32_t)(mo < 0 ? -mo : mo); if (a_ > dv->lvl) dv->lvl = (uint16_t)(a_ > 65535 ? 65535 : a_);
-                    }
-                }
-                at = to;
-            }
-            if (j < m->midi_n) midibus_feed(m->midi_q[j], tj, (m->midi_t[j] & MIDI_T_SFG) ? MDP_SFG : (m->midi_t[j] & MIDI_T_MM) ? MDP_MM : MDP_MSXMIDI);
-        }
+    {   /* 8.0.25: MIDI 음원 결과 섞기 (위에서 일꾼 또는 메인이 그림) */
+        if (mjh >= 0) { if (msx_job_wait(mjh)) msx_mp_midi_n++; else { mj.soft = 0; msx_mp_midi = 0; } }   /* 시간 초과: 이 프레임 MIDI 는 무음, 이후 메인 혼자 */
+        if (mjh >= 0) msx_synth_wcyc += mj.cyc; else msx_synth_cyc += mj.cyc;   /* 8.0.32: 일꾼이 한 건 메인 시간에서 빼지 않음 */
+        int def_on = mj.def_on, soft = mj.soft;
         if (def_on && soft)
             for (int i = 0; i < n; i++) { int32_t l = dl[i] * msx_midi_int_vol / 100, r = dr[i] * msx_midi_int_vol / 100, mo = (l + r) / 2; am[i] += mo; al[i] += l; ar[i] += r; }   /* GTMIDI 음량 */
         int vm = soft && midi_bus.n ? m->ch_vol[MSX_CH_MIDI] : 0;     /* MIDI 띠 = MIDI 믹서의 모든 기계 소리 (GT 내장 단자 기계도). GTMIDI 띠는 GT 내장 단자의 Note On 세기 */

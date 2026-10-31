@@ -13,9 +13,13 @@ static int rd(void *ctx, uint64_t lba, uint32_t count, uint8_t *buf)
     if (count > 64 || fseeko(f, (off_t)(lba * 512), SEEK_SET)) return -1;
     return fread(buf, 512, count, f) == count ? 0 : -1;
 }
+static long nwrites, fail_at = -1, drop_at = -1;   /* 시험용: FAILAT=n 이면 n번째 쓰기가 실패, DROPAT=n 이면 n번째 쓰기를 성공한 척 버림 */
 static int wr(void *ctx, uint64_t lba, uint32_t count, const uint8_t *buf)
 {
     FILE *f = ctx;
+    long w = nwrites++;
+    if (lba != 0 && w == fail_at) return -1;
+    if (lba != 0 && w == drop_at) return 0;
     if (count > 64 || fseeko(f, (off_t)(lba * 512), SEEK_SET)) return -1;
     return fwrite(buf, 512, count, f) == count ? 0 : -1;
 }
@@ -25,6 +29,8 @@ static void prog(int p, const char *w) { if (p / 10 != last / 10) { printf("  %3
 int main(int argc, char **argv)
 {
     if (argc < 2) return 2;
+    if (getenv("FAILAT")) fail_at = atol(getenv("FAILAT"));
+    if (getenv("DROPAT")) drop_at = atol(getenv("DROPAT"));
     FILE *f = fopen(argv[1], "r+b");
     if (!f) { perror(argv[1]); return 1; }
     fseeko(f, 0, SEEK_END);

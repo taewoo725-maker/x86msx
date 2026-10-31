@@ -25,6 +25,79 @@ static void soft_pick(void)                                 /* 소프트웨어 �
     }
 }
 
+/* 5.3.49: 곡이 보낸 설정을 기억 — 기계를 바꾸거나 롬을 다시 읽어 새 음원이 켜지면 처음부터 같은 설정으로 시작하게 (안 그러면 음색이 빠지거나 달라짐) */
+#define SH_LOG 32768
+#define SH_MSG 1024
+static struct {
+    int16_t cc[16][128];                /* -1 = 안 받음 */
+    int16_t prog[16], bend[16];
+    uint8_t log[SH_LOG]; uint32_t logn; /* 끝낸 SysEx 메시지들 (F0 … F7) 순서대로 */
+    uint8_t cur[SH_MSG]; uint32_t curn; uint8_t curok;
+    uint8_t first;                      /* 채널 메시지의 첫 자료 바이트 */
+    uint8_t inited;
+} sh;
+static void sh_clear(void)
+{
+    for (int c = 0; c < 16; c++) { for (int k = 0; k < 128; k++) sh.cc[c][k] = -1; sh.prog[c] = -1; sh.bend[c] = -1; }
+    sh.logn = 0; sh.curn = 0; sh.curok = 0; sh.inited = 1;
+}
+static int sh_is_reset(const uint8_t *x, uint32_t n)     /* GM·GS·MT-32 리셋이면 그 전 설정은 버림 */
+{
+    if (n >= 6 && x[1] == 0x7E && x[3] == 0x09 && (x[4] == 0x01 || x[4] == 0x02)) return 1;                        /* GM 켜기·끄기 */
+    if (n >= 11 && x[1] == 0x41 && x[3] == 0x42 && x[4] == 0x12 && x[5] == 0x40 && x[6] == 0x00 && x[7] == 0x7F) return 1;   /* GS 리셋 */
+    if (n >= 10 && x[1] == 0x41 && x[3] == 0x16 && x[4] == 0x12 && x[5] == 0x7F && x[6] == 0x00 && x[7] == 0x00) return 1;   /* MT-32 리셋 */
+    return 0;
+}
+static void sh_sysex_end(void)
+{
+    if (sh.curok && sh.curn >= 4) {
+        if (sh_is_reset(sh.cur, sh.curn)) { int keep = sh.curn; (void)keep; sh_clear(); }
+        while (sh.logn + sh.curn > SH_LOG) {            /* 모자라면 오래된 메시지부터 통째로 버림 */
+            uint32_t k = 1; while (k < sh.logn && sh.log[k - 1] != 0xF7) k++;
+            if (k >= sh.logn) { sh.logn = 0; break; }
+            memmove(sh.log, sh.log + k, sh.logn - k); sh.logn -= k;
+        }
+        if (sh.logn + sh.curn <= SH_LOG) { memcpy(sh.log + sh.logn, sh.cur, sh.curn); sh.logn += sh.curn; }
+    }
+    sh.curn = 0; sh.curok = 0;
+}
+static void sh_feed(uint8_t b, int ch, int idx, uint8_t status)
+{
+    if (!sh.inited) sh_clear();
+    if (b == 0xF0) { sh.curn = 0; sh.curok = 1; sh.cur[sh.curn++] = b; return; }
+    if (b == 0xF7) { if (sh.curok && sh.curn < SH_MSG) sh.cur[sh.curn++] = b; sh_sysex_end(); return; }
+    if (b >= 0xF8) return;
+    if (sh.curok) { if (!(b & 0x80)) { if (sh.curn < SH_MSG) sh.cur[sh.curn++] = b; else sh.curok = 0; } else sh.curok = 0; return; }
+    if (ch < 0 || (b & 0x80)) return;
+    switch (status & 0xF0) {
+    case 0xC0: sh.prog[ch] = b; break;
+    case 0xB0: if (idx == 0) sh.first = b; else sh.cc[ch][sh.first & 127] = b; break;
+    case 0xE0: if (idx == 0) sh.first = b; else sh.bend[ch] = (int16_t)(sh.first | (b << 7)); break;
+    default: break;
+    }
+}
+void midibus_replay(int i)
+{
+    if (i < 0 || i >= midi_bus.n || !sh.inited) return;
+    MidiDev *d = &midi_bus.dev[i];
+    if (!d->active) return;
+    for (uint32_t k = 0; k < sh.logn; k++) gmi_midi(i, sh.log[k]);          /* SysEx 먼저 (MT-32 음색·시스템 설정) */
+    for (int c = 0; c < 16; c++) {
+        if (!(d->rx_mask & (1u << c))) continue;
+        for (int pass = 0; pass < 2; pass++) {
+            if (pass == 0) { if (sh.cc[c][0] >= 0) { gmi_midi(i, (uint8_t)(0xB0 | c)); gmi_midi(i, 0); gmi_midi(i, (uint8_t)sh.cc[c][0]); }
+                             if (sh.cc[c][32] >= 0) { gmi_midi(i, (uint8_t)(0xB0 | c)); gmi_midi(i, 32); gmi_midi(i, (uint8_t)sh.cc[c][32]); }
+                             if (sh.prog[c] >= 0) { gmi_midi(i, (uint8_t)(0xC0 | c)); gmi_midi(i, (uint8_t)sh.prog[c]); } }
+            else for (int k = 1; k < 120; k++) {
+                if (k == 32 || k == 6 || k == 38 || (k >= 98 && k <= 101) || sh.cc[c][k] < 0) continue;
+                gmi_midi(i, (uint8_t)(0xB0 | c)); gmi_midi(i, (uint8_t)k); gmi_midi(i, (uint8_t)sh.cc[c][k]);
+            }
+        }
+        if (sh.bend[c] >= 0) { gmi_midi(i, (uint8_t)(0xE0 | c)); gmi_midi(i, (uint8_t)(sh.bend[c] & 127)); gmi_midi(i, (uint8_t)(sh.bend[c] >> 7)); }
+    }
+    d->run = 0;                                                             /* 다음 바이트는 상태부터 */
+}
+
 void midibus_clear(void) { memset(&midi_bus, 0, sizeof midi_bus); }
 
 int midibus_plug(int kind, int opt)
@@ -95,7 +168,6 @@ void midibus_feed(uint8_t b, uint32_t t, int src)
 {
     MidiBus *bus = &midi_bus;
     if (bus->def_on && src == MDP_MSXMIDI) gmi_midi(GM_INST_GT, b);   /* GT 내장 기본 음원 (5.2.74: 기계가 있어도 같이 — GTMIDI 띠) */
-    if (!bus->n) return;
     int ch = -1, idx = -1;                                  /* -1 = 모두 / 자료 바이트 차례 */
     if (b >= 0xF8) { }                                      /* 실시간: 상태 안 바뀜, 모두 */
     else if (b == 0xF0) { bus->sysex = 1; bus->run = 0; }
@@ -104,6 +176,8 @@ void midibus_feed(uint8_t b, uint32_t t, int src)
     else if (b & 0x80) { bus->run = b; ch = b & 0x0F; bus->dat1 = 0; }
     else if (bus->sysex) { }
     else if (bus->run) { ch = bus->run & 0x0F; idx = bus->dat1; bus->dat1 = (int8_t)(((bus->run & 0xF0) == 0xC0 || (bus->run & 0xF0) == 0xD0) ? 0 : !idx); }   /* 자료 바이트 차례 0·1 (실행 상태로 되풀이) */
+    sh_feed(b, ch, idx, bus->run);                          /* 5.3.49: 설정 기억 */
+    if (!bus->n) return;
     for (int i = 0; i < bus->n; i++) {
         MidiDev *d = &bus->dev[i];
         if (d->port != MDP_ANY && d->port != src) continue;    /* 다른 단자에 꽂힌 기계 */

@@ -25,6 +25,10 @@ const DiagPc diag_pcs[] = {
       "legacy BIOS (CSM) only; HDMI+panel dual and HDMI sound OK (test room v38/v39, 4.0.108~); plug HDMI before boot; wired BCM57785 in progress, wifi 168C:0034 unsupported" },
     { 0, "LG gram 16 (16Z90S-GA5VK, Core Ultra / Meteor Lake)", "8086:7D55", "16Z90S", "uefi", "10EC:0298", { O, O, O, O, O, X, U, O, X, O },
       "UEFI only; sound needs HDA DMA map (5.2.20); I2C touchpad (Intel) and wifi 8086:7E40 unsupported; speaker amp not checked; diag sound tab hang under investigation" },
+    { 7, "GPD G1619-04 (AMD Ryzen, Lee Ji-hyung's PC)", "1002:15BF", "G1619", "uefi", "14F1:1F87", { O, O, O, O, O, U, U, O, X, O },
+      "5.3.51 log: HDA 1022:15E3 codec 14F1:1F87 (pins 16,17) sound OK; USB mice 2; touchpad I2C GXTP7385 not mapped yet; wifi Intel 8086:2725 unsupported" },
+    { 9, "ASRock H110M-HDV (company desktop 2, Intel fam 6 model 9E)", "8086:5912", 0, "uefi", "10EC:0887", { O, O, O, O, O, N, U, O, U, O },
+      "5.3.55 log 2026-10-30: SMBIOS system/product 'To Be Filled By O.E.M.' (found by GPU, board H110M-HDV); HDA 8086:A170 codec ALC887 pins 14,15,1B sound OK; monitor S24C340 1920x1080; USB kbd 2, mice 2; desktop, no touchpad; no wifi" },
 };
 #undef U
 #undef O
@@ -139,7 +143,7 @@ void diag_judge(const DiagCtx *c, char (*lines)[64], int n, DiagSum o[DA_N])
     /* TP: ACPI 에 터치패드가 있는데 쓰지 못하면 주의 */
     {
         const char *ta = find(lines, n, "HID touchpad ACPI"), *pr = find(lines, n, "HID I2C probe"), *cpu = find(lines, n, "HID CPU");
-        int used = finds(lines, n, "I2C touchpad") != 0 || finds(lines, n, "touchpad: on") != 0;
+        int used = finds(lines, n, "I2C touchpad") != 0 || finds(lines, n, "touchpad: on") != 0 || finds(lines, n, "HID I2C mouse map: rid") != 0;   /* 5.3.53: 사용자가 터치패드를 꺼 두면 마우스 목록에 안 나옴 → 마우스 맵을 찾았으면 인식된 것 (거짓 경고 방지) */
         if (!ta && !cpu) set(&o[DA_TP], DS_NA, "no_data", "touchpad probe did not run (legacy boot?)");
         else if (!ta) set(&o[DA_TP], DS_INFO, "", "no touchpad in ACPI");
         else if (used) set(&o[DA_TP], DS_OK, "", ta + 4);
@@ -335,7 +339,7 @@ int diag_format(char *b, int max, const char *ver, const DiagCtx *c, char (*line
     {   /* #pc= 번호 name= 고른 시험 PC (sel=auto|manual|none), smbios= 펌웨어가 알려 준 이름 */
         const char *sm = find(lines, n, "SMBIOS system");
         q = put(b, q, max, "#pc=");
-        if (pc && pc->pc) { char t[8] = ""; catn(t, sizeof t, (uint32_t)pc->pc); q = put(b, q, max, t); } else q = put(b, q, max, "?");
+        if (pc) { char t[8] = ""; catn(t, sizeof t, (uint32_t)pc->pc); q = put(b, q, max, t); } else q = put(b, q, max, "?");   /* 8.0.6 (5.3.58 이식): 0번(LG gram)도 번호로 찍음 */
         q = put(b, q, max, " name=\""); q = put(b, q, max, pc ? pc->name : "?"); q = put(b, q, max, "\" sel=");
         q = put(b, q, max, !pc ? "none" : pc_auto ? "auto" : "manual");
         q = put(b, q, max, " smbios=\""); q = put(b, q, max, sm ? sm + 14 : "?"); q = put(b, q, max, "\"\r\n");

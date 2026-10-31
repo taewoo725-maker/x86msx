@@ -22,7 +22,27 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <math.h>
+#include <pthread.h>
 
+/* 8.0.23: FEPAR=1 이면 화면 줄 그리기를 진짜 스레드로 나눠 돌림 (UEFI 일꾼 코어 흉내) — 혼자 그린 화면과 해시가 같은지 시험 */
+typedef struct { void (*fn)(void *); void *a; } HPar;
+static void *h_par_thr(void *x) { HPar *h = (HPar *)x; h->fn(h->a); return 0; }
+#define H_JOBS 8
+static pthread_t h_job_t[H_JOBS]; static HPar h_job[H_JOBS]; static int h_job_used[H_JOBS];   /* 8.0.35: 영상 압축이 여러 장을 동시에 올림 */
+static int h_job_post(void (*fn)(void *), void *arg)
+{
+    for (int i = 0; i < H_JOBS; i++) if (!h_job_used[i]) { h_job_used[i] = 1; h_job[i].fn = fn; h_job[i].a = arg; pthread_create(&h_job_t[i], 0, h_par_thr, &h_job[i]); return i; }
+    return -1;
+}
+static int h_job_wait(int h) { pthread_join(h_job_t[h], 0); h_job_used[h] = 0; return 1; }
+static int h_par_run(void (*fn)(void *), void **args, int n)
+{
+    pthread_t t[16]; HPar h[16]; if (n > 16) n = 16;
+    for (int i = 1; i < n - (getenv("FEPARBUG") ? 1 : 0); i++) { h[i].fn = fn; h[i].a = args[i]; pthread_create(&t[i], 0, h_par_thr, &h[i]); }
+    fn(args[0]);
+    for (int i = 1; i < n - (getenv("FEPARBUG") ? 1 : 0); i++) pthread_join(t[i], 0);
+    return n - 1;
+}
 void gamma_lut(unsigned char *out, int g100)   /* kernel/libm.c와 같은 결과 (호스트 libm) */
 {
     if (g100 < 10) g100 = 10;
@@ -287,6 +307,28 @@ static void shot(const char *name)
     fclose(f);
 }
 
+/* 5.3.9: USB 확장 진행 화면 시험용 가짜 (GROWSHOT=파일, GROWPCT=퍼센트, GROWSTAGE=단계 이름) */
+static int h_grow_query(uint64_t *a, uint64_t *b) { *a = 63ull << 20; *b = 14ull << 30; return 0; }
+static int h_grow_run(void (*pr)(int, const char *), char *err, int n)
+{
+    (void)err; (void)n;
+    const char *pc = getenv("GROWPCT"), *st = getenv("GROWSTAGE");
+    if (getenv("GROWANIM")) {                             /* 5.3.10: 접시가 도는 모습을 GROWANIM 장 찍음 (60 ms 마다) */
+        int n = atoi(getenv("GROWANIM"));
+        static const char *const sq[] = { "scan", "list", "format", "FAT", "dirs", "copy", "verify", "mbr" };
+        for (int i = 0; i < n; i++) {
+            int pct = i * 100 / (n - 1 ? n - 1 : 1);
+            pr(pct, sq[pct < 5 ? 0 : pct < 10 ? 1 : pct < 11 ? 2 : pct < 21 ? 3 : pct < 25 ? 4 : pct < 71 ? 5 : pct < 97 ? 6 : 7]);
+            char nm[256]; snprintf(nm, sizeof nm, "%s_%03d.ppm", getenv("GROWANIM_OUT") ? getenv("GROWANIM_OUT") : "/tmp/ga", i); shot(nm);
+            usleep(60000);
+        }
+        return getenv("GROWRET") ? atoi(getenv("GROWRET")) : 1;
+    }
+    pr(pc ? atoi(pc) : 46, st ? st : "copy");
+    if (getenv("GROWSHOT")) shot(getenv("GROWSHOT"));
+    return getenv("GROWRET") ? atoi(getenv("GROWRET")) : 1;
+}
+
 /* 4.0: 진행 창처럼 P.flush를 부르는 동안의 화면을 FLUSHSHOT_<번호>.ppm으로 (FLUSHN=쉼표로 나눈 번호) */
 static void h_flush_shot(void)
 {
@@ -325,6 +367,24 @@ int errno_dir_exists(const char *p) { struct stat st; return !(stat(p, &st) == 0
 
 int fe_test_net;
 /* FENETON=1 이면 "인터넷 연결됨" (레거시 판 net_online 의 약한 연결을 시험 틀이 채움) — 인터넷 아이콘 시험 */
+/* 8.0.34: 시스템 보기 > 성능 시험용 흉내 수치 (호출할 때마다 조금씩 변함). FESYS=1 일 때만 연결 */
+static int h_sys_sample(FeSysSample *o)
+{
+    static uint64_t n, mb, w0[5], w1[5], iom; static uint32_t ior, iow;
+    n++;
+    memset(o, 0, sizeof *o);
+    const uint64_t hz = 2300000000ull;
+    mb += (uint64_t)((double)hz * (0.10 + 0.05 * (double)((n * 7) % 5) / 4.0));
+    for (int i = 0; i < 5; i++) { w0[i] += (uint64_t)((double)hz * (0.04 + 0.03 * (double)((n * (uint64_t)(i + 3)) % 6) / 5.0)); if (i == 4) w1[i] += (uint64_t)((double)hz * (0.12 + 0.06 * (double)((n * 5) % 4) / 3.0)); }
+    iom += n % 7 == 0 ? 90 : 3; ior += 2; iow += n % 3 == 0;
+    snprintf(o->cpu_name, sizeof o->cpu_name, "12th Gen Intel(R) Core(TM) i7-12700H");
+    o->logical = 20; o->workers = 5; o->tsc_hz = hz; o->tsc = n * hz; o->main_busy = mb;
+    for (int i = 0; i < 5; i++) { o->wk_busy[0][i] = w0[i]; o->wk_busy[1][i] = w1[i]; }
+    o->mem_total = 31ull << 30; o->mem_free = (29ull << 30) - n * (1ull << 20); o->mem_prog = 6ull << 20; o->mem_data = 420ull << 20; o->mem_fw = o->mem_total - o->mem_free - o->mem_prog - o->mem_data;
+    o->io_ms = iom; o->io_r = ior; o->io_w = iow;
+    o->io_n = 5; for (int i = 0; i < 5; i++) { o->io[i].at = 8200 + (uint32_t)i * 12000; o->io[i].ms = i == 0 ? 114 : i == 3 ? 56 : 23; o->io[i].w = (uint8_t)(i & 1); snprintf(o->io[i].path, sizeof o->io[i].path, i == 0 ? "Machines\\A1GT\\a1gtfirm.rom" : i == 3 ? "x86msx.ini" : "Storage Device\\DISK"); }
+    return 1;
+}
 int net_online(void) { return getenv("FENETON") != 0; }
 /* 시험용 가짜 네트워크 (FENETHOST=1): 네트워크 올라 있음, 에코 요청에 바로 응답 */
 #include "../src/netcard.h"
@@ -357,7 +417,7 @@ int main(void)
     FeDisplay d = { fb, W * 4, W, H, 4, 1, 2, 2, 0 };
     static uint8_t scratch[32u << 20], xram[4u << 20];
     { static uint8_t wv[OPL4_MEM_SIZE]; opl4_set_memory(wv, 0); }   /* 3.1.0 MoonSound */
-    FePlatform p = { .ms = h_ms, .diag_save = h_diag_save, .video_outputs = getenv("FEVO") ? h_vo : 0, .video_diag = getenv("FEVO") ? h_vd : 0, .mouse_read = h_mouse_read, .mouse_dev = h_mouse_dev, .mouse_set = h_mouse_set, .pad_view = h_pad_view, .midi_read = h_midi_read, .midi_write = h_midi_write, .info = getenv("INFO") ? h_info : 0, .make_file = h_make_file, .reboot = h_reboot, .flush = getenv("FLUSHSHOT") ? h_flush_shot : 0, .audio = h_audio, .list_dir = h_list, .read_file = h_read,
+    FePlatform p = { .sys_sample = getenv("FESYS") ? h_sys_sample : 0, .par_run = getenv("FEPAR") ? h_par_run : 0, .ms = h_ms, .diag_save = h_diag_save, .video_outputs = getenv("FEVO") ? h_vo : 0, .video_diag = getenv("FEVO") ? h_vd : 0, .mouse_read = h_mouse_read, .mouse_dev = h_mouse_dev, .mouse_set = h_mouse_set, .pad_view = h_pad_view, .midi_read = h_midi_read, .midi_write = h_midi_write, .info = getenv("INFO") ? h_info : 0, .make_file = h_make_file, .reboot = h_reboot, .flush = getenv("FLUSHSHOT") ? h_flush_shot : 0, .grow_query = h_grow_query, .grow_run = h_grow_run, .audio = h_audio, .list_dir = h_list, .read_file = h_read,
                      .hd_open = h_hd_open, .hd_close = h_hd_close, .hd_read = h_hd_read, .hd_write = h_hd_write,
                      .write_file = h_write, .write_at = h_write_at, .append = h_append, .read_at = h_read_at, .vhd_mem = malloc(24u << 20), .vhd_mem_size = 24u << 20, .create = h_create, .delete_file = h_delete, .scratch = scratch, .scratch_size = sizeof scratch, .xram = xram, .v9990 = malloc(2u << 20), .vbuf = malloc(128u << 20), .vbuf_size = 128u << 20 };
     {
@@ -373,6 +433,7 @@ int main(void)
             if ((fi = fopen(ip, "wb"))) { fputs(buf, fi); fclose(fi); }
         }
     }
+    if (getenv("FEPAR")) { extern int (*msx_job_post)(void (*)(void *), void *); extern int (*msx_job_wait)(int); msx_job_post = h_job_post; msx_job_wait = h_job_wait; }   /* 8.0.25 */
     fe_init(&d, &p, &m, FE_ROMS, FE_DISP_STORE " > ROMS");
     fe_restore();
     int gap = getenv("GAP") ? atoi(getenv("GAP")) : 20;
