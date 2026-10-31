@@ -120,7 +120,7 @@ uefi/       UEFI 부팅 코드
 kernel/     화면·메뉴·시스템 보기·파일 관리자 등 본체
 src/        Z80/R800, VDP, 소리 칩, 카트리지, 디스크, 네트워크 장치
 host/       PC 위에서 돌려 보는 시험용 호스트
-machines/   기본 기종(C-BIOS)
+machines/   기본 기종(C-BIOS) ***  Bluemsx의 머신방식으로 사용하였습니다.
 assets/     아이콘·키보드 그림·네트워크 ROM 등
 third_party/  포함한 외부 구성요소
 tools/      이미지 만들기 등 빌드 도구
