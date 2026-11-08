@@ -32,6 +32,8 @@ typedef struct {                        /* FEHD 덩이 — 뒤에 필드를 붙�
     char hd_path[FE_PATH_MAX], hd_name[64];
     int32_t pana_front, pana_pause;
     int32_t speed, speed_max;
+    char hd2_path[FE_PATH_MAX], hd2_name[64];           /* 8.0.191: IDE 슬레이브 하드 (옛 파일은 0 으로 읽음) */
+    int32_t dz_idx[2];                                  /* 8.0.191: zip 디스크 안에서 지금 몇 번째 디스크인지 */
 } StHeader;
 static StHeader st_hh;                 /* 저장·불러오기가 같이 씀 (BSS 아낌) */
 #define ST_HEAD_AT (8u + ST_CHUNK_HDR)  /* 파일 안 FEHD 내용 자리 (상태 목록이 기종 이름만 읽을 때) */
@@ -60,7 +62,9 @@ static int next_free_name(const char *dir, const char *prefix, const char *ext, 
 }
 
 /* ---------------- 상태 저장 ---------------- */
-static int state_save_to(const char *path)
+static int state_save_to_x(const char *path, int cfg_only);
+static int state_save_to(const char *path) { return state_save_to_x(path, 0); }
+static int state_save_to_x(const char *path, int cfg_only)   /* cfg_only = 8.0.117 기종 상태 저장 2: 실행 중인 MSX 상태(CPU·RAM·VDP …)는 빼고 기종·매체·속도만 */
 {
     if (!st_ready()) return -1;
     for (int d = 0; d < 2; d++) disk_flush(d);              /* 디스크·테이프·하드 디스크 바뀐 내용을 먼저 파일로 */
@@ -85,14 +89,18 @@ static int state_save_to(const char *path)
     if (M->tape) { copy_str(h->tape_path, sizeof h->tape_path, tape_path); copy_str(h->tape_name, sizeof h->tape_name, tape_name); }
     copy_str(h->hd_path, sizeof h->hd_path, hd_path);
     copy_str(h->hd_name, sizeof h->hd_name, hd_name);
+    if (hd2_secs) { copy_str(h->hd2_path, sizeof h->hd2_path, hd2_path); copy_str(h->hd2_name, sizeof h->hd2_name, hd2_name); }
+    for (int d = 0; d < 2; d++) h->dz_idx[d] = disk_size[d] ? dz_idx[d] : 0;
     h->pana_front = pana_front; h->pana_pause = pana_pause;
     h->speed = speed; h->speed_max = speed_max;
     memcpy(b, ST_MAGIC, 8);
     uint32_t len = 8, k = st_put(b + len, ST_BLOB_MAX - len, "FEHD", ST_FEHD_VER, h, (uint32_t)sizeof *h);
     if (!k) return -1;
     len += k;
-    if (!(k = msx_st_save(M, b + len, ST_BLOB_MAX - len))) return -1;
-    len += k;
+    if (!cfg_only) {
+        if (!(k = msx_st_save(M, b + len, ST_BLOB_MAX - len))) return -1;
+        len += k;
+    }
     if (P.create(path, 0) || P.write_file(path, b, len)) return -1;
     return 0;
 }
@@ -120,6 +128,20 @@ static int st_cart_reinsert(int n, const StHeader *h, MapperType mt)
 static char st_skip[96];                               /* 불러올 때 건너뛴 장치 (구조가 바뀜 → 켠 상태로) */
 static void st_loaded_toast(const char *name) { if (st_skip[0]) toast(T(S_ST_PARTIAL), st_skip); else toast(T(S_ST_LOADED), name); }
 static int st_resume_mode;                              /* 1 = 켤 때·기종 바꿀 때 이어하기 (resume_try) */
+static int st_cfg_only;                                 /* 8.0.117 1 = 기종 상태 저장 2 파일 (실행 중인 상태 없음 → 새로 부팅) */
+/* 8.0.191: 켤 때 이어하기 — 지금 꽂혀 있는 매체(기종별 환경이 되살린 특수 카트리지 등)가 저장 파일과 다르면 참 (그 매체로 새로 켬).
+ * 비어 있는 칸은 충돌이 아님: 설정 파일(ini)은 롬팩·디스크·카세트를 기억하지 않으므로 켠 직후엔 비어 있고, 그 칸은 저장 파일에서 채움.
+ * (예전: 비어 있는 것도 "다름"으로 봐서 롬 카트리지·디스크가 켤 때 돌아오지 않았음) */
+static int st_media_conflict(const StHeader *h)
+{
+    if (strcmp(h->machine, machine_name)) return 1;
+    for (int n = 0; n < MSX_CART_SLOTS; n++)
+        if (M->cart[n].present && (cart_special[n] != h->cart_special[n] || strcmp(cart_path[n], h->cart_path[n]))) return 1;
+    for (int d = 0; d < 2; d++) if (disk_size[d] && strcmp(disk_path[d], h->disk_path[d])) return 1;
+    if (M->tape && strcmp(tape_path, h->tape_path)) return 1;
+    return 0;
+}
+
 static int state_load_from(const char *path, char *err, int errlen)
 {
     err[0] = 0; st_skip[0] = 0;
@@ -132,18 +154,11 @@ static int state_load_from(const char *path, char *err, int errlen)
     StHeader *h = &st_hh;
     memset(h, 0, sizeof *h); memcpy(h, hp, hl);
     const uint8_t *ck = b + 8; uint32_t cl = size - 8;      /* 기계 덩이들 (FEHD 는 msx_st_load 가 모르는 덩이로 건너뜀) */
-    if (msx_st_check(ck, cl)) {                             /* 기계 뼈대(CORE)가 다른 빌드 — 기종·매체를 바꾸기 전에 */
+    if (!st_cfg_only && msx_st_check(ck, cl)) {                             /* 기계 뼈대(CORE)가 다른 빌드 — 기종·매체를 바꾸기 전에 */
         copy_str(err, errlen, T(S_ST_OTHER_VER)); str_append(err, errlen, " ("); str_append(err, errlen, h->build); str_append(err, errlen, ")");
         return -1;
     }
-    if (st_resume_mode) {                                   /* 4.0.34: 켤 때 이어하기 — ini(마지막으로 끼운 매체)가 저장 상태보다 새로우면 그 매체로 새로 켬 (끼운 카트리지가 사라지던 것) */
-        int same = !strcmp(h->machine, machine_name);
-        for (int n = 0; same && n < MSX_CART_SLOTS; n++)
-            if (cart_special[n] != h->cart_special[n] || strcmp(cart_path[n], h->cart_path[n]) || M->cart[n].present != (h->cart_special[n] || h->cart_path[n][0] ? 1 : 0)) same = 0;
-        for (int d = 0; same && d < 2; d++) if (strcmp(disk_path[d], h->disk_path[d])) same = 0;
-        if (same && strcmp(tape_path, h->tape_path)) same = 0;
-        if (!same) { copy_str(err, errlen, "media changed"); return -1; }
-    }
+    if (st_resume_mode && st_media_conflict(h)) { copy_str(err, errlen, "media changed"); return -1; }
     /* 1. 기종 */
     if (strcmp(h->machine, machine_name)) {
         char e2[160];
@@ -166,7 +181,7 @@ static int state_load_from(const char *path, char *err, int errlen)
     }
     for (int d = 0; d < 2; d++) {
         disk_wp[d] = h->disk_wp[d];
-        if (h->disk_path[d][0]) insert_disk_file(d, h->disk_path[d], h->disk_name[d], 0);
+        if (h->disk_path[d][0]) { dz_req = h->dz_idx[d] > 0 ? h->dz_idx[d] : -1; insert_disk_file(d, h->disk_path[d], h->disk_name[d], 0); dz_req = -1; }
         else if (disk_size[d]) disk_eject(d);
     }
     tape_eject();
@@ -180,7 +195,13 @@ static int state_load_from(const char *path, char *err, int errlen)
     }
     if (h->hd_path[0] && strcmp(h->hd_path, hd_path)) hd_insert(h->hd_path, h->hd_name, 1);
     else if (!h->hd_path[0] && hd_path[0]) hd_eject();
-    { char *sk = st_skip;
+    if (h->hd_path[0] && h->hd2_path[0] && hd_secs && strcmp(h->hd2_path, hd2_path)) hd2_insert(h->hd2_path, h->hd2_name, 1);   /* 8.0.191 슬레이브 */
+    /* 8.0.50: x86wifi(무선랜) 카트리지가 꽂혀 있으면 켤 때·기종 바꿀 때 이어하기에서도 MSX 본체 상태(CPU·RAM·VDP 등)는 되살리지 않고 새로 부팅한다.
+     * 설정·카트리지·디스크 같은 나머지는 그대로 복원. 롬팩 INIT(IP 기다리기·F2 안내 화면·시계 맞춤)이 돌아야 하기 때문. 저장 번호 168 = NET_CODE_WIFI */
+    int wifi_cold = 0;
+    for (int n = 0; st_resume_mode && n < MSX_CART_SLOTS; n++) if (h->cart_special[n] == 168) wifi_cold = 1;
+    if (wifi_cold || st_cfg_only) { st_skip[0] = 0; power_on(); }
+    else { char *sk = st_skip;
       if (msx_st_load(M, ck, cl, sk, sizeof st_skip)) { copy_str(err, errlen, T(S_ST_OTHER_VER)); str_append(err, errlen, " ("); str_append(err, errlen, h->build); str_append(err, errlen, ")"); return -1; }
       for (int gq = 0; gq < GM_INST_MAX; gq++) gmi_reset(gq);   /* 3.4.5: 소프트웨어 MIDI 음원은 상태에 없음 → 모든 음 끔 */
     }
@@ -426,7 +447,6 @@ static uint32_t zlib_fixed(const uint8_t *raw, uint32_t len, uint32_t row, uint8
  * P.append 가 있는 판(UEFI)만. 없으면(레거시) 예전처럼 한 번에. 버퍼는 저장이 끝날 때까지 그대로 둬야 함 (scratch PNG·녹음 자리, 영상 버퍼) —
  * 같은 버퍼를 쓰는 동작(상태 저장·불러오기, 새 녹음·녹화, SoundFont·MT-32 자리 잡기, 창 열기, 끝내기)은 bgw_finish() 로 먼저 마저 씀 */
 static struct { char path[160]; const uint8_t *buf; uint32_t len, off; StrId ok, fail; char msg[96]; } bgw;
-static int bgw_busy(void) { return bgw.buf != 0; }
 static void bgw_end(int ok) { bgw.buf = 0; margin_bd = -1; toast(T(ok ? bgw.ok : bgw.fail), ok ? bgw.msg : 0); }
 static int bgw_start(const char *path, const uint8_t *buf, uint32_t len, StrId ok, StrId fail, const char *msg)
 {
@@ -534,8 +554,9 @@ static void do_screenshot(void)
     bgw_start(path, png, n, S_SHOT_SAVED, S_SHOT_FAIL, path_base(path));   /* 조금씩 */
 }
 
-/* ---------------- 소리 저장 (WAV, 48 kHz 16비트 모노) ---------------- */
-static uint32_t rec_max(void) { return P.scratch_size > REC_OFF + 44 ? (P.scratch_size - REC_OFF - 44) / 2 : 0; }
+/* ---------------- 소리 저장 (WAV, 48 kHz 16비트. 소리가 스테레오로 나가면 스테레오, 아니면 모노. 8.0.230: 시험 스위치 TestRecStereo 를 없애고 스테레오를 정식 동작으로) ---------------- */
+static int rec_stereo;                                  /* 8.0.221: 이번 녹음이 스테레오인가 (녹음을 시작할 때의 스위치 값) */
+static uint32_t rec_max(void) { return P.scratch_size > REC_OFF + 44 ? (P.scratch_size - REC_OFF - 44) / (rec_stereo ? 4u : 2u) : 0; }   /* 표본(스테레오는 좌우 한 쌍) 수 */
 
 static void rec_stop(void)
 {
@@ -545,9 +566,10 @@ static void rec_stop(void)
     char path[160];
     if (next_free_name("Audio", "X86MSX_", ".wav", path, sizeof path)) { toast(T(S_REC_FAIL), 0); return; }
     uint8_t *w = P.scratch + REC_OFF;
-    uint32_t data = rec_n * 2;
+    uint32_t data = rec_n * (rec_stereo ? 4u : 2u);
     static const uint8_t hdr[44] = { 'R','I','F','F',0,0,0,0,'W','A','V','E','f','m','t',' ',16,0,0,0,1,0,1,0, 0x80,0xBB,0,0, 0,0x77,1,0, 2,0,16,0, 'd','a','t','a',0,0,0,0 };
     memcpy(w, hdr, 44);
+    if (rec_stereo) { w[22] = 2; w[28] = 0x00; w[29] = 0xEE; w[30] = 0x02; w[31] = 0; w[32] = 4; }   /* 채널 2, 초당 192000 바이트, 블록 4 */
     uint32_t riff = data + 36;
     w[4] = (uint8_t)riff; w[5] = (uint8_t)(riff >> 8); w[6] = (uint8_t)(riff >> 16); w[7] = (uint8_t)(riff >> 24);
     w[40] = (uint8_t)data; w[41] = (uint8_t)(data >> 8); w[42] = (uint8_t)(data >> 16); w[43] = (uint8_t)(data >> 24);
@@ -559,6 +581,7 @@ static void rec_toggle(void)
     if (rec_on) { rec_stop(); return; }
     bgw_finish();                                       /* 앞 녹음을 아직 쓰는 중이면 마저 */
     if (!st_ready() || !rec_max()) { toast(T(S_REC_FAIL), 0); return; }
+    rec_stereo = M->stereo && P.audio2;   /* 8.0.230: 소리가 실제로 스테레오로 나가는 때만 스테레오 파일 */
     rec_on = 1; rec_n = 0; rec_start = P.ms();
     margin_bd = -1;
     toast(T(S_REC_START), 0);
@@ -571,7 +594,8 @@ static void rec_feed(const int16_t *s, int n)
     uint32_t room = rec_max() - rec_n;
     if ((uint32_t)n > room) n = (int)room;
     int16_t *d = (int16_t *)(void *)(P.scratch + REC_OFF + 44);
-    memcpy(d + rec_n, s, (size_t)n * 2);
+    if (rec_stereo) { for (int i = 0; i < n; i++) { d[(rec_n + (uint32_t)i) * 2] = M->out_l[i]; d[(rec_n + (uint32_t)i) * 2 + 1] = M->out_r[i]; } }   /* 좌우 따로 */
+    else memcpy(d + rec_n, s, (size_t)n * 2);
     rec_n += (uint32_t)n;
     if (rec_n >= rec_max()) rec_stop();                     /* 가득 참: 저장하고 끝 */
 }
@@ -761,19 +785,19 @@ static void sram_tick(uint32_t now)
 /* ---------------- 끝낼 때 저장, 켤 때 이어서 — 2.11 ---------------- */
 #define RESUME_PATH "0:\\States\\resume.sta"             /* 4.0.33까지: 기종 하나뿐 (예전 파일은 처음 한 번만 읽음) */
 #define RESUME_DIR "0:\\States\\Resume"
-static void resume_path(char *out, int max)               /* 4.0.34: 기종마다 따로 (States\Resume\<기종 이름>.sta) */
+static void resume_path(char *out, int max)               /* 4.0.34: 기종마다 따로 (States\Resume\<기종 이름>.sta). 8.0.117: 기종 상태 저장 2 는 .rs2 (실행 중인 상태 없음) */
 {
-    copy_str(out, max, RESUME_DIR "\\"); str_append(out, max, machine_name); str_append(out, max, ".sta");
+    copy_str(out, max, RESUME_DIR "\\"); str_append(out, max, machine_name); str_append(out, max, resume_full() ? ".sta" : ".rs2");
 }
 static void resume_save(void)
 {
-    if (!resume_on || !st_ready()) return;
+    if (!resume_any() || !st_ready()) return;
     opts_save();                                        /* 속성 옵션도 기종별로 */
     if (run_state == RUN_STOPPED) return;
     if (P.create("0:\\States", 1) || P.create(RESUME_DIR, 1)) return;
     char p[300];
     resume_path(p, sizeof p);
-    state_save_to(p);
+    state_save_to_x(p, !resume_full());
 }
 
 static int resume_try(const char *path)
@@ -782,24 +806,25 @@ static int resume_try(const char *path)
     uint32_t n = 0;
     if (P.read_file(path, tiny, sizeof tiny, &n) || n < 8) return 0;
     char err[160];
-    st_resume_mode = 1;
+    st_resume_mode = 1; st_cfg_only = !resume_full();
     int ok = !state_load_from(path, err, sizeof err);
-    st_resume_mode = 0;
+    st_resume_mode = 0; st_cfg_only = 0;
     return ok;
 }
 
-static void resume_load(void)                             /* 켤 때: 전체 상태 저장이 켜져 있어야 */
+static void resume_load(void)                             /* 켤 때: 기종 상태 저장 1 또는 2 가 켜져 있어야 (8.0.104: 전체 상태 저장 스위치는 없앰) */
 {
-    if (!global_save || !resume_on || !st_ready()) return;
+    if (resume_on) resume2_on = 0;                      /* 8.0.117: 둘 다 켜져 있으면 1 만 */
+    if (!resume_any() || !st_ready()) return;
     opts_load();
     char p[300];
     resume_path(p, sizeof p);
     resume_try(p);                                      /* 예전 한 파일(resume.sta)은 쓰지 않음: 안에 적힌 기종으로 바꿔 버려서, 마지막에 쓴 기종으로 못 켜짐 */
 }
 
-static void resume_enter(void)                            /* 기종을 바꾼 뒤: 그 기종이 지난번 하던 상태로 */
+static void resume_enter(void)                            /* 기종을 바꾼 뒤: 그 기종이 지난번 하던 상태로 (2 는 그 기종의 구성으로 새로 부팅) */
 {
-    if (!resume_on || !st_ready()) return;
+    if (!resume_any() || !st_ready()) return;
     opts_load();
     char p[300];
     resume_path(p, sizeof p);
@@ -951,7 +976,7 @@ static void recent_open(int k, int i)
         FeDirEntry x;
         memset(&x, 0, sizeof x);
         copy_str(x.name, sizeof x.name, name);
-        cart_insert_file(k == 7 ? 4 : k, path, &x);   /* 3.6.7: 7 = 카트리지 5 */
+        cart_insert_file(recent_cart_of(k), path, &x);
     } else if (kind == 1) {
         int d = k - 4;
         insert_disk_file(d, path, name, 0);

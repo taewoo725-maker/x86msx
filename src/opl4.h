@@ -71,6 +71,7 @@ typedef struct {
     int32_t fm_last, pcm_last;      /* 가장 최근 칩 샘플 */
     int32_t fm_prev, pcm_prev;      /* 그 앞 샘플 (48 kHz 로 바꿀 때 직선 보간) */
     uint32_t weg_cnt;
+    int32_t fm_last_l, fm_prev_l, pcm_last_l, pcm_prev_l;   /* 8.0.232 왼쪽 몫만 따로 보간 (오른쪽은 합에서 뺌) */
 } Opl4;
 
 /* 웨이브 메모리 (롬 + 램, OPL4_MEM_SIZE). 플랫폼이 한 번 정함. rom_size = 롬 바이트 */
@@ -84,5 +85,7 @@ void opl4_write_wave(Opl4 *o, int port, uint8_t v);    /* port 0 = 7Eh, 1 = 7Fh 
 uint8_t opl4_read_wave(Opl4 *o, int port);
 /* 48 kHz 한 샘플 (모노, 약 ±32767) */
 int opl4_calc48(Opl4 *o);
+/* 8.0.232 같은 한 샘플을 좌우로도 돌려줌. 반환값(모노)은 opl4_calc48 과 똑같고, (left + right) / 2 == 반환값 (믹서의 좌우 규칙과 같음). left/right 는 NULL 가능 */
+int opl4_calc48_stereo(Opl4 *o, int *left, int *right);
 int opl4_active(const Opl4 *o);                        /* 소리를 내는 중이면 1 (상태 칩) */
 #endif

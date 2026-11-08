@@ -21,7 +21,10 @@ static void cw(int b, int d, int f, int off, uint32_t v)
     p_outl(0xCF8, 0x80000000u | (uint32_t)(b << 16) | (uint32_t)(d << 11) | (uint32_t)(f << 8) | (uint32_t)(off & 0xFC));
     p_outl(0xCFC, v);
 }
-static void wait_ms(int ms) { for (int i = 0; i < ms * 1000; i++) p_outb(0x80, 0); }   /* 포트 0x80 쓰기 ≈ 1µs */
+/* 8.0.217: 시간 보정. 포트 0x80 쓰기 한 번이 1µs 라고 믿던 가정을 실제 시계(ms)로 재서 바로잡는다.
+ * 시험 PC #8 은 이 쓰기가 약 5배 느려서 "250ms" 기다림이 1초 넘게 걸렸다. 기본은 예전과 같은 1000회/ms. */
+static uint32_t g_outb_per_ms = 1000; static uint32_t (*g_cal_clk)(void);
+static void wait_ms(int ms) { for (uint32_t i = 0, n = (uint32_t)ms * g_outb_per_ms; i < n; i++) p_outb(0x80, 0); }
 static void hx(char *o, uint32_t v, int digits)
 {
     static const char H[] = "0123456789ABCDEF";
@@ -35,14 +38,24 @@ static int put(char *l, const char *t)
 static char out[8][64];
 static int nout, done;
 
+/* 무선 칩 찾기 — RTL8822CE (C822) 또는 RTL8821CE (C821, 8.0.202~). is21 = 8821 이면 1 */
+static int rtw_find(int *outB, int *outD, int *is21)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        uint32_t want = pass == 0 ? 0xC82210ECu : 0xC82110ECu;
+        for (int b = 0; b < 16; b++)
+            for (int d = 0; d < 32; d++)
+                if (cr(b, d, 0, 0) == want) { *outB = b; *outD = d; *is21 = pass; return 1; }
+    }
+    return 0;
+}
+
 static void run(void)
 {
     done = 1;
-    int B = -1, D = 0;
-    for (int b = 0; b < 16 && B < 0; b++)
-        for (int d = 0; d < 32; d++)
-            if (cr(b, d, 0, 0) == 0xC82210ECu) { B = b; D = d; break; }
-    if (B < 0) { put(out[nout++], "wifi rtw: C822 not found"); return; }
+    int B = -1, D = 0, is21 = 0;
+    if (!rtw_find(&B, &D, &is21)) { put(out[nout++], "wifi rtw: C822/C821 not found"); return; }
+    if (is21) put(out[nout++], "wifi rtw: chip RTL8821CE (C821)");
 
     uint32_t cmd0 = cr(B, D, 0, 4) & 0xFFFFu;
     /* PM capability 찾기 (최대 16개) */
@@ -131,7 +144,7 @@ static int g_B, g_D, g_pcie;
 #define R8(o)  (m[(o)])
 #define R16(o) (*(volatile uint16_t *)(m + (o)))
 #define R32(o) (*(volatile uint32_t *)(m + (o)))
-static void us(int n) { for (int i = 0; i < n; i++) p_outb(0x80, 0); }
+static void us(int n) { uint32_t k = (uint32_t)n * g_outb_per_ms / 1000; if (!k && n > 0) k = 1; for (uint32_t i = 0; i < k; i++) p_outb(0x80, 0); }
 static int pollm(volatile uint8_t *m, uint32_t off, uint32_t mask, uint32_t want, int max_us)
 { for (int t = 0; t < max_us / 10; t++) { if ((R32(off) & mask) == want) return 1; us(10); } return 0; }
 static void dl_cpu(volatile uint8_t *m, int en)
@@ -208,22 +221,31 @@ static int dl_seg(volatile uint8_t *m, uint8_t *ring, uint8_t *pk, const uint8_t
     return 1;
 }
 
-/* 3a단계 - rtw_init_trx_cfg (rtw88 mac.c: txdma_queue_mapping, priority_queue_cfg, init_h2c). 8822C/PCIe 값으로 계산해 둠:
- * 큐 매핑표[1]={VO NORMAL,VI NORMAL,BE LOW,BK LOW,MG EXTRA,HI HIGH}, 페이지표[1]={64,64,64,64,1}, 전송FIFO 2048쪽, 예약 110쪽(경계 1938), 공용 1681쪽 */
-static int rtw_trxcfg(volatile uint8_t *m)
+/* 3a단계 - rtw_init_trx_cfg (rtw88 mac.c: txdma_queue_mapping, priority_queue_cfg, init_h2c). 칩마다 다른 값은 TrxPlan 한 곳에 모음.
+ * 계산식(rtw88 rtw_set_trx_fifo_info): 예약 쪽수 = 드라이버 예약 + 24(H2C 부가) + 8(H2C 고정) + 8(H2C 큐) + 4(FW 송신버퍼) + CSI 버퍼,
+ * 예약 경계 = 전송FIFO 쪽수 - 예약 쪽수, 공용 큐 = 전송FIFO 쪽수 - (HQ+NQ+LQ+EXQ+GAPQ) - 예약 쪽수, H2C 큐 위치 = 경계 + 드라이버 예약 + 24 + 8.
+ * 큐 매핑표[1]={VO NORMAL,VI NORMAL,BE LOW,BK LOW,MG EXTRA,HI HIGH} 은 두 칩이 같아서 0xC5A0 */
+typedef struct { uint16_t txff_pg, rxff_bytes, drv_pg, csi_pg, hq, lq, nq, exq, gapq; } TrxPlan;
+static const TrxPlan trx_8822c = { 2048, 24576 / 1, 16, 50, 64, 64, 64, 64, 1 };   /* 전송FIFO 2048쪽 · 수신FIFO 24576B */
+static const TrxPlan trx_8821c = {  512, 16384 / 1,  8,  0, 16, 16, 16, 14, 1 };   /* 전송FIFO  512쪽 · 수신FIFO 16384B */
+static int rtw_trxcfg(volatile uint8_t *m, int is21)
 {
+    const TrxPlan *pl = is21 ? &trx_8821c : &trx_8822c;
+    uint32_t rsvd = pl->drv_pg + 24u + 8u + 8u + 4u + pl->csi_pg;                 /* 8822C: 110, 8821C: 52 */
+    uint32_t bndy = pl->txff_pg - rsvd;                                           /* 8822C: 1938, 8821C: 460 */
+    uint32_t pub = pl->txff_pg - (uint32_t)(pl->hq + pl->nq + pl->lq + pl->exq + pl->gapq) - rsvd;   /* 8822C: 1681, 8821C: 397 */
     R16(0x10C) = 0xC5A0;                                          /* TXDMA_PQ_MAP */
     R8(0x100) = 0; R8(0x100) = 0xFF;                              /* CR: 송수신 엔진 켜기 */
     R32(0x1330) = 1u << 31;                                       /* H2CQ_CSR */
-    R16(0x230) = 64; R16(0x234) = 64; R16(0x238) = 64; R16(0x23C) = 64; R16(0x240) = 1681;
+    R16(0x230) = pl->hq; R16(0x234) = pl->lq; R16(0x238) = pl->nq; R16(0x23C) = pl->exq; R16(0x240) = (uint16_t)pub;
     R32(0x22C) |= 1u << 31;                                       /* LD_RQPN */
-    R16(0x204) = 1938; R8(0x422) |= 0x10;                         /* rsvd boundary, EN_WR_FREE_TAIL */
-    R16(0x424) = 1938; R16(0x206) = 1938; R16(0x456) = 1938;
-    R32(0x11C) = 24576 - 256 - 1;                                 /* RXFF_BNDY */
+    R16(0x204) = (uint16_t)bndy; R8(0x422) |= 0x10;               /* rsvd boundary, EN_WR_FREE_TAIL */
+    R16(0x424) = (uint16_t)bndy; R16(0x206) = (uint16_t)bndy; R16(0x456) = (uint16_t)bndy;
+    R32(0x11C) = (uint32_t)pl->rxff_bytes - 256 - 1;              /* RXFF_BNDY */
     R8(0x208) |= 1;                                               /* AUTO_INIT_LLT */
     int llt = pollm(m, 0x208, 1, 0, 100000);
     R8(0x103) = 0;
-    uint32_t addr = 1986u << 7, size = 8u << 7;                   /* H2C 큐 위치 (예약 쪽 1986) */
+    uint32_t addr = (bndy + pl->drv_pg + 24u + 8u) << 7, size = 8u << 7;   /* H2C 큐 위치 (8822C 1986쪽, 8821C 500쪽) */
     R32(0x244) = (R32(0x244) & 0xFFFC0000u) | addr;
     R32(0x24C) = (R32(0x24C) & 0xFFFC0000u) | addr;
     R32(0x248) = (R32(0x248) & 0xFFFC0000u) | (addr + size);
@@ -233,7 +255,8 @@ static int rtw_trxcfg(volatile uint8_t *m)
     uint32_t wp = R32(0x10D4) & 0x3FFFF, rp = R32(0x10D0) & 0x3FFFF;
     uint32_t fr = wp >= rp ? size - (wp - rp) : rp - wp;
     int ok = llt && fr == size;
-    lput("WIFI.trx res="); lput(ok ? "ok" : "fail"); lkv("llt", (uint32_t)llt, 1); lkv("h2c_free", fr, 4); lkv("size", size, 4);
+    lput("WIFI.trx res="); lput(ok ? "ok" : "fail"); lput(is21 ? " chip=8821C" : " chip=8822C"); lkv("llt", (uint32_t)llt, 1); lkv("h2c_free", fr, 4); lkv("size", size, 4);
+    lkv("rsvd", rsvd, 3); lkv("bndy", bndy, 4); lkv("pub", pub, 4);
     lkv("r100", R32(0x100), 8); lkv("r10C", R16(0x10C), 4); lkv("r204", R32(0x204), 8); lkv("r11C", R32(0x11C), 8); lkv("r240", R16(0x240), 4);
     lkv("r244", R32(0x244), 8); lkv("r248", R32(0x248), 8); lkv("r24C", R32(0x24C), 8); lkv("r254", R8(0x254), 2); lput("\r\n");
     return ok;
@@ -337,14 +360,77 @@ static int rtw_macinit(volatile uint8_t *m, int cut)
     return 1;
 }
 
+/* 8.0.209 3b-2 — rtw8821c_mac_init (rtw88 rtw8821c.c) + rtw_drv_info_cfg. 순서·값은 리눅스 소스의 WLAN_* 상수를 계산해 그대로 옮김.
+ * 8822C 와 달라지는 값: 프로토콜(0x4C8=0x200808FF), SIFS(0x514=0x10100E0A), 수신필터1(0x6A2=0x0FFF), ACK 타임아웃(0x639=0x40) 등. 쓴 값이 같게 읽히는지 mismatch 로 셈 */
+static int rtw_macinit_8821c(volatile uint8_t *m)
+{
+    mm_n = 0;
+    /* 프로토콜 설정 */
+    W8c(0x0455, 0x70);                                       /* AMPDU_MAX_TIME_V1 */
+    R8(0x045E) |= 0x04;                                      /* TX_HANG_CTRL: EN_EOF_V1 */
+    W8c(0x04E5, 0xE4); W8c(0x04E6, 0x09);                    /* PRECNT_CTRL: (0x1E4 | EN_PRECNT) */
+    W32c(0x04C8, 0x200808FFu);                               /* PROT_MODE_CTRL: RTS_LEN FF, RTS_TX_TIME 08, 묶음 한도 20/20 */
+    W16c(0x04CE, 0x0801);                                    /* BAR_MODE_CTRL+2: 재시도 1, RA 시도 8 */
+    W8c(0x1448, 0x06); W8c(0x144A, 0x06); W8c(0x144C, 0x06); W8c(0x144E, 0x06);   /* FAST_EDCA VO/VI/BE/BK */
+    R8(0x0480) |= 0x20;                                      /* INIRTS_RATE_SEL */
+    /* EDCA */
+    R8(0x05B4) &= (uint8_t)~0x70;                            /* TIMER0_SRC_SEL: TSFT_SEL_TIMER0 해제 */
+    W16c(0x0522, 0x0000);                                    /* TXPAUSE */
+    W8c(0x051B, 0x09); W8c(0x0512, 0x19);                    /* SLOT, PIFS */
+    W32c(0x0514, 0x10100E0Au);                               /* SIFS */
+    W16c(0x0502, 0x0186); W16c(0x0506, 0x03BC);              /* EDCA VO/VI TXOP 한도 */
+    W32c(0x0544, 0x001B0005u);                               /* RD_NAV_NXT */
+    W16c(0x055E, 0x3030);                                    /* RXTSF_OFFSET_CCK */
+    R8(0x0550) |= 0x08;                                      /* BCN_CTRL: EN_BCN_FUNCTION */
+    W32c(0x0540, 0x00006404u);                               /* TBTT_PROHIBIT */
+    W8c(0x0558, 0x04); W8c(0x0559, 0x02);                    /* DRVERLYINT, BCNDMATIM */
+    R8(0x0521) &= (uint8_t)~0x10;                            /* TX_PTCL_CTRL+1: SIFS_BK_EN 해제 */
+    /* WMAC */
+    W16c(0x06A0, 0xFFFF); W16c(0x06A2, 0x0FFF); W16c(0x06A4, 0xFFFF);   /* RXFLTMAP0/1/2 */
+    W32c(0x0608, 0xE400220Eu);                               /* RCR */
+    W8c(0x060C, 0x18);                                       /* RX_PKT_LIMIT: 12288 >> 9 */
+    W8c(0x0606, 0x30); W8c(0x0605, 0x30);                    /* TCR+2, TCR+1 */
+    W8c(0x0639, 0x40);                                       /* ACKTO_CCK */
+    R8(0x066C) |= 0x02;                                      /* WMAC_TRXPTCL_CTL_H */
+    R8(0x0718) |= 0x40;                                      /* SND_PTCL_CTRL: DIS_CHK_VHTSIGB_CRC */
+    W32c(0x07D8, 0xB0810041u);                               /* WMAC_OPTION_FUNCTION+8 */
+    W8c(0x07D4, 0x98);                                       /* WMAC_OPTION_FUNCTION+4 */
+    /* rtw_drv_info_cfg (칩 공통) */
+    R8(0x60F) = 4;
+    R8(0x115) = (uint8_t)((R8(0x115) & 0xF0) | 0xF);
+    R32(0x608) |= 0x10000000u;
+    R32(0x7D4) &= ~((1u << 8) | (1u << 9));
+    lput("WIFI.mac2 res=ok chip=8821C"); lkv("mismatch", (uint32_t)mm_n, 2);
+    if (mm_n) { lkv("first", (uint32_t)mm_first, 4); lkv("exp", mm_exp, 8); lkv("got", mm_got, 8); }
+    lkv("r608", R32(0x608), 8); lkv("r4C8", R32(0x4C8), 8); lkv("r514", R32(0x514), 8); lkv("r6A2", R16(0x6A2), 4); lkv("r550", R8(0x550), 2); lkv("r100", R32(0x100), 8); lput("\r\n");
+    return 1;
+}
+
 /* 3c단계 - 칩 내부 퓨즈(efuse) 읽기 (rtw88 efuse.c: rtw_dump_physical_efuse_map / rtw_dump_logical_efuse_map, 8822C 지도: 물리 512, 논리 768, 보호 124)
  * 결과: MAC 주소(논리 0x120), RFE 옵션(0xCA), 보드 옵션(0xB?) 등. PHY 표를 고를 때 RFE 옵션이 필요함 */
 static uint8_t ef_phy[512], ef_log[768];
-static int rtw_efuse(volatile uint8_t *m)
+/* 물리 efuse(ef_phy) → 논리 efuse(ef_log). 보호 영역(protect) 앞까지만 읽음. 돌려줌: 쓴 물리 바이트 수, *err = 오류 */
+static int efuse_decode(int psz, int logsz, int *err)
 {
-    for (int i = 0; i < 768; i++) ef_log[i] = 0xFF;
-    R32(0x34) &= ~(3u << 8);                                      /* 뱅크 0 (WiFi) */
-    R8(0x29) &= (uint8_t)~1;                                      /* 2.5V LDO 끄기 */
+    int pi = 0; *err = 0;
+    while (pi < psz) {
+        uint8_t h1 = ef_phy[pi], h2 = ef_phy[pi + 1], we; int blk;
+        if (h1 == 0xFF || ((h1 & 0x1F) == 0xF && h2 == 0xFF)) break;
+        if ((h1 & 0x1F) == 0xF) { blk = ((h2 & 0xF0) >> 1) | ((h1 >> 5) & 7); we = h2 & 0xF; pi += 2; }
+        else { blk = (h1 & 0xF0) >> 4; we = h1 & 0xF; pi += 1; }
+        for (int i = 0; i < 4; i++) {
+            if (we & (1 << i)) continue;
+            int li = (blk << 3) + (i << 1);
+            if (pi + 1 > psz || li + 1 > logsz) { *err = 1; break; }
+            ef_log[li] = ef_phy[pi]; ef_log[li + 1] = ef_phy[pi + 1]; pi += 2;
+        }
+        if (*err) break;
+    }
+    return pi;
+}
+/* 물리 efuse 512바이트를 ef_phy 에 읽음 (뱅크 0). 돌려줌: 1 성공, 0 시간 초과 */
+static int efuse_read_phys(volatile uint8_t *m)
+{
     uint32_t ctl = R32(0x30);
     for (uint32_t a = 0; a < 512; a++) {
         ctl &= ~(0xFFu | (0x3FFu << 8));
@@ -355,20 +441,15 @@ static int rtw_efuse(volatile uint8_t *m)
         if (!ok) { lput("WIFI.efuse res=fail why=timeout"); lkv("addr", a, 4); lput("\r\n"); return 0; }
         ef_phy[a] = (uint8_t)(ctl & 0xFF);
     }
-    int pi = 0, err = 0; const int psz = 512 - 124;
-    while (pi < psz) {
-        uint8_t h1 = ef_phy[pi], h2 = ef_phy[pi + 1], we; int blk;
-        if (h1 == 0xFF || ((h1 & 0x1F) == 0xF && h2 == 0xFF)) break;
-        if ((h1 & 0x1F) == 0xF) { blk = ((h2 & 0xF0) >> 1) | ((h1 >> 5) & 7); we = h2 & 0xF; pi += 2; }
-        else { blk = (h1 & 0xF0) >> 4; we = h1 & 0xF; pi += 1; }
-        for (int i = 0; i < 4; i++) {
-            if (we & (1 << i)) continue;
-            int li = (blk << 3) + (i << 1);
-            if (pi + 1 > psz || li + 1 > 768) { err = 1; break; }
-            ef_log[li] = ef_phy[pi]; ef_log[li + 1] = ef_phy[pi + 1]; pi += 2;
-        }
-        if (err) break;
-    }
+    return 1;
+}
+static int rtw_efuse(volatile uint8_t *m)
+{
+    for (int i = 0; i < 768; i++) ef_log[i] = 0xFF;
+    R32(0x34) &= ~(3u << 8);                                      /* 뱅크 0 (WiFi) */
+    R8(0x29) &= (uint8_t)~1;                                      /* 2.5V LDO 끄기 */
+    if (!efuse_read_phys(m)) return 0;
+    int err = 0, pi = efuse_decode(512 - 124, 768, &err);
     lput("WIFI.efuse res="); lput(err ? "fail" : "ok"); lkv("phyused", (uint32_t)pi, 3); lkv("rtlid", (uint32_t)(ef_log[0] | ef_log[1] << 8), 4);
     lput(" mac=");
     for (int i = 0; i < 6; i++) { lhex(ef_log[0x120 + i], 2); if (i < 5) lput(":"); }
@@ -380,53 +461,107 @@ static int rtw_efuse(volatile uint8_t *m)
     lput("\r\n");
     return !err;
 }
+/* 8.0.204 RTL8821C efuse — 리눅스 rtw88: 접근 허용(0xCF=0x69) → 뱅크 0 → 2.5V LDO 끄기(0x37 bit7) → 물리 512바이트 → 끝나면 허용 끄기.
+ * 보호 영역 96바이트, 논리 512바이트. PCIe 는 MAC 주소가 논리 0xD0, 제조사/장치 ID 0xD6/0xD8, 나머지(채널플랜 0xB8 …)는 8822C 와 같은 위치 */
+static int rtw_efuse_8821(volatile uint8_t *m)
+{
+    for (int i = 0; i < 768; i++) ef_log[i] = 0xFF;
+    R8(0xCF) = 0x69;
+    R32(0x34) &= ~(3u << 8);
+    R8(0x37) &= (uint8_t)~0x80;
+    int ok = efuse_read_phys(m);
+    R8(0xCF) = 0x00;
+    if (!ok) return 0;
+    int err = 0, pi = efuse_decode(512 - 96, 512, &err);
+    lput("WIFI.efuse res="); lput(err ? "fail" : "ok"); lkv("phyused", (uint32_t)pi, 3); lkv("rtlid", (uint32_t)(ef_log[0] | ef_log[1] << 8), 4);
+    lput(" mac=");
+    for (int i = 0; i < 6; i++) { lhex(ef_log[0xD0 + i], 2); if (i < 5) lput(":"); }
+    lkv("rfe", ef_log[0xCA], 2); lkv("board", ef_log[0xC1], 2); lkv("xtal", ef_log[0xB9], 2); lkv("plan", ef_log[0xB8], 2);
+    lkv("cc", (uint32_t)(ef_log[0xCB] << 8 | ef_log[0xCC]), 4); lkv("ther", ef_log[0xBA], 2);
+    lkv("vid", (uint32_t)(ef_log[0xD6] | ef_log[0xD7] << 8), 4); lkv("did", (uint32_t)(ef_log[0xD8] | ef_log[0xD9] << 8), 4); lput("\r\n");
+    lput("WIFI.efuse2");
+    for (int i = 0; i < 16; i++) lkv("b", ef_log[0xB8 + i], 2);
+    lput("\r\n");
+    return !err;
+}
 
 /* 3d단계 - PHY/RF 파라미터 표 적용 (rtw8822c_phy_set_param 의 앞부분: BB/RF 전원, 3선식 설정, MAC/BB/AGC/RFK/RF-B/RF-A 표, 수정 발진기 용량)
  * 표 내용은 리눅스 rtw88 rtw8822c_table.c 에서 컷 D / RFE 1 / PCIe 조건으로 걸러 DRV\rtw8822c_phy.bin 로 만든 것(tools/genphy_rtw8822c.py).
  * 레코드: {u32 op<<28|주소, u32 값}  op 0=32비트쓰기 1=8비트쓰기 2=RF쓰기(경로는 구역이 정함) 3=기다림(마이크로초) */
-static const uint8_t *g_phy; static uint32_t g_phyn; static uint8_t g_xtal;
-static void hf_init(volatile uint8_t *m, int pre)
+static void hf_init(volatile uint8_t *m, int pre)   /* 8822C 전용: PHY 표 앞뒤의 고주파 준비 */
 {
     R32(0x180C) |= 3; R32(0x180C) |= 0x10000000u; R32(0x410C) |= 3; R32(0x410C) |= 0x10000000u;
     if (pre) R32(0x1C3C) &= ~3u; else R32(0x1C3C) |= 3u;
 }
-static int rtw_phytbl(volatile uint8_t *m)
+static const uint8_t *g_phy; static uint32_t g_phyn; static uint8_t g_xtal;
+static const uint8_t *g_phy21; static uint32_t g_phy21n;
+void rtwdet_set_phy21(const uint8_t *b, uint32_t n) { g_phy21 = b; g_phy21n = n; }   /* DRV\\rtw8821c_phy.bin (main.c 가 읽어 넘김, 8.0.210) */
+/* RF 쓰기 방식: 8822C 는 경로 A/B 직접 접근(주소 0 만 SIPI), 8821C 는 경로 A 만 SIPI (rtw_phy_write_rf_reg_sipi, 0xC90) */
+enum { RFW_8822C_A, RFW_8822C_B, RFW_8821C_A };
+/* 표 구역 하나(레코드 cnt 개)를 칩에 적용하고 다음 레코드 위치를 돌려줌. 레코드 = (주소+종류, 값): 종류 0 쓰기32, 1 쓰기8, 2 RF, 3 기다림(us) */
+static const uint32_t *phy_play(volatile uint8_t *m, const uint32_t *rec, uint32_t cnt, int rfw, uint32_t *nw, uint32_t *nr)
 {
-    const uint8_t *b = g_phy; uint32_t n = g_phyn;
-    if (!b || n < 12 || b[0] != 'R' || b[1] != 'T' || b[2] != 'W' || b[3] != 'P') { lput("WIFI.phy res=skip why=no_file DRV\\rtw8822c_phy.bin\r\n"); return 0; }
+    for (uint32_t i = 0; i < cnt; i++, rec += 2) {
+        uint32_t a = rec[0], d = rec[1];
+        switch (a >> 28) {
+        case 0: R32(a & 0xFFFF) = d; (*nw)++; break;
+        case 1: R8(a & 0xFFFF) = (uint8_t)d; (*nw)++; break;
+        case 2: {
+            uint32_t ad = a & 0xFF;
+            if (rfw == RFW_8821C_A) { R32(0xC90) = ((ad << 20) | (d & 0xFFFFF)) & 0x0FFFFFFFu; us(13); }
+            else if (ad) { int path1 = rfw == RFW_8822C_B; uint32_t p = (path1 ? 0x4C00u : 0x3C00u) + (ad << 2); R32(p) = (R32(p) & ~0xFFFFFu) | (d & 0xFFFFF); us(1); }
+            else { R32(rfw == RFW_8822C_B ? 0x4108 : 0x1808) = d & 0x0FFFFFFFu; us(13); }
+            (*nr)++; break; }
+        default: for (uint32_t t = 0; t < d / 1000; t++) us(1000); us((int)(d % 1000)); break;
+        }
+    }
+    return rec;
+}
+/* 3d단계 - PHY 표 올리기 (rtw_phy_load_tables). is21: 0 = 8822C(구역 6: MAC BB AGC 보정 RF-B RF-A), 1 = 8821C(구역 4: MAC BB AGC RF-A). 칩 앞뒤 준비는 각 칩의 phy_set_param */
+static int rtw_phytbl(volatile uint8_t *m, int is21)
+{
+    const uint8_t *b = is21 ? g_phy21 : g_phy; uint32_t n = is21 ? g_phy21n : g_phyn;
+    const uint32_t want = is21 ? 4 : 6;
+    if (!b || n < 12 || b[0] != 'R' || b[1] != 'T' || b[2] != 'W' || b[3] != 'P') { lput(is21 ? "WIFI.phy res=skip why=no_file DRV\\rtw8821c_phy.bin\r\n" : "WIFI.phy res=skip why=no_file DRV\\rtw8822c_phy.bin\r\n"); return 0; }
     uint32_t ns = *(const uint32_t *)(b + 8);
-    if (ns != 6 || n < 12 + 4 * ns) { lput("WIFI.phy res=fail why=bad_header\r\n"); return 0; }
+    if (ns != want || n < 12 + 4 * ns) { lput("WIFI.phy res=fail why=bad_header\r\n"); return 0; }
     const uint32_t *cnt = (const uint32_t *)(b + 12);
     uint32_t tot = 0; for (uint32_t i = 0; i < ns; i++) tot += cnt[i];
     if (n != 12 + 4 * ns + 8 * tot) { lput("WIFI.phy res=fail why=bad_size\r\n"); return 0; }
     const uint32_t *rec = (const uint32_t *)(b + 12 + 4 * ns);
-    R8(0x02) |= 3; R8(0x1F) |= 7; R32(0xEC) |= 0x07000000u;       /* BB/RF 전원 */
-    R32(0xA70) = (R32(0xA70) & ~0x3FFu) | 0x3FFu;                 /* 낮은 속도 DPD 끄기 */
-    hf_init(m, 1);
+    if (is21) {                                                   /* rtw8821c_phy_set_param 앞부분 */
+        uint8_t v = R8(0x02) | 0x40;                              /* SYS_FUNC_EN: FEN_PCIEA */
+        R8(0x02) = v; v |= 3; R8(0x02) = v; v &= (uint8_t)~3; R8(0x02) = v; v |= 3; R8(0x02) = v;   /* BB 리셋 토글 */
+        R8(0x1F) = 7; us(10); R8(0xEF) = 7; us(10);               /* RF_CTRL, WLRF1+3 = RF_EN | RSTB | SDM_RSTB */
+        R32(0x808) &= ~((1u << 28) | (1u << 29));                 /* RXPSEL: RX_PSEL_RST 해제 */
+    } else {                                                      /* rtw8822c_phy_set_param 앞부분 */
+        R8(0x02) |= 3; R8(0x1F) |= 7; R32(0xEC) |= 0x07000000u;   /* BB/RF 전원 */
+        R32(0xA70) = (R32(0xA70) & ~0x3FFu) | 0x3FFu;             /* 낮은 속도 DPD 끄기 */
+        hf_init(m, 1);
+    }
     uint32_t nw = 0, nr = 0;
     for (uint32_t sct = 0; sct < ns; sct++) {
-        if (sct == 3) {                                           /* rtw_load_rfk_table 앞 준비 */
+        if (!is21 && sct == 3) {                                  /* rtw_load_rfk_table 앞 준비 */
             R32(0x1E24) |= 1u << 17; R32(0x1CD0) |= (1u << 28) | (1u << 29) | (1u << 30); R32(0x1CD0) &= ~(1u << 31);
         }
-        for (uint32_t i = 0; i < cnt[sct]; i++, rec++) {
-            uint32_t a = rec[0], d = rec[1]; rec++;
-            switch (a >> 28) {
-            case 0: R32(a & 0xFFFF) = d; nw++; break;
-            case 1: R8(a & 0xFFFF) = (uint8_t)d; nw++; break;
-            case 2: {
-                uint32_t ad = a & 0xFF; int path1 = (sct == 4);   /* 구역 4 = RF-B, 5 = RF-A */
-                if (ad) { uint32_t p = (path1 ? 0x4C00u : 0x3C00u) + (ad << 2); R32(p) = (R32(p) & ~0xFFFFFu) | (d & 0xFFFFF); us(1); }
-                else { R32(path1 ? 0x4108 : 0x1808) = d & 0x0FFFFFFFu; us(13); }
-                nr++; break; }
-            default: for (uint32_t t = 0; t < d / 1000; t++) us(1000); us((int)(d % 1000)); break;
-            }
-        }
+        int rfw = is21 ? RFW_8821C_A : (sct == 4 ? RFW_8822C_B : RFW_8822C_A);   /* 8822C: 구역 4 = RF-B, 5 = RF-A */
+        rec = phy_play(m, rec, cnt[sct], rfw, &nw, &nr);
     }
     uint32_t cap = g_xtal & 0x7F, v = cap | (cap << 7);
-    R32(0x1040) = (R32(0x1040) & ~0xFFFC00u) | ((v << 10) & 0xFFFC00u);
-    hf_init(m, 0);
-    lput("WIFI.phy res=ok"); lkv("secs", ns, 1); lkv("recs", tot, 5); lkv("wr", nw, 5); lkv("rf", nr, 5); lkv("xtal", g_xtal, 2);
-    lkv("r1040", R32(0x1040), 8); lkv("r1c3c", R32(0x1C3C), 8); lkv("r180c", R32(0x180C), 8); lkv("r3c60", R32(0x3C60), 8); lkv("r4c60", R32(0x4C60), 8); lkv("r1d90", R32(0x1D90), 8); lput("\r\n");
+    if (is21) {                                                   /* rtw8821c_phy_set_param 뒷부분: 수정 발진기 용량, CCK 설정, RX_PSEL 복구 */
+        cap = g_xtal & 0x3F;
+        R32(0x24) = (R32(0x24) & ~0x7E000000u) | (cap << 25);
+        R32(0x28) = (R32(0x28) & ~0x7Eu) | (cap << 1);
+        R32(0xA2C) &= ~((1u << 18) | (1u << 22));
+        R32(0x808) |= (1u << 28) | (1u << 29);
+    } else {
+        R32(0x1040) = (R32(0x1040) & ~0xFFFC00u) | ((v << 10) & 0xFFFC00u);
+        hf_init(m, 0);
+    }
+    lput("WIFI.phy res=ok"); lput(is21 ? " chip=8821C" : " chip=8822C"); lkv("secs", ns, 1); lkv("recs", tot, 5); lkv("wr", nw, 5); lkv("rf", nr, 5); lkv("xtal", g_xtal, 2);
+    if (is21) { lkv("r808", R32(0x808), 8); lkv("r24", R32(0x24), 8); lkv("r28", R32(0x28), 8); lkv("rc50", R32(0xC50), 8); lkv("ra2c", R32(0xA2C), 8); lkv("raaa", R8(0xAAA), 2); lkv("r2848", R32(0x2848), 8); }
+    else { lkv("r1040", R32(0x1040), 8); lkv("r1c3c", R32(0x1C3C), 8); lkv("r180c", R32(0x180C), 8); lkv("r3c60", R32(0x3C60), 8); lkv("r4c60", R32(0x4C60), 8); lkv("r1d90", R32(0x1D90), 8); }
+    lput("\r\n");
     return 1;
 }
 
@@ -497,6 +632,34 @@ static int rtw_rfinit(volatile uint8_t *m)
 /* 3g단계 - 채널 설정 (rtw8822c_set_channel: BB → MAC → RF → IGI 토글). 2.4GHz 6번(20MHz) 후 5GHz 36번(20MHz) 순서로 두 번 설정해 보고 RF 0x18 읽기로 확인.
  * 마지막은 2.4GHz 6번으로 되돌려 둔다. 리눅스 rtw88 함수를 tools/genchan_rtw8822c.py 로 uefi/rtwchan.inc 에 그대로 옮겼다. */
 #include "rtwchan.inc"
+#include "rtwchan21.inc"
+/* 8.0.211 8821C 채널 설정 (rtw8821c_set_channel: BB → BB 스윙 → MAC → RF → RX DFIR). 2.4GHz 6번 → 5GHz 36번 → 6번 순서로 설정해 RF 0x18 읽기로 확인.
+ * 리눅스 rtw88 함수를 tools/genchan_rtw8821c.py 로 uefi/rtwchan21.inc 에 그대로 옮겼다. 8822C 와 같은 shim(rtwshim.h)을 쓰고 d->is21 로 RF 접근 주소만 다르다. */
+/* 8.0.213: 8821C 시험은 부팅 중에 막고 도는 동안 로그를 파일에 중간 저장한다(멈춰도 어디까지 갔는지 남도록). main.c 가 저장 함수를 넘겨 준다 */
+static void (*g_flush)(void);
+void rtwdet_set_flush(void (*f)(void)) { g_flush = f; }
+#define FLUSH_STEP() do { if (g_is21 && g_flush && !g_live) g_flush(); } while (0)
+static int g_is21;   /* 1 = 지금 다루는 칩이 RTL8821C (시험 경로). 채널·전력·공존·MAC 주소 고르기가 이 값으로 갈린다 */
+static void rtw_dev_prepare21(volatile uint8_t *m)   /* 8821C 용 채널 설정에 필요한 칩 값 (efuse 에서) */
+{
+    struct rtw_dev *d = &g_rd; d->m = m; d->nerr = 0; d->is21 = 1; d->hal.rf_path_num = 1; g_is21 = 1;
+    uint8_t rfe = ef_log[0xCA] & 0x1F;
+    d->hal.rfe_btg = rfe == 2 || rfe == 4 || rfe == 7 || rfe == 0xA || rfe == 0xC || rfe == 0xF;
+    d->efuse.tx_bb_swing_setting_2g = ef_log[0xC6]; d->efuse.tx_bb_swing_setting_5g = ef_log[0xC7];
+    d->hal.ch_param[0] = R32(0xA24); d->hal.ch_param[1] = R32(0xA28); d->hal.ch_param[2] = R32(0xAAC);   /* 리눅스 phy_set_param 끝에서 읽는 값 (CCK 송신 필터 기본값) */
+}
+static int rtw_chan21(volatile uint8_t *m)
+{
+    struct rtw_dev *d = &g_rd; rtw_dev_prepare21(m);
+    static const uint8_t chs[3] = { 6, 36, 6 };
+    for (int i = 0; i < 3; i++) {
+        rtw8821c_set_channel(d, chs[i], RTW_CHANNEL_WIDTH_20, 0);
+        lput("WIFI.chan res=ok chip=8821C"); lkv("ch", chs[i], 2); lkv("rf18A", rtw_read_rf(d, 0, 0x18, RFREG_MASK), 5);
+        lkv("rfe", ef_log[0xCA] & 0x1F, 2); lkv("btg", d->hal.rfe_btg, 1); lkv("r808", R32(0x808), 8); lkv("rcb8", R32(0xCB8), 8); lkv("rc1c", R32(0xC1C), 8);
+        lkv("ra24", R32(0xA24), 8); lkv("ra80", R32(0xA80), 8); lkv("r8ac", R32(0x8AC), 8); lkv("rc20", R32(0xC20), 8); lkv("r860", R32(0x860), 8); lput("\r\n");
+    }
+    return 1;
+}
 static int rtw_chan(volatile uint8_t *m)
 {
     struct rtw_dev *d = &g_rd; d->m = m; d->nerr = 0;
@@ -614,7 +777,7 @@ static void rx_drain(volatile uint8_t *m, uint32_t ch, uint32_t *rx, uint32_t *b
                 if (idx < 0 && nbss < 160) { idx = nbss++; for (int j = 0; j < 6; j++) bss[idx].bssid[j] = f[16 + j]; bss[idx].ssidn = 0xFF; bss[idx].cnt = 0; bss[idx].ch = (uint8_t)ch; bss[idx].sec = 0; bss[idx].pw = 0; }
                 if (idx >= 0) {
                     bss[idx].cnt++; bss[idx].rate = (uint8_t)(w3 & 0x7F);
-                    if ((w3 & 0x7F) <= 3 && drv >= 8) { uint8_t pwd = b[25]; if (pwd > 0 && pwd < 100 && pwd > bss[idx].pw) bss[idx].pw = pwd; }   /* CCK 프레임의 PHY 상태 PWDB (신호 세기 추정) */
+                    if (drv >= 8 && ((w3 & 0x7F) <= 3 || (g_is21 && (b[24] & 0xF) == 1))) { uint8_t pwd = b[25]; if (pwd > 0 && pwd < 100 && pwd > bss[idx].pw) bss[idx].pw = pwd; }   /* CCK(쪽0)·8821C OFDM(쪽1) 의 PHY 상태 PWDB = 바이트1, dBm = PWDB-110 (rtw8821c query_phy_status_page0/1) */   /* CCK 프레임의 PHY 상태 PWDB (신호 세기 추정) */
                     uint16_t cap = (uint16_t)(f[34] | f[35] << 8); if (cap & 0x10) bss[idx].sec |= 1;
                     const uint8_t *ie = f + 36, *end = f + plen - 4;
                     while (ie + 2 <= end && ie + 2 + ie[1] <= end) {
@@ -669,6 +832,45 @@ static void rtw_coexfix(volatile uint8_t *m)
     lput("WIFI.coex res=ok"); lkv("g38_before", g0, 8); lkv("g38_after", coex_rd(m, 0x38), 8); lkv("r70_before", r70, 8); lkv("r70", R32(0x70), 8);
     lkv("q4c6_before", q0, 2); lkv("q4c6", R8(0x4C6), 2); lkv("txpause_before", p0, 4); lkv("txpause", R16(0x522), 4); lkv("r762", R16(0x762), 4); lkv("r40", R32(0x40), 8); lput("\r\n");
 }
+/* ===== 8.0.212: 칩 갈림 한 곳 — 아래 세 함수만 칩(g_is21)을 보고 갈린다. 스캔·접속·4-way·DHCP 쪽은 두 칩이 같은 코드를 쓴다 ===== */
+/* 8821C 송신 전력: 리눅스 rtw8821c_set_tx_power_index 는 속도별 표를 0x1D00(경로 A)부터 4속도씩 한 낱말로 쓴다.
+ * 여기서는 8822C 시험과 같이 efuse 그룹 기준값에서 4(=1dB) 낮춘 한 값을 모든 속도에 쓴다(시험용, 2.4GHz 만 의미 있음. 5GHz 는 기본값). */
+static void rtw_txpwr21(volatile uint8_t *m, int ch)
+{
+    int g = ch <= 2 ? 0 : ch <= 5 ? 1 : ch <= 8 ? 2 : ch <= 11 ? 3 : ch <= 13 ? 4 : 5;
+    uint32_t c = ef_log[0x10 + g], o = ef_log[0x10 + 6 + (g > 4 ? 4 : g)];
+    if (ch > 14 || c == 0xFF || c > 0x3F) c = 0x24; if (ch > 14 || o == 0xFF || o > 0x3F) o = 0x24;     /* 8821C 최대 전력 지수 0x3F */
+    c = c > 4 ? c - 4 : 0; o = o > 4 ? o - 4 : 0;
+    R32(0x1D00) = c * 0x01010101u;
+    for (uint32_t off = 4; off <= 0x34; off += 4) R32(0x1D00 + off) = o * 0x01010101u;
+    static int logged; if (logged < 3) { logged++; lput("WIFI.txpwr res=ok chip=8821C"); lkv("ch", (uint32_t)ch, 2); lkv("cck", c, 2); lkv("ofdm", o, 2); lkv("efcck", ef_log[0x10 + g], 2); lput("\r\n"); }
+}
+/* 8821C 공존: 리눅스 rtw8821c_coex_cfg_init(블루투스 3선 켜기 등) + 무선만 쓰는 안테나 연결(rtw8821c_coex_cfg_ant_switch: BB 스위치 → WLG).
+ * rtw_coexfix(8822C)는 GNT 강제 같은 8822C 전용 방법이라 8821C 에는 쓰지 않는다. */
+static void rtw_coex21(volatile uint8_t *m)
+{
+    struct rtw_dev *d = &g_rd; d->m = m;
+    uint32_t led0 = R32(0x4C), rfe0 = R32(REG_RFE_CTRL8);
+    rtw8821c_coex_cfg_init(d);
+    uint8_t rfe = ef_log[0xCA] & 0x1F; int inverse = (rfe == 3 || rfe == 4 || rfe == 11 || rfe == 12);   /* 안테나 스위치 극성 (rfe 0 은 0) */
+    rtw_write32_clr(d, REG_LED_CFG, BIT_DPDT_SEL_EN); rtw_write32_set(d, REG_LED_CFG, BIT_DPDT_WL_SEL);
+    rtw_write8_mask(d, REG_RFE_CTRL8, BIT_MASK_RFE_SEL89, DPDT_CTRL_PIN);
+    rtw_write32_mask(d, REG_RFE_CTRL8, BIT_MASK_R_RFE_SEL_15, inverse ? 1 : 2);
+    rtw_write8_set(d, REG_CTRL_TYPE, BIT_CTRL_TYPE1); rtw_write8_set(d, REG_CTRL_TYPE, BIT_CTRL_TYPE2);
+    /* 무선 전용 공존 — 리눅스 rtw_coex_set_ant_path(COEX_SET_ANT_WONLY) + rtw_coex_table(1) + TXPAUSE 해제 */
+    uint32_t g0 = coex_rd(m, 0x38), p0 = R16(0x522), t0 = R32(0x6C0);
+    R32(0x70) |= 1u << 26;                                       /* 경로 제어권 = 무선 (LTE_MUX_CTRL_PATH) */
+    coex_wr(m, 0x38, (coex_rd(m, 0x38) & ~0xFF00u) | 0x7700u);   /* GNT_BT 낮춤 고정, GNT_WL 높임 고정 */
+    R32(0x6C0) = 0x55555555u; R32(0x6C4) = 0x55555555u; R32(0x6C8) = 0xf0ffffffu;   /* 공존 표(단일 안테나 case-1) + 끊김표 */
+    R16(0x522) = 0;                                              /* 송신 일시정지 해제 */
+    lput("WIFI.coex2 res=ok"); lkv("g38_before", g0, 8); lkv("g38", coex_rd(m, 0x38), 8); lkv("txpause_before", p0, 4); lkv("txpause", R16(0x522), 4);
+    lkv("t6c0_before", t0, 8); lkv("t6c0", R32(0x6C0), 8); lkv("t6c4", R32(0x6C4), 8); lkv("t6c8", R32(0x6C8), 8); lkv("r70", R32(0x70), 8);
+    lkv("agc1d00", R32(0x1D00), 8); lkv("agc1d04", R32(0x1D04), 8); lkv("r522", R16(0x522), 4); lkv("r550", R8(0x550), 2); lkv("r608", R32(0x608), 8); lput("\r\n");
+    lput("WIFI.coex res=ok chip=8821C"); lkv("led_before", led0, 8); lkv("led", R32(0x4C), 8); lkv("rfe8_before", rfe0, 8); lkv("rfe8", R32(REG_RFE_CTRL8), 8); lkv("r40", R32(0x40), 8); lkv("r4c6", R8(0x4C6), 2); lkv("r762", R16(0x762), 4); lput("\r\n");
+}
+static void rtw_setch(struct rtw_dev *d, int ch) { d->is21 = g_is21; if (g_is21) rtw8821c_set_channel(d, (u8)ch, RTW_CHANNEL_WIDTH_20, 0); else rtw8822c_set_channel(d, (u8)ch, RTW_CHANNEL_WIDTH_20, 0); }
+static void rtw_txpwr(volatile uint8_t *m, int ch) { if (g_is21) rtw_txpwr21(m, ch); else rtw_txpwr2g(m, ch); }
+static void rtw_coex(volatile uint8_t *m) { if (g_is21) rtw_coex21(m); else rtw_coexfix(m); }
 /* 큐 q(0=MGMT, 1=BE)로 프레임 한 개 보냄. 반환 1=칩이 읽어 감(하드웨어 인덱스가 따라옴).
  * 슬롯 768바이트. MGMT 는 칩이 순서번호를 붙이고(en_hwseq), BE(데이터)는 헤더의 순서번호를 그대로 씀 */
 static uint16_t g_txsn;
@@ -1037,7 +1239,7 @@ static int rtw_connect(volatile uint8_t *m, struct rtw_dev *d)
     uint64_t t0 = __builtin_ia32_rdtsc(); wpa_pmk(g_pass, (const uint8_t *)g_ssid, sl, g_pmk); uint64_t t1 = __builtin_ia32_rdtsc();
     lput("WIFI.pmk res=done"); lkv("kcycles", (uint32_t)((t1 - t0) >> 10), 8); lput("\r\n");
     /* 채널 맞추고 수신 보관 켜기 */
-    rtw8822c_set_channel(d, g_chan, RTW_CHANNEL_WIDTH_20, 0); rtw_txpwr2g(m, g_chan);
+    rtw_setch(d, g_chan); rtw_txpwr(m, g_chan);
     g_listen = 1; g_bcq = 0; g_qn = 0; g_qdrop = 0; g_have_tk = g_have_gtk = 0; pump(m, 30);
     uint8_t fr[160];
     int auth = 0;
@@ -1122,7 +1324,7 @@ static int rtw_live_connect(volatile uint8_t *m, struct rtw_dev *d)
     for (uint8_t c = 1; c <= 13; c++) if (c != g_chan) order[no++] = c;
     int found = 0;
     for (int ci = 0; ci < no && !found; ci++) {
-        rtw8822c_set_channel(d, order[ci], RTW_CHANNEL_WIDTH_20, 0);
+        rtw_setch(d, order[ci]);
         uint32_t rx = 0, bc = 0, c2 = 0, bad = 0, hw = 0;
         pumpx(m, 300, order[ci], &rx, &bc, &c2, &bad, &hw);
         for (int i = 0; i < nbss; i++) if (bss[i].ssidn == sl && !__builtin_memcmp(bss[i].ssid, g_ssid, (unsigned)sl) && (bss[i].sec & 2) && bss[i].ch < 14) { found = 1; break; }
@@ -1144,7 +1346,7 @@ static int rtw_scan(volatile uint8_t *m, void *dma)
         *(volatile uint32_t *)(bufs + i * RXBUF) = 0; *(volatile uint32_t *)(bufs + i * RXBUF + 8) = 0;
     }
     for (int i = 0; i < 2 * 256; i++) g_txbd[0][i] = 0;
-    for (int i = 0; i < 6; i++) g_mac[i] = ef_log[0x120 + i];
+    for (int i = 0; i < 6; i++) g_mac[i] = ef_log[(g_is21 ? 0xD0 : 0x120) + i];   /* 8821C 는 efuse 0xD0, 8822C 는 0x120 */
     R8(0x303) |= 0xF7;
     R32(0x338) = (uint32_t)(uintptr_t)bd; R16(0x382) = RXN & 0xFFF;
     R32(0x310) = (uint32_t)(uintptr_t)g_txbd[0]; R16(0x380) = TXN & 0xFFF;         /* MGMT 큐 링 */
@@ -1156,45 +1358,56 @@ static int rtw_scan(volatile uint8_t *m, void *dma)
     lput("WIFI.rxring res=ok"); lkv("bd", (uint32_t)(uintptr_t)bd, 8); lkv("n", RXN, 3); lkv("r338", R32(0x338), 8); lkv("r382", R16(0x382), 4); lkv("r3b4", R32(0x3B4), 8);
     lkv("r608", R32(0x608), 8); lkv("r6a0", R16(0x6A0), 4); lkv("r6a2", R16(0x6A2), 4); lkv("r6a4", R16(0x6A4), 4); lkv("r60f", R8(0x60F), 2);
     lkv("txbd", (uint32_t)(uintptr_t)g_txbd[0], 8); lkv("r310", R32(0x310), 8); lkv("r380", R16(0x380), 4); lkv("r3b0", R32(0x3B0), 8); lkv("r610", R32(0x610), 8); lkv("r614", R16(0x614), 4); lput("\r\n");
-    rtw_coexfix(m);
+    FLUSH_STEP();
+    rtw_coex(m);
+    FLUSH_STEP();
     g_ready = 1;
     if (g_live) { rtw_live_connect(m, d); return 1; }   /* 실시간 모드는 짧은 스캔 + 접속만 (진단용 전체 스캔·송신 시험은 건너뜀) */
-    static const uint8_t chs[] = { 1,2,3,4,5,6,7,8,9,10,11,12,13, 36,40,44,48,52,56,60,64, 100,104,108,112,116,120,124,128,132,136,140, 149,153,157,161,165 };
+    static const uint8_t chs_full[] = { 1,2,3,4,5,6,7,8,9,10,11,12,13, 36,40,44,48,52,56,60,64, 100,104,108,112,116,120,124,128,132,136,140, 149,153,157,161,165 };
+    static const uint8_t chs_quick[] = { 1, 6, 11, 36, 149 };   /* 8821C 시험: 부팅 중에 막고 도는 시간을 줄이려고 대표 채널만 (2.4G 1·6·11, 5G 36·149) */
+    const uint8_t *chs = g_is21 ? chs_quick : chs_full; unsigned nchs = g_is21 ? sizeof chs_quick : sizeof chs_full;
     uint32_t tot = 0, totb = 0, totc = 0, totbad = 0;
-    for (unsigned ci = 0; ci < sizeof chs; ci++) {
-        rtw8822c_set_channel(d, chs[ci], RTW_CHANNEL_WIDTH_20, 0);
+    FLUSH_STEP();
+    for (unsigned ci = 0; ci < nchs; ci++) {
+        rtw_setch(d, chs[ci]);
         uint32_t rx = 0, bc = 0, c2 = 0, bad = 0, hw = 0;
-        pumpx(m, chs[ci] < 14 ? 450 : 250, chs[ci], &rx, &bc, &c2, &bad, &hw);
+        pumpx(m, g_is21 ? 250 : chs[ci] < 14 ? 450 : 250, chs[ci], &rx, &bc, &c2, &bad, &hw);
         tot += rx; totb += bc; totc += c2; totbad += bad;
-        if (rx || ci < 3) { lput("WIFI.scan"); lkv("ch", chs[ci], 2); lkv("rx", rx, 3); lkv("bcn", bc, 3); lkv("c2h", c2, 2); lkv("bad", bad, 2); lkv("hw", hw, 3); lput("\r\n"); }
+        if (rx || ci < 3 || g_is21) { lput("WIFI.scan"); lkv("ch", chs[ci], 2); lkv("rx", rx, 3); lkv("bcn", bc, 3); lkv("c2h", c2, 2); lkv("bad", bad, 2); lkv("hw", hw, 3); lput("\r\n"); }
     }
+    FLUSH_STEP();
     lput("WIFI.scan res=ok"); lkv("rx", tot, 4); lkv("bcn", totb, 4); lkv("c2h", totc, 3); lkv("bad", totbad, 3); lkv("aps", (uint32_t)nbss, 2); lkv("r3b4", R32(0x3B4), 8); lput("\r\n");
     for (int i = 0; i < nbss; i++) {
         lput("WIFI.bss"); lput(" bssid="); for (int j = 0; j < 6; j++) { lhex(bss[i].bssid[j], 2); if (j < 5) lput(":"); }
-        lkv("ch", bss[i].ch, 2); lkv("sec", bss[i].sec, 1); lkv("rate", bss[i].rate, 2); lkv("n", bss[i].cnt, 3); lput(" ssid="); put_ssid(bss[i].ssid, bss[i].ssidn); lput("\r\n");
+        lkv("ch", bss[i].ch, 2); lkv("sec", bss[i].sec, 1); lkv("rate", bss[i].rate, 2); lkv("pw", bss[i].pw, 2); lkv("n", bss[i].cnt, 3); lput(" ssid="); put_ssid(bss[i].ssid, bss[i].ssidn); lput("\r\n");
     }
     /* 4b: probe request 송신 시험 (2.4GHz 1·6·11번, 1Mbps CCK, 와일드카드 SSID) */
-    static const uint8_t pch[3] = { 1, 6, 11 };
+    static const uint8_t pch[4] = { 1, 6, 11, 36 };
+    const int npch = g_is21 ? 2 : 3, pch0 = 0;   /* 8821C 시험: 8.0.215 로그에서 공유기가 1번(2.4G)·36번(5G)에만 있었음 → 그 둘에 쏜다(6번엔 공유기가 없어 응답 0 이 당연했음) */
     uint8_t fr[40]; for (int i = 0; i < 40; i++) fr[i] = 0;
     fr[0] = 0x40; for (int j = 0; j < 6; j++) { fr[4 + j] = 0xFF; fr[10 + j] = g_mac[j]; fr[16 + j] = 0xFF; }
     fr[24] = 0; fr[25] = 0; fr[26] = 1; fr[27] = 4; fr[28] = 0x82; fr[29] = 0x84; fr[30] = 0x8B; fr[31] = 0x96;
-    for (int pi = 0; pi < 3; pi++) {
-        rtw8822c_set_channel(d, pch[pi], RTW_CHANNEL_WIDTH_20, 0);
-        rtw_txpwr2g(m, pch[pi]);
+    for (int pi = pch0; pi < pch0 + npch; pi++) {
+        int pc = (g_is21 && pi == 1) ? 36 : pch[pi];   /* 8821C 두 번째 = 5G 36번 */
+        int is5g = pc > 14;
+        if (is5g) { fr[26] = 1; fr[27] = 4; fr[28] = 0x8C; fr[29] = 0x12; fr[30] = 0x98; fr[31] = 0x24; }   /* 5G 는 CCK 없음: 6·9·12·18Mbps OFDM */
+        rtw_setch(d, pc);
+        rtw_txpwr(m, pc);
         int sent = 0, taken = 0; uint32_t rx = 0, bc = 0, c2 = 0, bad = 0, hw = 0, pr0 = g_prsp;
         for (int rep = 0; rep < 4; rep++) {
-            sent++; if (tx_mgmt(m, fr, 32, 0)) taken++;
-            pumpx(m, 150, pch[pi], &rx, &bc, &c2, &bad, &hw);
+            sent++; if (tx_mgmt(m, fr, 32, is5g ? 4 : 0)) taken++;
+            pumpx(m, 150, pc, &rx, &bc, &c2, &bad, &hw);
         }
-        lput("WIFI.tx"); lkv("ch", pch[pi], 2); lkv("sent", (uint32_t)sent, 1); lkv("taken", (uint32_t)taken, 1); lkv("rx", rx, 3); lkv("prsp", g_prsp - pr0, 3); lkv("c2h", c2, 2); lkv("r3b0", R32(0x3B0), 8); lkv("r3b4", R32(0x3B4), 8); lput("\r\n");
+        lput("WIFI.tx"); lkv("ch", (uint32_t)pc, 2); lkv("sent", (uint32_t)sent, 1); lkv("taken", (uint32_t)taken, 1); lkv("rx", rx, 3); lkv("prsp", g_prsp - pr0, 3); lkv("c2h", c2, 2); lkv("r3b0", R32(0x3B0), 8); lkv("r3b4", R32(0x3B4), 8); lput("\r\n");
     }
     lput("WIFI.tx res=ok"); lkv("prsp_total", g_prsp, 3); lput("\r\n");
-    rtw8822c_set_channel(d, 6, RTW_CHANNEL_WIDTH_20, 0);
+    FLUSH_STEP();
+    rtw_setch(d, 6);
     rtw_connect(m, d);
     return 1;
 }
 
-static int rtw_dlfw(volatile uint8_t *m, const uint8_t *fw, uint32_t fwsz, void *dma)
+static int rtw_dlfw(volatile uint8_t *m, const uint8_t *fw, uint32_t fwsz, void *dma, int dl_only)   /* dl_only=1: 펌웨어 올리고 준비 확인까지만 (8.0.203 RTL8821C 시험) */
 {
     uint8_t *ring = (uint8_t *)dma, *pk = (uint8_t *)dma + 4096;
     const char *why = "";
@@ -1231,7 +1444,7 @@ static int rtw_dlfw(volatile uint8_t *m, const uint8_t *fw, uint32_t fwsz, void 
     int rdy = pollm(m, 0x80, 0xCFFF, 0x8000 | 0x4000 | 0x08 | 0x20 | 0x50, 1000000);
     lput("WIFI.fwrdy res="); lput(rdy ? "ok" : "fail"); lkv("r80", R32(0x80), 8); lkv("rFD", R8(0xFD), 2); lput("\r\n");
     if (!rdy) { R8(0x80) &= (uint8_t)~1; R8(0x03) |= 4; }
-    else if (rtw_trxcfg(m)) { if (rtw_macinit(m, (int)((R32(0xF0) >> 12) & 0xF)) && rtw_phytbl(m) && rtw_trxmode(m) && rtw_rfinit(m)) { rtw_chan(m); rtw_scan(m, dma); } }
+    else if (!dl_only && rtw_trxcfg(m, 0)) { if (rtw_macinit(m, (int)((R32(0xF0) >> 12) & 0xF)) && rtw_phytbl(m, 0) && rtw_trxmode(m) && rtw_rfinit(m)) { rtw_chan(m); rtw_scan(m, dma); } }
     return rdy;
 }
 
@@ -1264,15 +1477,137 @@ static void brg_off(void) { for (int i = 0; i < nbrg; i++) cw(brg[i].b, brg[i].d
 
 static int g_pm, g_Bs, g_Ds; static uint32_t g_cmd0, g_pmcsr0; static volatile uint8_t *g_m8; static const uint8_t *g_fw; static uint32_t g_fwsz; static void *g_dma; static int g_dl;
 /* 세 토막으로 나눔 - begin(PCI 설정 접근, 메인 코어) → work(칩 메모리만 만짐, 어느 코어든 가능) → end(PCI 설정 복구, 메인 코어) */
+/* ====== 8.0.202: RTL8821CE 칩 전원 켜기 (리눅스 rtw88 rtw8821c 의 PCI 전원 순서) ======
+ * 끝나면 PCI CMD 를 처음 값으로 돌려놓는다 (칩 전원은 켠 채로 둠). 결과는 WIFI.* 줄로 남김 */
+static const PwrCmd pwr_on_8821[] = {
+    /* 카드 끔 → 카드 준비 */
+    {0x0005, 1, 0x98, 0x00}, {0x0300, 1, 0xFF, 0x00}, {0x0301, 1, 0xFF, 0x00},
+    /* 카드 준비 → 동작 */
+    {0x0005, 1, 0x1C, 0x00}, {0x0075, 1, 0x01, 0x01}, {0x0006, 2, 0x02, 0x02}, {0x0075, 1, 0x01, 0x00},
+    {0x0006, 1, 0x01, 0x01}, {0x0005, 1, 0x80, 0x00}, {0x0005, 1, 0x18, 0x00}, {0x0005, 1, 0x01, 0x01},
+    {0x0005, 2, 0x01, 0x00}, {0x0020, 1, 0x08, 0x08}, {0x0074, 1, 0x20, 0x20}, {0x0022, 1, 0x02, 0x00},
+    {0x0062, 1, 0xE0, 0xE0}, {0x0061, 1, 0xE0, 0x00}, {0x007C, 1, 0x02, 0x00},
+};
+static const uint8_t *g_fw21; static uint32_t g_fw21n;
+void rtwdet_set_fw21(const uint8_t *fw, uint32_t n) { g_fw21 = fw; g_fw21n = n; }   /* DRV\\rtw8821c_fw.bin (main.c 가 읽어 넘김) */
+/* 8.0.203 2단계 — 펌웨어 파일 검사 → 시스템 설정 → 신호등 링 → 펌웨어 올리기 → 준비 확인. 끝나면 칩 CPU 를 다시 멈춤 */
+static void wifi8821_bringup(volatile uint8_t *m8, void *dma, uint32_t dmasz);
+static int g_chip21, g_want_live;   /* 8.0.218: 실시간 모드에서 8821C 를 쓰는지 / 시작 전에 실시간이 요청됐는지 */
+static void wifi8821_stage2(volatile uint8_t *m8, void *dma, uint32_t dmasz)
+{
+    volatile uint32_t *m32 = (volatile uint32_t *)m8; const uint8_t *fw = g_fw21; uint32_t fwsz = g_fw21n;
+    if (!fw || fwsz < 64) { lput("WIFI.fw res=skip why=no_file DRV\\rtw8821c_fw.bin\r\n"); return; }
+    uint32_t dm = *(const uint32_t *)(fw + 0x24), im = *(const uint32_t *)(fw + 0x30), em = *(const uint32_t *)(fw + 0x34);
+    uint8_t mu = fw[0x18]; if (!(mu & 0x10)) em = 0;
+    uint32_t real = 64 + dm + 8 + im + 8 + (em ? em + 8 : 0);
+    int fwok = fw[0] == 0x21 && fw[1] == 0x88 && real == fwsz;
+    lput("WIFI.fw res="); lput(fwok ? "ok" : "fail"); lkv("size", fwsz, 8); lkv("calc", real, 8); lkv("sig", (uint32_t)(fw[0] | fw[1] << 8), 4); lkv("ver", (uint32_t)(fw[4] | fw[5] << 8), 4); lkv("sub", fw[6], 2); lput("\r\n");
+    if (!fwok) return;
+    m8[0x1C] = 0; m32[0x74 / 4] |= 0x100u;                                           /* 사전 설정 (PCIe) */
+    uint32_t v = m32[0x1080 / 4]; v |= 0x10000u | 0x100u; m32[0x1080 / 4] = v;     /* WL_PLATFORM_RST | DDMA_EN */
+    m8[3] |= 0xD8;                                                                  /* SYS_FUNC_EN+1 |= 0xD8 (8821C 도 같음) */
+    m8[0x1103] = (uint8_t)((m8[0x1103] & 0xF0) | 0x0C);
+    v = m32[0x80 / 4];
+    if (v & 0x100000u) { m32[0x80 / 4] = v & ~0x100000u; m32[0x40 / 4] &= ~0x80000u; }
+    wait_ms(5);
+    lput("WIFI.mac res=ok"); lkv("r1080", m32[0x1080 / 4], 8); lkv("r03", m8[3], 2); lkv("r1103", m8[0x1103], 2); lkv("r80", m32[0x80 / 4], 8); lput("\r\n");
+    rtw_efuse_8821(m8);                                                             /* 8.0.204: 펌웨어 올리기 전에 읽음 (리눅스와 같은 순서) */
+    if (!dma || dmasz < 12288 || ((uintptr_t)dma >> 32)) { lput("WIFI.ring res=skip why=no_dma_below_4G\r\n"); return; }
+    volatile uint8_t *rg = (volatile uint8_t *)dma; for (uint32_t i = 0; i < 4096; i++) rg[i] = 0;
+    uint32_t pa = (uint32_t)(uintptr_t)dma;
+    m8[0x303] |= 0xF7; m32[0x308 / 4] = pa; m32[0x39C / 4] = 0xFFFFFFFFu; m32[0x300 / 4] |= (1u << 20) | (1u << 15);
+    wait_ms(1);
+    uint32_t rb = m32[0x308 / 4];
+    lput("WIFI.ring res="); lput(rb == pa ? "ok" : "fail"); lkv("pa", pa, 8); lkv("desa", rb, 8); lput("\r\n");
+    if (rb != pa) return;
+    int rdy = rtw_dlfw(m8, fw, fwsz, dma, 1);
+    lput("WIFI.fwdl8821 res="); lput(rdy ? "ok" : "fail"); lkv("fwver", (uint32_t)(fw[4] | fw[5] << 8), 4); lput("\r\n");
+    if (rdy && rtw_trxcfg(m8, 1) && rtw_macinit_8821c(m8)) {
+        g_xtal = ef_log[0xB9];                                                      /* 8821C 수정 발진기 용량 (efuse 0xB9) */
+        if (rtw_phytbl(m8, 1) && rtw_chan21(m8)) {                                 /* 8.0.210: 3c PHY 표 → 8.0.211: 3d 채널 설정 */
+            g_dmasz = dmasz; FLUSH_STEP();
+            rtw_scan(m8, dma);                                                      /* 8.0.212: 4 수신 링·스캔·송신 시험·접속 (8822C 와 같은 코드, 칩 갈림은 rtw_setch/rtw_txpwr/rtw_coex) */
+        }
+        if (!g_live) g_is21 = 0;                           /* 실시간 모드는 칩 갈림(g_is21)을 계속 써야 한다 */
+    }                                                     /* 8.0.208: 3b-1 송수신 큐·H2C 큐 설정 (펌웨어가 돌고 있을 때) */
+    if (g_live) { lput("WIFI.chip res=info id=8821C mode=live note=chip_stays_on\r\n"); return; }   /* 8.0.218: 실시간 모드는 칩 CPU 를 멈추지 않는다 */
+    dl_cpu(m8, 0);                                                                  /* 시험 뒤 칩 CPU 멈춤 */
+    lput("WIFI.cpu res=stopped note=diag_flow\r\n");
+}
+static void wifi8821_stage1(int B, int D, void *dma, uint32_t dmasz)
+{
+    g_B = B; g_D = D; g_pcie = 0; g_dmasz = dmasz;
+    uint32_t cmd0 = cr(B, D, 0, 4) & 0xFFFFu, bar2 = cr(B, D, 0, 0x18), bar3 = cr(B, D, 0, 0x1C);
+    int pm = 0;
+    if (cr(B, D, 0, 4) & 0x00100000u) {
+        int p = (int)(cr(B, D, 0, 0x34) & 0xFC);
+        for (int i = 0; i < 16 && p >= 0x40; i++) { uint32_t h = cr(B, D, 0, p); if ((h & 0xFF) == 0x01) { pm = p; break; } p = (int)((h >> 8) & 0xFC); }
+    }
+    uint32_t pmcsr0 = pm ? (cr(B, D, 0, pm + 4) & 0xFFFFu) : 0;
+    lput("WIFI.find res=ok chip=8821C"); lkv("bus", (uint32_t)B, 2); lkv("dev", (uint32_t)D, 2); lkv("cmd", cmd0, 4); lkv("bar2", bar2, 8); lkv("bar3", bar3, 8); lkv("pm", (uint32_t)pm, 2); lkv("pmcsr", pmcsr0, 4);
+    lkv("subsys", cr(B, D, 0, 0x2C), 8); lkv("rev", cr(B, D, 0, 8) & 0xFFu, 2); lput("\r\n");
+    uint64_t base = (bar2 & 6) == 4 ? (((uint64_t)bar3 << 32) | (bar2 & 0xFFFFFFF0u)) : (uint64_t)(bar2 & 0xFFFFFFF0u);
+    if ((bar2 & 1) || !base) { lput("WIFI.bar res=fail why=BAR2_unassigned_or_io\r\n"); return; }
+    if (pm && (pmcsr0 & 3)) { cw(B, D, 0, pm + 4, pmcsr0 & ~0x8003u & 0xFFFFu); wait_ms(10); }
+    brg_on(B);
+    cw(B, D, 0, 4, cmd0 | 0x0006u); wait_ms(10);
+    cw(B, D, 0, 4, (cmd0 | 0x0006u) | 0xF9000000u); wait_ms(1);
+    volatile uint8_t *m8 = (volatile uint8_t *)(uintptr_t)base;
+    wifi8821_bringup(m8, dma, dmasz);
+    brg_off();
+    cw(B, D, 0, 4, cmd0);
+    if (pm && (pmcsr0 & 3)) cw(B, D, 0, pm + 4, pmcsr0 & 0x7FFFu);
+    lput("WIFI.chip res=info id=8821C stage=fwdl_trx_macinit_phy_chan_scan note=iqk_not_yet pci_cmd_restored\r\n");
+}
+void rtwdet_want_live(int on) { g_want_live = on; }
+int rtwdet_fw21_ok(void) { return g_fw21 && g_fw21n >= 64; }
+/* 8821C 칩 켜기 → 펌웨어 → MAC → PHY → 채널 → 스캔/접속. 시험 흐름(wifi8821_stage1)과 실시간 흐름(rtwdet_work 의 코루틴)이 같이 쓴다 */
+static void wifi8821_bringup(volatile uint8_t *m8, void *dma, uint32_t dmasz)
+{
+    volatile uint32_t *m32 = (volatile uint32_t *)m8;
+    uint32_t f0 = m32[0xF0 / 4], fc = m32[0xFC / 4], cr0 = m32[0x100 / 4];
+    lput("WIFI.regs1 res="); lput(f0 == 0xFFFFFFFFu ? "fail" : "ok"); lkv("F0", f0, 8); lkv("FC", fc, 8); lkv("CR", cr0, 8); lkv("r05", m8[5], 2); lkv("r06", m8[6], 2); lput("\r\n");
+    if (f0 == 0xFFFFFFFFu) lput("WIFI.pwr res=skip why=mmio_all_FF\r\n");
+    else {
+        int fail = -1;
+        for (int i = 0; i < (int)(sizeof pwr_on_8821 / sizeof pwr_on_8821[0]) && fail < 0; i++) {
+            const PwrCmd *c = &pwr_on_8821[i];
+            if (c->cmd == 1) { uint8_t v = m8[c->off]; v = (uint8_t)((v & ~c->mask) | (c->val & c->mask)); m8[c->off] = v; }
+            else {
+                int ok = 0;
+                for (int t = 0; t < 2000; t++) { if ((m8[c->off] & c->mask) == (c->val & c->mask)) { ok = 1; break; } wait_ms(0); for (int u = 0; u < 50; u++) p_outb(0x80, 0); }
+                if (!ok) fail = i;
+            }
+        }
+        lput("WIFI.pwr res="); lput(fail < 0 ? "ok" : "fail"); if (fail >= 0) lkv("step", (uint32_t)fail, 2); lput("\r\n");
+        wait_ms(10);
+        lput("WIFI.regs2 res=ok"); lkv("F0", m32[0xF0 / 4], 8); lkv("FC", m32[0xFC / 4], 8); lkv("CR", m32[0x100 / 4], 8);
+        lkv("r05", m8[5], 2); lkv("r06", m8[6], 2); lkv("r20", m8[0x20], 2); lkv("r74", m8[0x74], 2); lput("\r\n");
+        if (fail < 0) wifi8821_stage2(m8, dma, dmasz);
+    }
+}
+
+void rtwdet_set_clock(uint32_t (*clk)(void)) { g_cal_clk = clk; }
+static void rtw_calibrate_wait(void)   /* 20ms 동안 포트 0x80 쓰기를 세어 1ms 당 횟수를 정한다 (200~4000 으로 제한) */
+{
+    if (!g_cal_clk) return;
+    uint32_t t0 = g_cal_clk(); while (g_cal_clk() == t0) { }          /* ms 경계에 맞춤 */
+    uint32_t t1 = g_cal_clk(), loops = 0;
+    while ((uint32_t)(g_cal_clk() - t1) < 20) { for (int i = 0; i < 100; i++) p_outb(0x80, 0); loops += 100; }
+    uint32_t per = loops / 20; if (per < 200) per = 200; if (per > 4000) per = 4000;
+    g_outb_per_ms = per;
+    lput("WIFI.cal res=ok"); lkv("outb_per_ms", per, 4); lkv("raw", loops / 20, 5); lput("\r\n");
+}
 int rtwdet_begin(char *buf, int max, const uint8_t *fw, uint32_t fwsz, void *dma, uint32_t dmasz, int dl, const uint8_t *phy, uint32_t phyn)
 {
     g_phy = phy; g_phyn = phyn;
     lg = buf; lgn = 0; lgmax = max; buf[0] = 0;
-    int B = -1, D = 0;
-    for (int b = 0; b < 16 && B < 0; b++)
-        for (int d = 0; d < 32; d++)
-            if (cr(b, d, 0, 0) == 0xC82210ECu) { B = b; D = d; break; }
-    if (B < 0) { lput("WIFI.find res=fail why=C822_not_found\r\n"); return 0; }
+    rtw_calibrate_wait();
+    int B = -1, D = 0, is21 = 0;
+    if (!rtw_find(&B, &D, &is21)) { lput("WIFI.find res=fail why=C822_C821_not_found\r\n"); return 0; }
+    g_chip21 = 0;
+    if (is21 && !(g_want_live && rtwdet_fw21_ok() && dma && dmasz >= 12288 + RXN * RXBUF + 4096 + 2 * TXN * 768)) { wifi8821_stage1(B, D, dma, dmasz); return 0; }   /* 8.0.202: 시험 흐름 — 한 번 돌고 끝, 0 을 돌려주면 호출한 쪽이 로그만 저장 */
+    g_chip21 = is21;                                            /* 8.0.218: 실시간 모드 — 아래 공통 준비 뒤 rtwdet_work 코루틴이 칩을 켠다 */
     uint32_t cmd0 = cr(B, D, 0, 4) & 0xFFFFu, bar2 = cr(B, D, 0, 0x18), bar3 = cr(B, D, 0, 0x1C);
     int pm = 0;
     if (cr(B, D, 0, 4) & 0x00100000u) {
@@ -1296,6 +1631,7 @@ int rtwdet_begin(char *buf, int max, const uint8_t *fw, uint32_t fwsz, void *dma
 
 void rtwdet_work(void)
 {
+    if (g_chip21) { wifi8821_bringup(g_m8, g_dma, g_dmasz); return; }   /* 8.0.218: 8821C 실시간 */
     volatile uint8_t *m8 = g_m8; volatile uint32_t *m32 = (volatile uint32_t *)g_m8;
     const uint8_t *fw = g_fw; uint32_t fwsz = g_fwsz; void *dma = g_dma; uint32_t dmasz = g_dmasz; int dl = g_dl;
     uint32_t f0 = m32[0xF0 / 4], fc = m32[0xFC / 4], cr0 = m32[0x100 / 4];
@@ -1350,7 +1686,7 @@ void rtwdet_work(void)
             wait_ms(1);
             uint32_t rb = m32[0x308 / 4];
             lput("WIFI.ring res="); lput(rb == pa ? "ok" : "fail"); lkv("pa", pa, 8); lkv("desa", rb, 8); lkv("ctrl3", m8[0x303], 2); lkv("idx", m32[0x39C / 4], 8); lput("\r\n");
-            if (dl && rb == pa && fw && fwsz >= 64 && fw[0] == 0x22 && fw[1] == 0x88) rtw_dlfw(m8, fw, fwsz, dma);
+            if (dl && rb == pa && fw && fwsz >= 64 && fw[0] == 0x22 && fw[1] == 0x88) rtw_dlfw(m8, fw, fwsz, dma, 0);
             else lput("WIFI.dl res=skip why=not_requested_or_ring_fail\r\n");
         }
     }
@@ -1468,8 +1804,8 @@ static void rtw_do_scan(volatile uint8_t *m, struct rtw_dev *d)
     fr[24] = 0; fr[25] = 0; fr[26] = 1; fr[27] = 4; fr[28] = 0x82; fr[29] = 0x84; fr[30] = 0x8B; fr[31] = 0x96;
     for (int pass = 0; pass < SCAN_PASSES && !g_scanabort; pass++) {
         for (uint8_t c = 1; c <= 13 && !g_scanabort; c++) {
-            rtw8822c_set_channel(d, c, RTW_CHANNEL_WIDTH_20, 0);
-            rtw_txpwr2g(m, c);
+            rtw_setch(d, c);
+            rtw_txpwr(m, c);
             uint32_t rx = 0, bc = 0, c2 = 0, bad = 0, hw = 0;
             tx_mgmt(m, fr, 32, 0);
             pumpx(m, 110, c, &rx, &bc, &c2, &bad, &hw);
@@ -1478,7 +1814,7 @@ static void rtw_do_scan(volatile uint8_t *m, struct rtw_dev *d)
             rtw_ap_rebuild();
         }
     }
-    rtw8822c_set_channel(d, g_chan ? g_chan : 6, RTW_CHANNEL_WIDTH_20, 0); rtw_txpwr2g(m, g_chan ? g_chan : 6);
+    rtw_setch(d, g_chan ? g_chan : 6); rtw_txpwr(m, g_chan ? g_chan : 6);
     rtw_ap_rebuild();
     g_lastbcn = tms();
     lput("WIFI.ui scan n="); lhex((uint32_t)g_apn, 2); lkv("passes", SCAN_PASSES, 1); lput("\r\n");

@@ -606,7 +606,8 @@ static int mix_apply(int v, int lvl)
     return (int)(((int64_t)v * w_gain(mixatt[lvl] * 4)) >> 11);
 }
 
-int opl4_calc48(Opl4 *o)
+/* 칩이 내놓은 FM/PCM 좌우를 48 kHz 한 샘플로 보간해 합치는 곳. 모노 값은 예전과 같은 식 그대로이고 좌우는 거기에 얹기만 한다 */
+int opl4_calc48_stereo(Opl4 *o, int *left, int *right)
 {
     /* 직선 보간으로 48 kHz 로 (전에는 가장 가까운 샘플을 그대로 써서 높은 소리에 거친 잡음이 섞였음) */
     o->fm_acc += 49716;
@@ -614,22 +615,38 @@ int opl4_calc48(Opl4 *o)
         o->fm_acc -= 48000;
         int l, r; fm_sample(o, &l, &r);
         uint8_t m = o->wreg[0xF8];
+        int mixL = mix_apply(l, m & 7), mixR = mix_apply(r, (m >> 3) & 7);
         o->fm_prev = o->fm_last;
-        o->fm_last = (mix_apply(l, m & 7) + mix_apply(r, (m >> 3) & 7));
+        o->fm_last = (mixL + mixR);
+        o->fm_prev_l = o->fm_last_l;
+        o->fm_last_l = mixL * 2;                 /* 모노는 좌우의 '합'이라 왼쪽 몫은 2배로 두어야 (왼쪽+오른쪽)/2 가 모노가 됨 */
     }
     o->pcm_acc += 44100;
     while (o->pcm_acc >= 48000) {
         o->pcm_acc -= 48000;
         int l, r; pcm_sample(o, &l, &r);
         uint8_t m = o->wreg[0xF9];
+        int mixL = mix_apply(l, m & 7), mixR = mix_apply(r, (m >> 3) & 7);
         o->pcm_prev = o->pcm_last;
-        o->pcm_last = (mix_apply(l, m & 7) + mix_apply(r, (m >> 3) & 7)) / 2;
+        o->pcm_last = (mixL + mixR) / 2;
+        o->pcm_prev_l = o->pcm_last_l;
+        o->pcm_last_l = mixL;                    /* 모노는 좌우의 '평균'이라 왼쪽 몫은 그대로 */
     }
     int fm = o->fm_prev + (int)(((int64_t)(o->fm_last - o->fm_prev) * (int64_t)o->fm_acc) / 48000);
     int pcm = o->pcm_prev + (int)(((int64_t)(o->pcm_last - o->pcm_prev) * (int64_t)o->pcm_acc) / 48000);
     /* openMSX 와 같은 음원 간 비율 (PSG 대비 FM 0.81, PCM 0.61 — 전에는 1.17 / 3.5) */
-    return fm * 69 / 100 + pcm * 17 / 100;
+    int mono = fm * 69 / 100 + pcm * 17 / 100;
+    if (left || right) {
+        int fmL = o->fm_prev_l + (int)(((int64_t)(o->fm_last_l - o->fm_prev_l) * (int64_t)o->fm_acc) / 48000);
+        int pcmL = o->pcm_prev_l + (int)(((int64_t)(o->pcm_last_l - o->pcm_prev_l) * (int64_t)o->pcm_acc) / 48000);
+        int l = fmL * 69 / 100 + pcmL * 17 / 100;
+        if (left) *left = l;
+        if (right) *right = 2 * mono - l;        /* (왼쪽+오른쪽)/2 가 모노와 정확히 같도록 */
+    }
+    return mono;
 }
+
+int opl4_calc48(Opl4 *o) { return opl4_calc48_stereo(o, 0, 0); }
 
 int opl4_active(const Opl4 *o)
 {

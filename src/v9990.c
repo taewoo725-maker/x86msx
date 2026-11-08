@@ -658,6 +658,16 @@ uint8_t v9990_read(V9990 *v, int port, int tick)
     return r;
 }
 
+/* 8.0.133: 포트 0 에 같은 바이트 열을 연달아 쓰는 것과 똑같은 결과를 한 번에 (영상 한 줄 쓰기 속도용, 동작은 v9990_write(v,0,..) 반복과 같음) */
+void v9990_write_vram(V9990 *v, const uint8_t *p, int n)
+{
+    if (v->sysreset) return;
+    unsigned a = get_addr(v, R_WA0);
+    int inc = !(v->regs[R_WA2] & 0x80);
+    for (int i = 0; i < n; i++) { v->vram[map_addr(v, a)] = p[i]; if (inc) a++; }
+    if (inc) set_addr(v, R_WA0, a);
+}
+
 void v9990_write(V9990 *v, int port, uint8_t val)
 {
     port &= 15;

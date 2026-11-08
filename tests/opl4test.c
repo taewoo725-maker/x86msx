@@ -29,6 +29,20 @@ static double measure(int secs, int *peak)
     return (double)cross / secs;
 }
 
+/* 8.0.232 좌우: 1초 동안 (왼쪽+오른쪽)/2 == 모노 인지, 왼쪽/오른쪽 최대 크기를 잼 */
+static int stereo_identity_fails(int *peakL, int *peakR)
+{
+    int bad = 0, pl = 0, pr = 0;
+    for (int i = 0; i < 48000; i++) {
+        int l, r, mono = opl4_calc48_stereo(&o, &l, &r);
+        if ((l + r) / 2 != mono && (l + r + 1) / 2 != mono && (l + r - 1) / 2 != mono) bad++;
+        if (abs(l) > pl) pl = abs(l);
+        if (abs(r) > pr) pr = abs(r);
+    }
+    *peakL = pl; *peakR = pr;
+    return bad;
+}
+
 int main(void)
 {
     memset(mem, 0, sizeof mem);
@@ -42,6 +56,17 @@ int main(void)
     fm(0, 0xC0, 0x31); fm(0, 0xA0, 0x44); fm(0, 0xB0, 0x32);
     double f = measure(1, &pk);
     CHECK(f > 437 && f < 443 && pk > 4000, "FM 440 Hz: %.1f Hz peak %d", f, pk);
+    { int pl, pr, bad = stereo_identity_fails(&pl, &pr);
+      CHECK(bad == 0 && pl > 4000 && abs(pl - pr) < pl / 20, "FM 가운데: (L+R)/2 == 모노, 좌 %d 우 %d, 어긋남 %d", pl, pr, bad);
+      fm(0, 0xC0, 0x11);                                /* 왼쪽만 */
+      stereo_identity_fails(&pl, &pr);
+      bad = stereo_identity_fails(&pl, &pr);
+      CHECK(bad == 0 && pl > 4000 && pr < pl / 10, "FM 왼쪽만: 좌 %d 우 %d (오른쪽은 작아야 함)", pl, pr);
+      fm(0, 0xC0, 0x21);                                /* 오른쪽만 */
+      stereo_identity_fails(&pl, &pr);
+      bad = stereo_identity_fails(&pl, &pr);
+      CHECK(bad == 0 && pr > 4000 && pl < pr / 10, "FM 오른쪽만: 좌 %d 우 %d (왼쪽은 작아야 함)", pl, pr);
+      fm(0, 0xC0, 0x31); }
     fm(0, 0xB0, 0x12);                                  /* 키 끔 */
     measure(1, &pk);
     f = measure(1, &pk);

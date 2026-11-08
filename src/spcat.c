@@ -21,7 +21,8 @@ const SpGroup sp_groups[SPG_N] = {
     [SPG_FLASHCART] = { SPG_FLASHCART, SPG_ROOT, "Flash cartridge",  54, 1 },
     [SPG_DISK]      = { SPG_DISK,      SPG_ROOT, "Disk Interface",   60, 0 },
     [SPG_AUDIO]     = { SPG_AUDIO,     SPG_ROOT, "MSX-AUDIO",        62, 1 },
-    [SPG_NET]       = { SPG_NET,       SPG_ROOT, "Network",          71, 0 },
+    [SPG_NET]       = { SPG_NET,       SPG_HIDDEN, "Network",        71, 0 },   /* 8.0.140: 네트워크 카트리지가 X86MSX 묶음으로 옮겨져 비었음 → 메뉴에서 숨김 */
+    [SPG_X86]       = { SPG_X86,       SPG_ROOT, "X86MSX",           43, 0 },   /* 8.0.140: X86 으로 시작하는 카트리지 모음 */
 };
 
 #define SR "Shared Roms\\"
@@ -37,7 +38,9 @@ static const SpCart cat[] = {
     { 62, SPG_ROOT, 40, 0, "Sony HBI-55", SPK_HBI55, 0, 0, 0 },                        /* 5.2.45 보강 1단계: SRAM 4 KiB, i8255 B0h~B3h */
     { 65, SPG_ROOT, 41, 0, "Philips NMS1210 Serial Interface", SPK_RS232, 0, 0, 0 },
     { 66, SPG_ROOT, 42, 1, "MSX-MIDI Interface", SPK_MSXMIDI, 0, 0, 0 },              /* 외장 MSX-MIDI (8251+8253 E8h~EFh, GT 내장과 같음) */
-    { 67, SPG_ROOT, 43, 0, "X86MSX MIDI", SPK_MSXMIDI, 0, 0, 0 },                     /* X86MSX 자체 MIDI 카트리지 (MSX-MIDI 호환 8251+8253, E8h~EFh). GT 가 아닌 기종에 MIDI 기계를 꽂으면 자동으로 */
+    { 67, SPG_X86, 1, 0, "X86 MIDI", SPK_MSXMIDI, 0, 0, 0 },                     /* X86MSX 자체 MIDI 카트리지 (MSX-MIDI 호환 8251+8253, E8h~EFh). GT 가 아닌 기종에 MIDI 기계를 꽂으면 자동으로 */
+    { 70, SPG_X86, 0, 0, "X86 Multimedia", SPK_MMEDIA, 0, SR "X86-Multimedia.rom", 0 },                        /* 8.0.75: 소리 2Ch~2Fh + 영상 24h~27h (옛 X86MV Sound·X86 Video 를 합침), 롬 코드 없음 */
+    { 71, SPG_ROOT, 69, 0, "V9968 (MSX2++ VDP)", SPK_V9968, 0, 0, 0 },   /* 8.0.140: 차례 46 → 69 (V9990 바로 위로). 8.0.94: 두 번째 VDP — 본체 화면은 그대로, 포트 88h~8Ch, 화면 소스 "V9968" 로 봄. 롬 없음 */
     /* 50 외장 RAM ▶, 51 MegaRAM ▶, 52 Ese-RAM ▶, 53 Mega Flash ROM ▶, 54 플래시 카트리지 ▶ */
     /* ---- X86MSX 만 (blueMSX 에 없음) ---- */
     /* 60 디스크 인터페이스 ▶ */
@@ -55,7 +58,7 @@ static const SpCart cat[] = {
     { 13, SPG_IDE, 1, 0, "IDE (Sunrise, Nextor)", SPK_IDE, 0, SR "Nextor-2.1.1.SunriseIDE.ROM|" SR "Nextor-2.1.0.SunriseIDE.ROM|" SR "Nextor-2.1.0.SunriseIDE.emulators.ROM|" SR "Nextor-2.0.1.SunriseIDE.rom|" SR "Nextor-2.0.SunriseIDE.rom", 0 },
     { 40, SPG_IDE, 2, 0, "IDE (Beer)", SPK_BEER, 0, SR "BEERIDE.ROM|" SR "beer-ide.rom", "BeerIDE" },
     { 41, SPG_IDE, 3, 1, "IDE (GIDE)", SPK_GIDE, 0, 0, 0 },
-    { 49, SPG_IDE, 4, 0, "X86MSX VHD (Nextor)", SPK_VHD, 0, SR "Nextor-2.1.3.base.dat|" SR "Nextor-2.1.3.StandaloneASCII16.ROM|" SR "Nextor-2.1.3.SunriseIDE.ROM|" SR "Nextor-2.0.1.SunriseIDE.rom", 0 },
+    { 49, SPG_X86, 2, 0, "X86MSX VHD (Nextor)", SPK_VHD, 0, SR "Nextor-2.1.3.base.dat|" SR "Nextor-2.1.3.StandaloneASCII16.ROM|" SR "Nextor-2.1.3.SunriseIDE.ROM|" SR "Nextor-2.0.1.SunriseIDE.rom", 0 },
     /* ---- SCSI ▶ (MEGA ▶ / WAVE ▶ / Gouda) ---- */
     { 50, SPG_MEGASCSI, 0, 0, "MEGA-SCSI 128 KB", SPK_MEGASCSI, 128, 0, 0 },
     { 51, SPG_MEGASCSI, 1, 0, "MEGA-SCSI 256 KB", SPK_MEGASCSI, 256, 0, 0 },
@@ -116,7 +119,8 @@ static const SpCart cat[] = {
     { 47, SPG_AUDIO, 5, 0, "Yamaha SFG-01", SPK_SFG, 0, SR "SFG01.ROM|" SR "sfg01.rom|" SR "yamaha_sfg-01.rom", 0 },
     { 48, SPG_AUDIO, 6, 0, "Yamaha SFG-05", SPK_SFG, 0, SR "SFG05.rom|" SR "sfg05.rom|" SR "yamaha_sfg-05.rom", 0 },
     /* ---- 네트워크 ▶ ---- */
-    { 59, SPG_NET, 0, 0, "X86Network", SPK_NET, 0, SR "UNAPI.ROM|" SR "unapi.rom|" SR "X86MSX_UNAPI.ROM", 0 },
+    { 59, SPG_X86, 3, 0, "X86Ethernet", SPK_NET, 0, SR "UNAPI.ROM|" SR "unapi.rom|" SR "X86MSX_UNAPI.ROM", 0 },
+    { 68, SPG_X86, 4, 0, "x86wifi", SPK_NET, 0, SR "UNAPI.ROM|" SR "unapi.rom|" SR "X86MSX_UNAPI.ROM", 0 },   /* 8.0.45: 무선 전용 네트워크 카트리지 (롬·포트는 X86Ethernet 과 같고, 무선 메뉴와 짝) */
 };
 #define N ((int)(sizeof cat / sizeof cat[0]))
 
@@ -127,10 +131,4 @@ const SpCart *spcat_kind(int kind)
     if (kind < 0) return 0;
     for (int i = 0; i < N; i++) if (cat[i].kind == kind) return &cat[i];
     return 0;
-}
-int spcat_max_kind(void)
-{
-    int m = 0;
-    for (int i = 0; i < N; i++) if (cat[i].kind + 1 > m) m = cat[i].kind + 1;
-    return m;
 }

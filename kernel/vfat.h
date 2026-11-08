@@ -27,6 +27,7 @@ typedef struct {
     int (*write)(void *ctx, const char *path, const uint8_t *data, uint32_t len);        /* 만들거나 덮어씀, 성공 0 */
     int (*mkdir)(void *ctx, const char *path);
     int (*del)(void *ctx, const char *path);
+    uint32_t (*now_ms)(void);    /* 8.0.42: 없어도 됨 (vf_sync2 의 시간 제한에 씀) */
 } VfHost;
 
 /* 형식 */
@@ -55,6 +56,7 @@ typedef struct {
     int dirty;                  /* 마지막 sync 뒤 쓴 것이 있음 */
     int trunc;                  /* 3.9.12: 폴더가 너무 커서 일부를 못 담음 (파일·폴더 수 한도) */
     uint32_t used_clus;         /* 마운트 때 쓴 클러스터 */
+    uint32_t need_clus;         /* 8.0.169: 폴더 전체가 차지할 클러스터 (마운트가 "full" 로 실패해도 채워짐) */
 } Vf;
 
 /* 덮개(쓴 자료 섹터) 공용 자리. 볼륨 여럿이 함께 씀. 섹터 수 = size / 516 */
@@ -68,10 +70,18 @@ int vf_read(Vf *v, uint32_t lba, uint8_t *buf);         /* 성공 0 */
 int vf_write(Vf *v, uint32_t lba, const uint8_t *buf);  /* 성공 0, 덮개가 가득이면 -1 */
 /* 바뀐 것을 USB에 반영. tmp = 파일 하나를 모을 자리. 다시 쓴 파일 수, 실패 -1 (err에 이유) */
 int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen);
+/* 8.0.42: budget_ms > 0 이면 USB 일을 하나 끝낼 때마다 시간을 보고, 넘으면 멈춤 (v->dirty 를 남겨 다음에 이어서). 최소 한 가지는 함 */
+int vf_sync2(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen, uint32_t budget_ms);
 /* 폴더에 맞는 형식 (VF_AUTO일 때): MSXDOS.SYS만 있으면 DOS1, 그 밖 FAT16(작으면 FAT12) */
 int vf_auto_kind(const VfHost *h, const char *root, uint32_t size_mb);
 /* 형식마다 MB 범위 */
 uint32_t vf_min_mb(int kind), vf_max_mb(int kind);
+/* 8.0.169: 마운트한(실패한 "full" 포함) 폴더가 이 형식에서 차지할 MB (올림). 설정 용량과 견줘 모자란 만큼을 안내 */
+uint32_t vf_need_mb(const Vf *v);
 /* 폴더 안 파일 크기 합 (MB, 올림). 실패 -1 */
 int vf_folder_mb(const VfHost *h, const char *root);
+/* 8.0.62: DOS 짧은 이름 경로 → USB 쪽(긴) 이름. 찾으면 1 */
+int vf_lfn(const Vf *v, const char *path, char *out, int max);
+/* 8.0.66: DOS 짧은 경로의 파일 → USB 전체 경로·크기 (X86MV 소리 카트리지 파일 재생). 찾으면 1 */
+int vf_find_file(const Vf *v, const char *path, char *host, int max, uint32_t *size);
 #endif

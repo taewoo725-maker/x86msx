@@ -65,9 +65,21 @@ typedef struct {
     uint8_t line_adj[VDP_H];    /* 4.0.31: 줄마다 R#18 (화면 위치 조정) — 줄 인터럽트로 중간에 바뀜 */
     int pal_nsnap, pal_cur, pal_changed;
     int pal_58;                 /* 1 = V9958: 5비트 늘림 곡선 */      /* 3.2.0 VID-03: 스프라이트 숨기기, 한 줄 4·8개 제한 풀기 (프런트엔드 설정) */             /* 줄마다 테두리 색 (줄별로 R#7을 바꾸는 효과: MSX2+ 로고 등) */         /* YJK 줄의 스프라이트 (0xFF = 없음, 값 = SCREEN 8 색) */
+    /* ---- 8.0.69 V9968 (상태 덩이 VDP 판 3부터. 이 앞까지가 판 2 — 필드는 늘 끝에만 더함) ---- */
+    uint8_t v9968;              /* 1 = V9968 (R#20·R#21 확장, 확장 팔레트, 스프라이트 16개) */
+    uint8_t lock_ext;           /* 포트 9Ch 비트 7: 1이면 R#20·R#21 쓰기 무시 (처음엔 0 = 풀림) */
+    uint8_t pal_ptr, pal_r, pal_g;   /* EPAL 팔레트 3번 쓰기 (R, G, B 각 5비트) 진행 */
+    uint8_t pal256[256][3];     /* 확장 팔레트 (8비트 RGB). 0~15는 palette[]와 같은 값 */
+    /* ---- 8.0.71 V9968 256 KB VRAM (EVR): 위쪽 128 KB. 상태 덩이 판 4부터 ---- */
+    uint8_t vram_x[VDP_VRAM];
+    /* ---- 8.0.72 V9968 명령 엔진 확장 (LRMM·LFMM·LFMC, FG4). 상태 덩이 판 5부터 ---- */
+    uint8_t fg4;                /* 이번 명령이 FG4 (R#45 비트 7 = 4비트 점으로 강제) */
+    uint8_t fcol, fwc, fsrc;    /* LFMC: 글자색, 남은 비트 수, 지금 바이트 */
+    /* ---- 8.0.73 V9968 스프라이트 모드 3 (SP3). 상태 덩이 판 6부터 ---- */
+    uint8_t sps_top;            /* SPS(R#25 비트 7): 이번 프레임에 맨 앞인 스프라이트 번호 (프레임마다 +5) */
 } VDP;
 
-/* kind: 0 TMS9918A, 1 V9938, 2 V9958 */
+/* kind: 0 TMS9918A, 1 V9938, 2 V9958, 3 V9968 */
 void vdp_init(VDP *v, int kind);
 void vdp_reset(VDP *v);
 uint8_t vdp_read_data(VDP *v);
@@ -75,6 +87,8 @@ uint8_t vdp_read_status(VDP *v);
 void vdp_write_data(VDP *v, uint8_t val);
 void vdp_write_ctrl(VDP *v, uint8_t val);
 void vdp_write_palette(VDP *v, uint8_t val);
+void vdp_set_reg(VDP *v, int r, uint8_t val);                   /* 8.0.75 X86 Multimedia 카트리지: 레지스터를 직접 */
+void vdp_set_pal3(VDP *v, int i, int r, int g, int b);          /* 8.0.75: 팔레트 한 칸 (3비트 RGB) */
 void vdp_write_indirect(VDP *v, uint8_t val);
 int vdp_hres(const VDP *v);                 /* 4.0.4: 가로 점 수 256 / 512 */
 void vdp_line_start(VDP *v, int line);
@@ -92,7 +106,22 @@ void vdp_default_palette(VDP *v);
 void vdp_g7_rgb(const VDP *v, uint8_t c, uint8_t *r, uint8_t *g, uint8_t *b);
 /* 상태 덩이 VDP 판 1 (팔레트가 밖에 있던 때)의 크기 */
 #define VDP_ST_V1_SIZE offsetof(VDP, palette)
+/* 판 2 (V9968 필드가 생기기 전)의 크기 */
+#define VDP_ST_V2_SIZE offsetof(VDP, v9968)
+/* 판 3 (256 KB VRAM 이 생기기 전)의 크기 */
+#define VDP_ST_V3_SIZE offsetof(VDP, vram_x)
+/* 판 4 = 명령 엔진 확장 필드가 없던 VDP */
+#define VDP_ST_V4_SIZE offsetof(VDP, fg4)
+/* 판 5 = 스프라이트 모드 3 필드가 없던 VDP */
+#define VDP_ST_V5_SIZE offsetof(VDP, sps_top)
+int vdp_evr(const VDP *v);                  /* 1 = 256 KB VRAM·확장 주소 켜짐 (V9968 이고 R#21 비트 0 = 0) */
+/* 실제 칩 배치의 VRAM (끼워 넣기 풀어서). out 은 256 KB, 돌려주는 값 = 쓴 바이트 수 (128 KB 또는 256 KB) — 시험·진단용 */
+size_t vdp_vram_physical(const VDP *v, uint8_t *out);
+int vdp_epal(const VDP *v);                 /* 1 = 확장 팔레트 켜짐 (V9968 R#20 비트 4) */
+uint8_t vdp_read_9c(VDP *v);
+void vdp_write_9c(VDP *v, uint8_t val);
 /* YJK 한 줄 해독 (raw 256바이트): 점마다 RGB, 또는 팔레트 번호(pal_idx != 0xFF, YAE) */
 void vdp_yjk_line(const uint8_t *raw, int yae, uint8_t rgb[256][3], uint8_t pal_idx[256]);
 
+extern void (*vdp_vram_trace)(uint32_t addr, uint8_t val);   /* 8.0.175 */
 #endif

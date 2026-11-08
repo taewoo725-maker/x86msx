@@ -59,6 +59,9 @@ static uint8_t *fb;
 static int cur_frame;
 static int h_vd(char (*l)[64], int max) { (void)max; strcpy(l[0], "> 1: 1920x1080 AMD 15BF - DELL U2720Q"); strcpy(l[1], "    modes 12 fmt 1 fb E000xxxx 8MB edid 128"); strcpy(l[2], "  2: 1920x1080 NVIDIA 2803 - no monitor info"); strcpy(l[3], "    modes 9 fmt 1 fb D000xxxx 8MB edid -"); return 4; }
 static int h_vo(char (*l)[64], int max, int *act) { (void)max; strcpy(l[0], "1: 1920x1080 AMD 15BF"); strcpy(l[1], "2: 1920x1080 NVIDIA 2803"); *act = 0; return 2; }
+static int rtc_fake[6] = { 2026, 10, 31, 12, 0, 0 };   /* 8.0.43 시험(FERTC): 가짜 PC 시계. 프레임 시계로 흐르지 않고 고정 */
+static int h_now(int t[6]) { for (int i = 0; i < 6; i++) t[i] = rtc_fake[i]; return 0; }
+static int h_set_time(const int t[6]) { printf("SETTIME %04d-%02d-%02d %02d:%02d:%02d\n", t[0], t[1], t[2], t[3], t[4], t[5]); for (int i = 0; i < 6; i++) rtc_fake[i] = t[i]; return getenv("FERTCFAIL") ? -1 : 0; }
 static uint32_t h_ms(void) { static int lf = -1; static uint32_t ex; if (lf != (int)cur_frame) { lf = (int)cur_frame; ex = 0; } else ex++; return (uint32_t)(10000 + cur_frame * 1000 / 60) + ex; }   /* 같은 프레임 안에서 기다리는 반복이 끝나도록 한 번 부를 때마다 1 ms씩 */   /* 가상 시계: 프레임마다 1/60초 */
 
 /* 3.0 마우스 시험: MOUSE="프레임,dx,dy,dz,버튼;…" — 그 프레임에 움직임·버튼 상태(다음 줄까지 유지) */
@@ -147,6 +150,7 @@ static int h_mouse_read(int *dx, int *dy, int *dz, int *b, char *name, int max)
 static void h_flush_shot(void);
 static void h_dump_line(const char *s) { printf("%s\n", s); }
 static void h_reboot(void) { printf("reboot requested\n"); fflush(stdout); exit(3); }
+static void h_audio2(const int16_t *l, const int16_t *r, int n, int v, int m) { (void)l; (void)r; (void)n; (void)v; (void)m; }   /* 8.0.221: 스테레오 출력이 있는 것처럼 (소리 저장 스테레오 시험) */
 static void h_audio(const int16_t *s, int n, int v, int m)    /* 3.4.1: WAV=파일 이면 원시 16비트 모노로 덧붙임 */
 {
     (void)v; (void)m;
@@ -159,8 +163,9 @@ static void host_path(const char *p, char *out, size_t max)
 {
     /* "0:\A\B" → ROOT/A/B */
     const char *c = strchr(p, ':');
+    const char *rt = (p[0] == '1' && getenv("ROOT2")) ? getenv("ROOT2") : root;   /* 8.0.79 시험: 두 번째 USB */
     c = c ? c + 1 : p;
-    snprintf(out, max, "%s", root);
+    snprintf(out, max, "%s", rt);
     size_t k = strlen(out);
     for (; *c && k + 1 < max; c++) out[k++] = *c == '\\' ? '/' : *c;
     out[k] = 0;
@@ -175,6 +180,13 @@ static int h_list(const char *path, FeDirEntry *out, int max)
         snprintf(out->name, sizeof out->name, "Drive 1 X86MSX (boot)");
         snprintf(out->key, sizeof out->key, "0:");
         out->is_dir = 1;
+        if (getenv("ROOT2") && max >= 2) {
+            memset(out + 1, 0, sizeof *out);
+            snprintf(out[1].name, sizeof out[1].name, "Drive 2 MUSIC 28 GB");
+            snprintf(out[1].key, sizeof out[1].key, "1:");
+            out[1].is_dir = 1;
+            return 2;
+        }
         return 1;
     }
     char hp[2048]; host_path(path, hp, sizeof hp);
@@ -395,6 +407,16 @@ static int th_echo_send(void *c, const uint8_t ip[4], uint8_t ttl, uint16_t id, 
 { (void)c; printf("ECHO_SEND %u.%u.%u.%u ttl=%u id=%u seq=%u len=%u\n", ip[0], ip[1], ip[2], ip[3], ttl, id, seq, len);
   memcpy(th_eq, ip, 4); th_eq[4] = 57; th_eq[5] = (uint8_t)id; th_eq[6] = (uint8_t)(id >> 8); th_eq[7] = (uint8_t)seq; th_eq[8] = (uint8_t)(seq >> 8); th_eq[9] = (uint8_t)len; th_eq[10] = (uint8_t)(len >> 8); th_has = 1; return 0; }
 static int th_echo_recv(void *c, uint8_t o[11]) { (void)c; if (!th_has) return NC_E_NODATA; memcpy(o, th_eq, 11); th_has = 0; printf("ECHO_RECV\n"); return 0; }
+/* FENTP=<UTC 유닉스 초>: 가짜 DNS·UDP·시간 서버 (8.0.49). FENTP_MODE=1 이면 서버가 답하지 않음 */
+static int th_dnsn, th_rdy;
+static int th_dns_start(void *c, const char *n, int l) { (void)c; (void)n; (void)l; th_dnsn = 0; return 0; }
+static int th_dns_result(void *c, uint8_t *st, uint8_t ip[4], uint8_t *err) { (void)c; *err = 0; if (++th_dnsn < 3) { *st = NC_DNS_PENDING; return 0; } *st = NC_DNS_OK; ip[0] = 216; ip[1] = 239; ip[2] = 35; ip[3] = 0; return 0; }
+static int th_udp_open(void *c, uint16_t lp, uint8_t *h) { (void)c; (void)lp; *h = 1; return 0; }
+static int th_udp_close(void *c, int h) { (void)c; (void)h; return 0; }
+static int th_udp_send(void *c, int h, const uint8_t ip[4], uint16_t rp, const uint8_t *d, int l) { (void)c; (void)h; (void)ip; (void)d; if (rp == 123 && l == 48 && !getenv("FENTP_MODE")) th_rdy = 2; return 0; }
+static int th_udp_recv(void *c, int h, uint8_t *dst, int max, uint8_t sip[4], uint16_t *sp, int *got)
+{ (void)c; (void)h; (void)max; (void)sip; (void)sp; if (th_rdy <= 0) return NC_E_NODATA; if (--th_rdy > 0) return NC_E_NODATA;
+  uint32_t t = (uint32_t)strtoul(getenv("FENTP"), 0, 10) + 2208988800u; memset(dst, 0, 48); dst[0] = 0x24; dst[1] = 1; dst[40] = t >> 24; dst[41] = t >> 16; dst[42] = t >> 8; dst[43] = t; *got = 48; return 0; }
 static NetHost th_host;
 
 static void h_diag_save(const char *head)   /* DIAG.TXT 머리 (fe 가 만든 시스템·소리 줄) */
@@ -405,7 +427,7 @@ static void h_diag_save(const char *head)   /* DIAG.TXT 머리 (fe 가 만든 �
 }
 int main(void)
 {
-    if (getenv("FENETHOST")) { th_host.net_state = th_state; th_host.get_ipinfo = th_ipinfo; th_host.echo_send = th_echo_send; th_host.echo_recv = th_echo_recv; msx_net_host = &th_host; }
+    if (getenv("FENETHOST")) { th_host.net_state = th_state; th_host.get_ipinfo = th_ipinfo; th_host.echo_send = th_echo_send; th_host.echo_recv = th_echo_recv; if (getenv("FENTP")) { th_host.dns_start = th_dns_start; th_host.dns_result = th_dns_result; th_host.udp_open = th_udp_open; th_host.udp_close = th_udp_close; th_host.udp_send = th_udp_send; th_host.udp_recv = th_udp_recv; } msx_net_host = &th_host; }
     if (getenv("FENET")) fe_test_net = atoi(getenv("FENET"));
     machine_big = malloc(4u << 20); machine_big_size = 4u << 20;   /* 3.4.0 */
     cart_big = malloc(16u << 20); cart_big_size = 16u << 20;   /* 큰 롬 시험 */
@@ -415,9 +437,12 @@ int main(void)
     fb = calloc((size_t)W * H, 4);
     static MSX m;
     FeDisplay d = { fb, W * 4, W, H, 4, 1, 2, 2, 0 };
+    if (getenv("BGR")) d.bgr = atoi(getenv("BGR"));   /* 8.0.235 시험: GOP 색 순서 */
+    if (getenv("MMW")) d.mm_w = (uint32_t)atoi(getenv("MMW"));   /* EDID 가로 mm */
+    if (getenv("MMH")) d.mm_h = (uint32_t)atoi(getenv("MMH"));   /* EDID 세로 mm */
     static uint8_t scratch[32u << 20], xram[4u << 20];
     { static uint8_t wv[OPL4_MEM_SIZE]; opl4_set_memory(wv, 0); }   /* 3.1.0 MoonSound */
-    FePlatform p = { .sys_sample = getenv("FESYS") ? h_sys_sample : 0, .par_run = getenv("FEPAR") ? h_par_run : 0, .ms = h_ms, .diag_save = h_diag_save, .video_outputs = getenv("FEVO") ? h_vo : 0, .video_diag = getenv("FEVO") ? h_vd : 0, .mouse_read = h_mouse_read, .mouse_dev = h_mouse_dev, .mouse_set = h_mouse_set, .pad_view = h_pad_view, .midi_read = h_midi_read, .midi_write = h_midi_write, .info = getenv("INFO") ? h_info : 0, .make_file = h_make_file, .reboot = h_reboot, .flush = getenv("FLUSHSHOT") ? h_flush_shot : 0, .grow_query = h_grow_query, .grow_run = h_grow_run, .audio = h_audio, .list_dir = h_list, .read_file = h_read,
+    FePlatform p = { .audio2 = getenv("FESTEREO") ? h_audio2 : 0, .sys_sample = getenv("FESYS") ? h_sys_sample : 0, .par_run = getenv("FEPAR") ? h_par_run : 0, .ms = h_ms, .now = getenv("FERTC") ? h_now : 0, .set_time = getenv("FERTC") ? h_set_time : 0, .diag_save = h_diag_save, .video_outputs = getenv("FEVO") ? h_vo : 0, .video_diag = getenv("FEVO") ? h_vd : 0, .mouse_read = h_mouse_read, .mouse_dev = h_mouse_dev, .mouse_set = h_mouse_set, .pad_view = h_pad_view, .midi_read = h_midi_read, .midi_write = h_midi_write, .info = getenv("INFO") ? h_info : 0, .make_file = h_make_file, .reboot = h_reboot, .flush = getenv("FLUSHSHOT") ? h_flush_shot : 0, .grow_query = h_grow_query, .grow_run = h_grow_run, .audio = h_audio, .list_dir = h_list, .read_file = h_read,
                      .hd_open = h_hd_open, .hd_close = h_hd_close, .hd_read = h_hd_read, .hd_write = h_hd_write,
                      .write_file = h_write, .write_at = h_write_at, .append = h_append, .read_at = h_read_at, .vhd_mem = malloc(24u << 20), .vhd_mem_size = 24u << 20, .create = h_create, .delete_file = h_delete, .scratch = scratch, .scratch_size = sizeof scratch, .xram = xram, .v9990 = malloc(2u << 20), .vbuf = malloc(128u << 20), .vbuf_size = 128u << 20 };
     {
@@ -474,6 +499,8 @@ int main(void)
         }
         if (getenv("FEEJECT_F") && f == atoi(getenv("FEEJECT_F"))) msx_eject_cart(&m, 0);   /* 5.2.11 */
         if (getenv("FEACT") && f == (getenv("FEACT_F") ? atoi(getenv("FEACT_F")) : 5)) fe_test_action(getenv("FEACT"));   /* 3.7.0 */
+        if (getenv("FENETST") && f == atoi(getenv("FENETST"))) { extern int fe_test_bootwait(void); { extern int fe_test_bootwait(void); extern uint32_t fe_test_bw_el; extern int fe_test_bw_starts, fe_test_bw_shows; { extern int fe_test_ntp_state; printf("NTPST %d\n", fe_test_ntp_state); } printf("NETST %d\nNETBW %d EL %u STARTS %d SHOWS %d\n", fe_test_net_state(), fe_test_bootwait(), fe_test_bw_el, fe_test_bw_starts, fe_test_bw_shows); } }   /* 8.0.45 */
+        if (getenv("FESPL") && f == 4) { for (const char *q = getenv("FESPL"); *q; ) { int sl = (int)strtol(q, (char **)&q, 10); if (*q == ':') q++; int kd = (int)strtol(q, (char **)&q, 10); fe_insert_special(sl, kd); if (*q == ',') q++; else break; } }   /* 8.0.184: 여러 칸에 특수 카트리지 꽂기 "슬롯:종류,..." */
         if (getenv("FESP") && f == (getenv("FESP_F") ? atoi(getenv("FESP_F")) : 2)) fe_insert_special(getenv("FESP_SLOT") ? atoi(getenv("FESP_SLOT")) : 0, atoi(getenv("FESP")));   /* 3.6.7 */
         if (getenv("FESP2") && f == (getenv("FESP_F") ? atoi(getenv("FESP_F")) : 2) + 2) fe_insert_special(getenv("FESP2_SLOT") ? atoi(getenv("FESP2_SLOT")) : 1, atoi(getenv("FESP2")));   /* 3.6.8 */
         if (getenv("FEROM") && f == (getenv("FEROM_F") ? atoi(getenv("FEROM_F")) : 2)) fe_insert_rom(getenv("FEROM_SLOT") ? atoi(getenv("FEROM_SLOT")) : 0, getenv("FEROM"));   /* 3.6.1 (3.6.7: FEROM_SLOT) */
@@ -525,6 +552,8 @@ int main(void)
             msx_mem_write(&m, 0xF3F8, (uint8_t)(0xF0 + n)); msx_mem_write(&m, 0xF3F9, 0xFB);
         }
         struct timespec a, b; clock_gettime(CLOCK_MONOTONIC, &a);
+        if (getenv("FERTC") && f == (getenv("FERTC_F") ? atoi(getenv("FERTC_F")) : 10)) { m.rtc_delta = atoi(getenv("FERTC")); m.rtc_wlast = m.cpu.cycles; }   /* MSX 가 시계를 고친 것처럼 */
+        if (getenv("FERTC") && f == total - 1) printf("RTCDELTA %d\n", (int)m.rtc_delta);
         fe_frame();
         if (getenv("TAPEMOT") && f % 100 == 0) printf("f%d motor %d pos %u/%u pc %04X\n", f, m.tape_motor, m.tape_pos, m.tape_size, m.cpu.pc);
         if (getenv("PCLOW") && m.cpu.pc < 0x0600 && f % 10 == 0) printf("f%d pc %04X sp %04X\n", f, m.cpu.pc, m.cpu.sp.w);
@@ -575,6 +604,12 @@ int main(void)
             char nm[256]; snprintf(nm, sizeof nm, "%s_%02d.ppm", sp, f == total - 1 && !(all && ph == gap - 1) ? 99 : i / gap);
             shot(nm);
         }
+    }
+    if (getenv("VIRTDUMP")) {   /* 8.0.235 X86VIRT: 끝 VDP 상태 (화면 모드·팔레트 0~3·프레임 버퍼 세 점) */
+        const VDP *v = &m.vdp;
+        printf("VDP R0=%02X R1=%02X R2=%02X R7=%02X R8=%02X R9=%02X pal0=(%d,%d,%d) pal1=(%d,%d,%d) pal2=(%d,%d,%d) pal3=(%d,%d,%d) fb=%02X,%02X,%02X\n", v->reg[0], v->reg[1], v->reg[2], v->reg[7], v->reg[8], v->reg[9],
+               v->palette[0][0], v->palette[0][1], v->palette[0][2], v->palette[1][0], v->palette[1][1], v->palette[1][2], v->palette[2][0], v->palette[2][1], v->palette[2][2], v->palette[3][0], v->palette[3][1], v->palette[3][2],
+               v->fb[0][0], v->fb[100][256], v->fb[200][500]);
     }
     if (getenv("CARTDUMP")) {   /* 카트 자리·장치 상태 (특수 카트리지 꽂기 시험 — 이전 판과 비교) */
         for (int n = 0; n < MSX_CART_ALL; n++) {

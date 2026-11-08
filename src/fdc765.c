@@ -211,9 +211,3 @@ void fdc765_write_data(FDC765 *c, FDC *f, uint8_t v)
     }
 }
 
-/* 실행 중 강제 종료 (TC): 지금까지로 정상 끝 */
-void fdc765_tc(FDC765 *c)
-{
-    if (c->phase == PH_EXEC_READ || c->phase == PH_EXEC_WRITE)
-        result7(c, (uint8_t)(c->us | c->hd << 2), 0, 0);
-}

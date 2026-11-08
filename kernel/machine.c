@@ -71,7 +71,7 @@ int machine_load(MSX *m, MachineRead rd, const char *name, MachineProfile *out, 
     static MachineProfile prof;
     if (profile_parse(cfg, n, &prof, err, (size_t)errlen)) return -1;
     int tms = prof.vdp[0] == 'T' && prof.vdp[1] == 'M' && prof.vdp[2] == 'S';
-    int v9938 = !strcmp(prof.vdp, "V9938") || !strcmp(prof.vdp, "V9958");
+    int v9938 = !strcmp(prof.vdp, "V9938") || !strcmp(prof.vdp, "V9958") || !strcmp(prof.vdp, "V9968");
     if (prof.vdp[0] && !tms && !v9938) {
         err[0] = 0; put(err, errlen, "needs "); put(err, errlen, prof.vdp); put(err, errlen, ": this video chip is not supported");
         return -1;
@@ -162,7 +162,7 @@ int machine_check(MachineRead rd, const char *name, char *miss, int misslen)
     char err[64];
     if (profile_parse(ccfg, n, &prof, err, sizeof err)) { put(miss, misslen, "config.ini"); return 3; }
     int tms = prof.vdp[0] == 'T' && prof.vdp[1] == 'M' && prof.vdp[2] == 'S';
-    if (prof.vdp[0] && !tms && strcmp(prof.vdp, "V9938") && strcmp(prof.vdp, "V9958")) { put(miss, misslen, prof.vdp); return 2; }
+    if (prof.vdp[0] && !tms && strcmp(prof.vdp, "V9938") && strcmp(prof.vdp, "V9958") && strcmp(prof.vdp, "V9968")) { put(miss, misslen, prof.vdp); return 2; }
     for (int i = 0; i < prof.region_count; i++) {
         ProfileRegion *r = &prof.region[i];
         if (!(r->slot == 0 && r->subslot == 0 && r->start_block == 0) || r->type == REGION_RAM ||

@@ -21,6 +21,10 @@ for k in 3 2 1; do
   $B $T/B 8 $k apply $T/qi.bin >/dev/null || fail=1
   [ -f $T/B/readme.txt ] && { echo "kind $k: delete"; fail=1; }
   cmp -s $T/B/big.bin $T/b2 && cmp -s $T/B/NEW.TXT $T/new.txt && [ -f $T/B/X.DAT ] || { echo "kind $k: write back"; fail=1; }
+  # 8.0.42: 시간 제한(조각내기)으로 반영해도 결과가 똑같아야 함
+  rm -rf $T/C; cp -r $T/A $T/C
+  VF_SLICE=1 $B $T/C 8 $k apply $T/qi.bin > $T/slice.out || { echo "kind $k: slice run"; cat $T/slice.out; fail=1; }
+  diff -r $T/B $T/C >/dev/null || { echo "kind $k: slice result differs"; fail=1; }
   $B $T/B 8 $k dump $T/re.bin >/dev/null; dd if=$T/re.bin of=$T/rp.bin bs=512 skip=1 2>/dev/null
   ck $T/rp.bin || { echo "kind $k: remount fsck"; fail=1; }
 done
@@ -59,5 +63,18 @@ $B $T/L 200 3 dump $T/l.bin >/dev/null || fail=1; dd if=$T/l.bin of=$T/lp.bin bs
 echo hi > $T/n.txt; mcopy -i $T/lp.bin $T/n.txt ::G.BAT; (dd if=$T/l.bin bs=512 count=1 2>/dev/null; cat $T/lp.bin) > $T/lq.bin
 $B $T/L 200 3 apply $T/lq.bin >/dev/null || fail=1
 [ -f $T/L/G.BAT ] || { echo "big folder: new file not written back"; fail=1; }
+# 8.0.66: 소리 카트리지 파일 재생 — 짧은 이름 경로 → USB 파일 전체 경로·크기 (폴더는 안 됨)
+mkdir -p "$T/FM/My Music"; echo 12345 > "$T/FM/My Music/Song Two Long.wav"; echo abc > "$T/FM/Another Track.flac"
+o=$($B "$T/FM" 32 0 find '\MYMUSI~1\SONGTW~1.WAV' 'a:\anothe~1.fla' '\MYMUSI~1' '\NOPE.WAV' 2>&1)
+printf "%s\n" "$o" | grep -q 'find .MYMUSI~1.SONGTW~1.WAV -> .*My Music.Song Two Long.wav 6$' || { echo "find: nested file not resolved"; fail=1; }
+printf "%s\n" "$o" | grep -q 'find a:.anothe~1.fla -> .*Another Track.flac 4$' || { echo "find: root file (drive letter, lowercase) not resolved"; fail=1; }
+printf "%s\n" "$o" | grep -q 'find .MYMUSI~1 -> (none)' || { echo "find: folder must not resolve"; fail=1; }
+printf "%s\n" "$o" | grep -q 'find .NOPE.WAV -> (none)' || { echo "find: missing file must not resolve"; fail=1; }
+# 8.0.169: 설정 용량보다 큰 폴더 — 마운트는 "full" 로 실패하지만 필요한 MB(올림)를 알려 줌. 그 값 이상 + 여유 용량이면 마운트됨
+mkdir -p $T/OV/D1; for n in 1 2 3 4 5; do head -c 700000 /dev/urandom > $T/OV/F$n.bin; done; head -c 20000 /dev/urandom > $T/OV/D1/x.bin
+o=$($B $T/OV 2 3 dump $T/ov.img 2>&1)
+need=$(printf "%s\n" "$o" | sed -n 's/.*mount fail full need \([0-9]*\) MB.*/\1/p')
+{ [ -n "$need" ] && [ "$need" -ge 4 ] && [ "$need" -le 5 ]; } || { echo "overflow: need MB missing or wrong ($o)"; fail=1; }
+$B $T/OV 8 3 dump $T/ov.img >/dev/null 2>&1 || { echo "overflow: fits at 8 MB but mount failed"; fail=1; }
 rm -rf $T
 [ $fail = 0 ] && echo "vfattest: ok (FAT16, FAT12, DOS1)" || { echo "vfattest: FAIL"; exit 1; }

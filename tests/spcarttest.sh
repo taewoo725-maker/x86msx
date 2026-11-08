@@ -1,8 +1,8 @@
 #!/bin/bash
 # 만든이: KimTaeWoo
 # 도와준이: Lee.J.H
-# X86MSX - 5.2.90: 특수 카트리지 전부(spcat.c kind 0~67)를 하나씩 꽂고, 꽂은 뒤 SCC 로 바꿔 꽂아(앞 장치 빼기) 카트 자리·장치 상태를 기준과 비교.
-#   5.2.86~5.2.89 에 17종(디스크 인터페이스·SCC·FM-PAC·DOS2·SCC-I·IDE·VHD·X86Network)이 꽂히지 않던 회귀를 잡으려고 만듦.
+# X86MSX - 5.2.90: 특수 카트리지 전부(spcat.c kind 0~68)를 하나씩 꽂고, 꽂은 뒤 SCC 로 바꿔 꽂아(앞 장치 빼기) 카트 자리·장치 상태를 기준과 비교.
+#   5.2.86~5.2.89 에 17종(디스크 인터페이스·SCC·FM-PAC·DOS2·SCC-I·IDE·VHD·X86Ethernet)이 꽂히지 않던 회귀를 잡으려고 만듦.
 #   기준 tests/data/spcart_expected.txt = 5.2.85 와 같은 결과 (가짜 롬은 고정 시드로 이 스크립트가 만듦)
 #   usage: bash tests/spcarttest.sh [update]
 set -e
@@ -20,12 +20,13 @@ def size(n):
     if 'nms1205' in l or 'musicmodule' in l or 'hx-mu900' in l or 'sfg' in l: return 32768
     return 16384
 random.seed(11)
-for n in sorted(set(re.findall(r'SR "([^"|]+)',src)) | {'MOONSOUND.rom'}):   # MoonSound 웨이브 롬은 꽂기 코드(fe_extdev.inc)가 직접 찾음
+for n in sorted((set(re.findall(r'SR "([^"|]+)',src)) - {'X86-Multimedia.rom'}) | {'MOONSOUND.rom'}):   # 8.0.77: X86-Multimedia.rom 은 꽂을 때 만들어지는 롬이라 가짜를 안 만듦 (난수 순서가 밀리지 않게)
+    #   # MoonSound 웨이브 롬은 꽂기 코드(fe_extdev.inc)가 직접 찾음
     b=bytearray(random.getrandbits(8) for _ in range(size(n))); b[0:2]=b'AB'
     open(os.path.join(d,n),'wb').write(b)
 P
 OUT=$T/out.txt; : > $OUT
-for k in $(seq 0 67); do
+for k in $(seq 0 68); do
   for mode in a b; do
     X=""; [ $mode = b ] && X="FEACT2=special:2 FEACT2_F=40"
     echo "== kind $k $mode" >> $OUT

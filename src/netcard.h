@@ -53,6 +53,9 @@
 #define NC_CMD_UDP_RECV    0x34   /* 인자: 핸들, 최대 길이(2, LE). 결과 8바이트: 보낸 IP(4), 보낸 포트(2, LE), 받은 길이(2, LE). 자료는 +1 포트에서 읽음 */
 
 #define NC_CMD_ECHO_SEND   0x40   /* 5.0.131 ICMP 에코(PING) 보내기. 인자 11바이트: 상대 IP(4), TTL(1), 식별자(2, LE), 순번(2, LE), 자료 길이(2, LE). 자료는 0,1,2..255 되풀이 */
+#define NC_CMD_BOOT_WAIT   0x42   /* 8.0.46 롬(INIT)이 부팅 중에 부르는 "계속 기다릴까?". 인자 1바이트: 1 = 이번 부팅의 첫 물음, 0 = 이어서. 결과 2바이트: [0] 0 = 이제 부팅, 1 = 더 기다림 / [1] 비트0 = 무선(x86wifi) 카트리지 (롬이 F2 안내 화면을 그린다). 호스트 콜백이 없으면 0, 0 */
+#define NC_CMD_BOOT_TEXT   0x44   /* 8.0.49 안내 화면에 찍을 글자 가져오기 (인자 없음). 결과: [0] = 글자 수 n(0~40), 이어서 ASCII n 바이트 */
+#define NC_CMD_BOOT_SETUP  0x43   /* 8.0.47 부팅 중 F2 가 눌림 — 호스트가 네트워크 설정 창을 연다 (인자 없음). 호스트 콜백이 없으면 아무것도 안 함 */
 #define NC_CMD_ECHO_RECV   0x41   /* 가장 오래된 응답 하나를 꺼냄. 결과 11바이트: 보낸 IP(4), TTL(1), 식별자(2, LE), 순번(2, LE), 자료 길이(2, LE). 없으면 NODATA */
 
 /* 오류 코드 (+3 읽기) */
@@ -166,6 +169,9 @@ void    netcard_reset(NetCard *nc);                              /* MSX 리셋 *
 int     netcard_owns(const NetCard *nc, uint16_t port);          /* 이 포트가 이 장치 것인가 (정렬 8포트 중 +0~+3) */
 uint8_t netcard_io_read(NetCard *nc, uint16_t port, uint64_t cycles);
 void    netcard_io_write(NetCard *nc, uint16_t port, uint8_t v, uint64_t cycles);
+extern int (*netcard_bootwait_cb)(int start);          /* 반환: 비트0 = 더 기다림, 비트1 = 무선 카트리지 */
+extern int (*netcard_boottext_cb)(char *buf, int max);   /* 8.0.49 글자를 buf 에 넣고 글자 수를 돌려줌 */
+extern void (*netcard_bootsetup_cb)(void);          /* 8.0.45 호스트(프런트엔드)가 걸어 두는 콜백. 상태 저장에는 넣지 않는 전역이다 */
 extern uint32_t netcard_act;                             /* 실행한 명령 수 */
 void    netcard_tick(NetCard *nc, uint64_t cycles);              /* 프레임마다 한 번 이상 호출 (BUSY 해제용) */
 int     netcard_irq_line(const NetCard *nc);                     /* 1이면 MSX 인터럽트 선을 올린다 */

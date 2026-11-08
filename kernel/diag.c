@@ -12,6 +12,7 @@ const char *const diag_area_key[DA_N] = { "SYS", "VID", "SND", "KBD", "MOUSE", "
 #define O EX_OK
 #define X EX_UNSUP
 #define N EX_NONE
+int diag_file_pct;                                   /* 8.0.210: 최근 1초 중 파일 쓰기가 차지한 % (fe.c 가 갱신) */
 const DiagPc diag_pcs[] = {
     { 1, "Lenovo V14-ARE (82DQ, AMD Renoir)", "1002:1636", "V14-ARE", "uefi", 0, { O, O, O, O, U, O, U, O, O, O },
       "I2C touchpad (AMD) OK; wifi RTL8822CE 10EC:C822 OK (ping 5.0.161); HDMI video+sound OK (test room v53, X86MSX 4.0.115~), plug HDMI before boot" },
@@ -27,8 +28,12 @@ const DiagPc diag_pcs[] = {
       "UEFI only; sound needs HDA DMA map (5.2.20); I2C touchpad (Intel) and wifi 8086:7E40 unsupported; speaker amp not checked; diag sound tab hang under investigation" },
     { 7, "GPD G1619-04 (AMD Ryzen, Lee Ji-hyung's PC)", "1002:15BF", "G1619", "uefi", "14F1:1F87", { O, O, O, O, O, U, U, O, X, O },
       "5.3.51 log: HDA 1022:15E3 codec 14F1:1F87 (pins 16,17) sound OK; USB mice 2; touchpad I2C GXTP7385 not mapped yet; wifi Intel 8086:2725 unsupported" },
+    { 8, "Dell Inspiron 15 3511 (daughter's PC, Intel Tiger Lake)", "8086:9A78", "Inspiron 15 3511", "uefi", "10EC:0236", { O, O, O, O, O, X, U, O, U, O },
+      "8.0.204 log: wifi RTL8821CE 10EC:C821 power-on + firmware download OK; touchpad works via PS/2 (Intel I2C address not found, ACPI ELAN900C)" },
     { 9, "ASRock H110M-HDV (company desktop 2, Intel fam 6 model 9E)", "8086:5912", 0, "uefi", "10EC:0887", { O, O, O, O, O, N, U, O, U, O },
       "5.3.55 log 2026-10-30: SMBIOS system/product 'To Be Filled By O.E.M.' (found by GPU, board H110M-HDV); HDA 8086:A170 codec ALC887 pins 14,15,1B sound OK; monitor S24C340 1920x1080; USB kbd 2, mice 2; desktop, no touchpad; no wifi" },
+    { 10, "LG 15ZB95N-GP5KL (Lee Ji-hyung's PC, Intel Tiger Lake)", "8086:9A49", "15ZB95N", "uefi", 0, { O, O, U, O, O, X, U, O, X, O },
+      "waiting for logs: cyan X86MP3 screen (need DIAG == VDP == while cyan); I2C touchpad PNP0C50 and wifi Intel 8086:A0F0 unsupported" },
 };
 #undef U
 #undef O
@@ -75,6 +80,17 @@ static void cat(char *d, int max, const char *s) { int i = 0; while (d[i]) i++; 
 static void catn(char *d, int max, uint32_t v) { char t[12]; int n = 0; do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v); char r[12]; int k = 0; while (n) r[k++] = t[--n]; r[k] = 0; cat(d, max, r); }
 static void set(DiagSum *s, DiagState st, const char *why, const char *text) { s->st = st; cpy(s->why, sizeof s->why, why ? why : ""); cpy(s->text, sizeof s->text, text); }
 static const char *find(char (*lines)[64], int n, const char *pfx) { for (int i = 0; i < n; i++) if (starts(lines[i], pfx)) return lines[i]; return 0; }
+/* 8.0.224: HDA 줄이 여럿(그래픽 HDMI 소리 + 내장 소리)일 때 실제로 쓰는 줄("<- used")을 먼저 고른다. 첫 줄을 그대로 쓰면 HDMI 컨트롤러(아날로그 출력 없음) 때문에 거짓 경고가 나옴 */
+static const char *find_hda_used(char (*lines)[64], int n, int need_codec)
+{
+    const char *first = 0;
+    for (int i = 0; i < n; i++) {
+        if (!starts(lines[i], "HDA ") || (need_codec && !has(lines[i], "codec"))) continue;
+        if (has(lines[i], "<- used")) return lines[i];
+        if (!first) first = lines[i];
+    }
+    return first;
+}
 static const char *finds(char (*lines)[64], int n, const char *w) { for (int i = 0; i < n; i++) if (has(lines[i], w)) return lines[i]; return 0; }
 static int num_after(const char *l, const char *key)  /* "USB keyboards: 1" → 1, 없으면 -1 */
 {
@@ -107,7 +123,7 @@ void diag_judge(const DiagCtx *c, char (*lines)[64], int n, DiagSum o[DA_N])
     }
     /* SND: 소리 상태 문자열 + HDA 줄 */
     {
-        const char *ss = c->snd_status ? c->snd_status : "", *hl = find(lines, n, "HDA ");
+        const char *ss = c->snd_status ? c->snd_status : "", *hl = find_hda_used(lines, n, 0);
         cpy(t, sizeof t, ss);
         if (!ss[0] && !hl) { set(&o[DA_SND], DS_NA, "no_data", "sound not initialised"); goto snd_done; }
         if (hl) { cat(t, sizeof t, " | "); cat(t, sizeof t, hl + 4); }
@@ -147,7 +163,10 @@ void diag_judge(const DiagCtx *c, char (*lines)[64], int n, DiagSum o[DA_N])
         if (!ta && !cpu) set(&o[DA_TP], DS_NA, "no_data", "touchpad probe did not run (legacy boot?)");
         else if (!ta) set(&o[DA_TP], DS_INFO, "", "no touchpad in ACPI");
         else if (used) set(&o[DA_TP], DS_OK, "", ta + 4);
-        else {
+        else if (num_after(find(lines, n, "PS/2 mouse: on"), "bytes") > 0) {   /* 8.0.206: I2C 는 못 찾았지만 PS/2 로 입력이 들어옴 = 터치패드 동작 중 */
+            cpy(t, sizeof t, "works via PS/2 | "); cat(t, sizeof t, ta + 4);
+            set(&o[DA_TP], DS_INFO, "ps2_touchpad", t);
+        } else {
             cpy(t, sizeof t, ta + 4); if (pr) { cat(t, sizeof t, " | "); cat(t, sizeof t, pr + 4); }
             set(&o[DA_TP], DS_WARN, cpu && has(cpu, "Intel") ? "i2c_intel_unsupported" : "i2c_tp_not_found", t);
         }
@@ -183,7 +202,12 @@ void diag_judge(const DiagCtx *c, char (*lines)[64], int n, DiagSum o[DA_N])
     {
         t[0] = 0; cat(t, sizeof t, "speed "); catn(t, sizeof t, (uint32_t)(c->speed < 0 ? 0 : c->speed)); cat(t, sizeof t, "% busy ");
         catn(t, sizeof t, (uint32_t)(c->busy < 0 ? 0 : c->busy)); cat(t, sizeof t, "% gap max "); catn(t, sizeof t, (uint32_t)(c->gap_ms < 0 ? 0 : c->gap_ms)); cat(t, sizeof t, " ms");
+        int slowish = (c->speed > 0 && c->speed < 90) || c->gap_ms > 40 || c->busy > 90;
         if (c->speed <= 0) set(&o[DA_PERF], DS_NA, "not_measured_yet", t);
+        else if (slowish && diag_file_pct >= 25) {                 /* 8.0.210: 느림의 대부분이 파일 쓰기(진단·기록 저장) 때문이면 실패가 아니라 정보 */
+            cat(t, sizeof t, " | file write "); catn(t, sizeof t, (uint32_t)diag_file_pct); cat(t, sizeof t, "%");
+            set(&o[DA_PERF], DS_INFO, "file_write", t);
+        }
         else if (c->speed > 0 && c->speed < 90) set(&o[DA_PERF], DS_WARN, "slow", t);
         else if (c->gap_ms > 40) set(&o[DA_PERF], DS_WARN, "frame_gap", t);
         else if (c->busy > 90) set(&o[DA_PERF], DS_WARN, "cpu_busy", t);
@@ -253,7 +277,7 @@ int diag_pc_user_add(char (*lines)[64], int n, const DiagSum s[DA_N], const char
 {
     const char *sm = find(lines, n, "SMBIOS system "), *gl = 0, *hl = 0, *bl = find(lines, n, "boot mode");
     for (int k = 0; k < n && !gl; k++) if (starts(lines[k], "gpu ") || starts(lines[k], "screen gpu ")) gl = lines[k];
-    for (int k = 0; k < n && !hl; k++) if (starts(lines[k], "HDA ") && has(lines[k], "codec")) hl = lines[k];
+    hl = find_hda_used(lines, n, 1);
     DiagPcU t = { 0 };
     if (sm) { cpy(t.smbios, sizeof t.smbios, sm + 14); cpy(t.name, sizeof t.name, sm + 14); }
     if (gl) { for (const char *q = gl; *q; q++) if (ishex(q[0]) && ishex(q[1]) && ishex(q[2]) && ishex(q[3]) && q[4] == ':' && ishex(q[5])) { int k = 0; while (k < 9 && q[k]) { t.gpu[k] = q[k]; k++; } t.gpu[k] = 0; break; } }
@@ -322,7 +346,7 @@ void diag_expect(const DiagPc *pc, char (*lines)[64], int n, DiagSum s[DA_N])
     }
     if (pc->codec) {                                    /* 소리 코덱이 표와 다름 → 다른 PC 이거나 코덱 판별이 틀림 */
         const char *hl = 0;
-        for (int i = 0; i < n && !hl; i++) if (starts(lines[i], "HDA ") && has(lines[i], "codec")) hl = lines[i];
+        hl = find_hda_used(lines, n, 1);
         if (hl && !has(hl, pc->codec) && s[DA_SND].st == DS_OK) { s[DA_SND].st = DS_WARN; cpy(s[DA_SND].why, sizeof s[DA_SND].why, "codec_mismatch"); }
     }
 }

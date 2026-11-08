@@ -161,12 +161,16 @@ void gm_mt32_close(int slot) { for (int i = 0; i < GM_INST_MAX; i++) if (gi[i].m
 int  gm_mt32_ready(int slot) { return mt32w_ready(slot); }
 const char *gm_mt32_name(int slot) { return mt32w_name(slot); }
 static void gm_fx_mt32(int rev) { mt32w_fx(rev); }
+void gm_mt32_real(int on) { mt32w_real(on); }
+void gm_mt32_reverb(int rv) { mt32w_reverb(rv); }
 #else
 int gm_mt32_open(int slot, void *arena, uint32_t arena_n, const uint8_t *ctl, uint32_t ctl_n, const uint8_t *pcm, uint32_t pcm_n) { (void)slot; (void)arena; (void)arena_n; (void)ctl; (void)ctl_n; (void)pcm; (void)pcm_n; return -9; }
 void gm_mt32_close(int slot) { (void)slot; }
 int  gm_mt32_ready(int slot) { (void)slot; return 0; }
 const char *gm_mt32_name(int slot) { (void)slot; return ""; }
 static void gm_fx_mt32(int rev) { (void)rev; }
+void gm_mt32_real(int on) { (void)on; }
+void gm_mt32_reverb(int rv) { (void)rv; }
 static void mt32w_midi(int slot, uint8_t b) { (void)slot; (void)b; }
 static void mt32w_reset(int slot) { (void)slot; }
 static void mt32w_render(int slot, int32_t *l, int32_t *r, int n) { (void)slot; (void)l; (void)r; (void)n; }
@@ -821,10 +825,32 @@ static void reset_chan(int c)
     k->vrate = k->vdepth = k->cutoff = k->reso = k->att = k->dec = k->rel = 64;
 }
 static void reset_part(int c) { Chan *k = &ch[c]; reset_chan(c); k->level = 127; k->tune = 0; }
+/* 8.0.222: 롬 에뮬 음원(MT-32·SC-55) 공용 접합부 — 음원마다 reset·midi·render 를 한 묶음으로 두고, 부르는 쪽은 묶음만 본다.
+ * 새 롬 음원은 묶음 하나만 더하면 됨 (reset·midi·render·voices 네 곳의 if 를 고치지 않음). FM·SoundFont 는 안쪽 상태를 같이 써서 아직 이 묶음 밖 */
+typedef struct {
+    void (*reset)(void);                            /* 처음 상태로 (SC-55 는 GS 리셋을 보냄) */
+    void (*midi)(uint8_t b);                        /* MIDI 바이트 하나 */
+    void (*render)(int32_t *l, int32_t *r, int n);  /* n표본을 l·r 에 씀 */
+    int  master_after;                              /* 1 이면 렌더 뒤 마스터 음량(G->master_s)을 곱함 (SC-55) */
+} GmRomEngine;
+static void mt32_eng_reset(void) { mt32w_reset(G->mt_slot_s); }
+static void mt32_eng_midi(uint8_t b) { mt32w_midi(G->mt_slot_s, b); }
+static void mt32_eng_render(int32_t *l, int32_t *r, int n) { mt32w_render(G->mt_slot_s, l, r, n); }
+static void sc55_eng_render(int32_t *l, int32_t *r, int n) { sc55w_render(l, r, n); }
+static const GmRomEngine eng_mt32 = { mt32_eng_reset, mt32_eng_midi, mt32_eng_render, 0 };
+static const GmRomEngine eng_sc55 = { sc55w_reset, sc55w_midi, sc55_eng_render, 1 };
+static const GmRomEngine *rom_engine(void) { return mode == GM_MT32 ? &eng_mt32 : mode == GM_SC55 ? &eng_sc55 : 0; }
+/* 롬 음원 출력 뒤처리: 한계 넘은 횟수를 세고 묶음 (마스터 음량은 SC-55 만) */
+static void rom_engine_render(const GmRomEngine *e, int32_t *l, int32_t *r, int n)
+{
+    e->render(l, r, n);
+    for (int i = 0; i < n; i++) { if (l[i] > GM_LIM || l[i] < -GM_LIM || r[i] > GM_LIM || r[i] < -GM_LIM) gm_guard_hits++; l[i] = GCL(l[i], GM_LIM); r[i] = GCL(r[i], GM_LIM); }
+    if (e->master_after && G->master_s < 127) for (int i = 0; i < n; i++) { l[i] = l[i] * G->master_s / 127; r[i] = r[i] * G->master_s / 127; }
+}
 void gm_reset(void)
 {
-    if (mode == GM_MT32) { mt32w_reset(G->mt_slot_s); return; }
-    if (mode == GM_SC55) { sc55w_reset(); return; }       /* GS 리셋을 보냄 */
+    const GmRomEngine *re = rom_engine();
+    if (re) { re->reset(); return; }
     memset(v, 0, sizeof v);
     for (int c = 0; c < 16; c++) { reset_part(c); ch[c].prog = 0; ch[c].bank = 0; }
     rs = 0; ndat = 0; need = 0; sysex = 0; sxn = 0;
@@ -925,8 +951,8 @@ static void message(uint8_t st, uint8_t a, uint8_t b)
 }
 void gm_midi(uint8_t b)
 {
-    if (mode == GM_MT32) { mt32w_midi(G->mt_slot_s, b); return; }
-    if (mode == GM_SC55) { sc55w_midi(b); return; }
+    const GmRomEngine *re = rom_engine();
+    if (re) { re->midi(b); return; }
     if (b >= 0xF8) return;                      /* 실시간 메시지 */
     if (sysex) {
         if (b == 0xF7 || b & 0x80) {
@@ -1091,8 +1117,8 @@ void gm_render(int32_t *l, int32_t *r, int n)
     for (int i = 0; i < n; i++) { l[i] = 0; r[i] = 0; }
     if (mode == GM_OFF) return;
     if ((mode == GM_FM || mode == GM_SF2) && !G->cal_s) cal_run();
-    if (mode == GM_MT32) { mt32w_render(G->mt_slot_s, l, r, n); for (int i = 0; i < n; i++) { if (l[i] > GM_LIM || l[i] < -GM_LIM || r[i] > GM_LIM || r[i] < -GM_LIM) gm_guard_hits++; l[i] = GCL(l[i], GM_LIM); r[i] = GCL(r[i], GM_LIM); } return; }
-    if (mode == GM_SC55) { sc55w_render(l, r, n); for (int i = 0; i < n; i++) { if (l[i] > GM_LIM || l[i] < -GM_LIM || r[i] > GM_LIM || r[i] < -GM_LIM) gm_guard_hits++; l[i] = GCL(l[i], GM_LIM); r[i] = GCL(r[i], GM_LIM); } if (G->master_s < 127) for (int i = 0; i < n; i++) { l[i] = l[i] * G->master_s / 127; r[i] = r[i] * G->master_s / 127; } return; }
+    const GmRomEngine *re = rom_engine();
+    if (re) { rom_engine_render(re, l, r, n); return; }
     for (int i = 0; i < n; i++) {
         if (++lfo_cnt >= 64) {                  /* 비브라토: 64표본마다, 채널마다 5.6 Hz (GS 비브라토 빠르기로 바뀜) */
             lfo_cnt = 0;
@@ -1174,7 +1200,7 @@ static void cal_run(void)                       /* 프레임마다 한 박씩 (�
     }
     G = sv; SFD = ssfd;
 }
-int gm_voices(void) { if (mode == GM_MT32 || mode == GM_SC55) return 0; int c = 0; for (int i = 0; i < MAXV; i++) c += v[i].on; return c; }   /* 유령은 안 셈 */
+int gm_voices(void) { if (rom_engine()) return 0; int c = 0; for (int i = 0; i < MAXV; i++) c += v[i].on; return c; }   /* 유령은 안 셈 */
 
 /* 인스턴스 API — i 번째 음원 (단자에 꽂힌 소프트웨어 기계 번호). gm_*() 는 지금 고른 인스턴스(처음엔 0) */
 void gm_use(int i) { G = &gi[i >= 0 && i < GM_INST_MAX ? i : 0]; SFD = &sfd[G->sfslot_s < GM_SF_MAX ? G->sfslot_s : 0]; }

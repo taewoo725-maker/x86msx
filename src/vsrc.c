@@ -6,11 +6,14 @@
 
 static int vdp_present(const MSX *m) { (void)m; return 1; }
 static int v9_present(const MSX *m) { return m->v9 != 0; }
+static int v2_present(const MSX *m) { return m->v2 != 0; }
+static int v2_active(const MSX *m) { return m->v2 && (m->v2->reg[1] & 0x40); }   /* 8.0.94: 표시 켜짐 */
 static int v9_active(const MSX *m) { return m->v9 && v9990_visible(m->v9); }
 
 const VSrcInfo msx_vsrc[VSRC_N] = {
     [VSRC_VDP]   = { "VDP",   "MSX (VDP)",       vdp_present, vdp_present, 0, 0 },
     [VSRC_V9990] = { "V9990", "V9990 (Gfx9000)", v9_present,  v9_active,   0, 1 },
+    [VSRC_V9968] = { "V9968", "V9968 (cartridge)", v2_present, v2_active, 0, 1 },
 };
 
 int msx_vsrc_pick(const MSX *m, int pref)

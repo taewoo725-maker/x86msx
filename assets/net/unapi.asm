@@ -46,6 +46,9 @@ C_TCP_STATE     equ     23h
 C_TCP_SEND      equ     24h
 C_TCP_RECV      equ     25h
 C_TCP_INFO      equ     27h
+C_BOOT_TEXT     equ     44h             ; 8.0.49 안내 화면에 찍을 글자 (netcard.h NC_CMD_BOOT_TEXT)
+C_BOOT_SETUP    equ     43h             ; 8.0.46 부팅 중 F2 (netcard.h NC_CMD_BOOT_SETUP)
+C_BOOT_WAIT     equ     42h             ; 8.0.45 부팅 중 "계속 기다릴까?" (netcard.h NC_CMD_BOOT_WAIT)
 
 ; ---- UNAPI 오류 코드 ----
 ERR_OK          equ     0
@@ -1242,7 +1245,101 @@ I2_SET: call    GETSLOT                 ; A = 이 ROM의 슬롯 (CALSLT 형식)
         ld      (hl),EXT_RT >> 8
         inc     hl
         ld      (hl),0C9h               ; RET
+; 8.0.45: 네트워크가 올라올 때까지(호스트가 정한 시간 안에) 부팅을 붙잡는다. 시간·ESC·IP 기다림은 호스트 몫이다.
+; 8.0.46: 무선(x86wifi) 카트리지면 안내 화면(YS-II 같은 글자 화면)을 그리고 F2 를 기다린다. F2 → 호스트가 네트워크 설정 창을 연다.
+; 호스트가 기다릴 일이 없다고 하거나(0), 명령이 오류면 곧바로 부팅한다.
+        ld      a,1                     ; 첫 물음
+        ld      d,0                     ; D = 안내 화면을 그렸나
+        ld      e,0                     ; E = F2 를 이미 눌렀나 (설정 창은 한 번만 연다)
+BW_ASK: out     (P2),a
+        ld      a,C_BOOT_WAIT
+        call    DEVCMD
+        or      a
+        ret     nz
+        in      a,(P2)                  ; [0] 더 기다림
+        ld      c,a
+        in      a,(P2)                  ; [1] 비트0 = 무선 카트리지
+        ld      b,a
+        in      a,(P2)                  ; [2] 8.0.49 새 글자(시계 결과)가 있음
+        ld      h,a
+        ld      a,c
+        or      a
+        ret     z
+        bit     0,b
+        jr      z,BW_DLYP               ; 유선: 안내·F2 없음
+        ld      a,d
+        or      a
+        jr      nz,BW_KEY
+        inc     d
+        call    BW_BANNER
+BW_KEY: bit     0,h
+        call    nz,BW_TEXT              ; 시계 결과 줄 ("Clock: ...")
+        ld      a,e
+        or      a
+        jr      nz,BW_DLYP
+        in      a,(0AAh)                ; 키보드 행 6 (비트6 = F2, 눌림 = 0)
+        and     0F0h
+        or      6
+        out     (0AAh),a
+        in      a,(0A9h)
+        bit     6,a
+        jr      nz,BW_DLYP
+        ld      e,1
+        push    de
+        ld      a,C_BOOT_SETUP
+        call    DEVCMD                  ; 호스트가 네트워크 설정 창을 연다 (닫을 때까지 호스트가 "기다림"을 답한다)
+        pop     de
+BW_DLYP:ld      b,0
+BW_DLY: djnz    BW_DLY                  ; 물음 사이를 조금 띄운다 (명령이 너무 자주 나가지 않게)
+        xor     a                       ; 이어서
+        jr      BW_ASK
+
+; 안내 글자를 CHPUT(00A2h)으로 그린다. INIT 중에는 페이지 0 이 BIOS 이므로 직접 부른다.
+BW_BANNER:
+        push    bc
+        push    de
+        push    hl
+        ld      hl,BW_TXT
+BWB1:   ld      a,(hl)
+        or      a
+        jr      z,BWB2
+        push    hl
+        call    00A2h
+        pop     hl
+        inc     hl
+        jr      BWB1
+BWB2:   pop     hl
+        pop     de
+        pop     bc
         ret
+; 호스트가 준 글자(길이 n + ASCII n 바이트)를 한 줄 찍는다.
+BW_TEXT:
+        push    bc
+        push    de
+        push    hl
+        ld      a,C_BOOT_TEXT
+        call    DEVCMD
+        or      a
+        jr      nz,BWT9
+        in      a,(P2)                  ; 글자 수
+        or      a
+        jr      z,BWT9
+        ld      b,a
+BWT1:   in      a,(P2)
+        push    bc
+        call    00A2h
+        pop     bc
+        djnz    BWT1
+        ld      a,13
+        call    00A2h
+        ld      a,10
+        call    00A2h
+BWT9:   pop     hl
+        pop     de
+        pop     bc
+        ret
+BW_TXT: db      0Ch,"x86wifi Wi-Fi cartridge",13,10   ; 0Ch = 화면 지우기(CHPUT)
+        db      "Press F2 for network setup",13,10,0
 
 ; EXTBIO 처리 (슬롯 간 호출로 들어옴). 규격은 RAM 조각(TPL)과 같고, 이어 붙일 후크가 없어 그냥 RET.
 EXT_RT:

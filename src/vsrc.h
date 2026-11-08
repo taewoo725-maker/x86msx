@@ -10,7 +10,7 @@
 #define VSRC_H
 #include "msx.h"
 
-typedef enum { VSRC_VDP, VSRC_V9990, VSRC_N } VSrcId;
+typedef enum { VSRC_VDP, VSRC_V9990, VSRC_V9968, VSRC_N } VSrcId;
 
 typedef struct {
     const char *key;                    /* ini 값 (VideoSource=) */

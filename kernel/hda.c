@@ -54,6 +54,7 @@ void hda_set_dma_dev(int64_t off) { dma_dev_off = off; }
 #define TARGET_LAT  1600                        /* 목표 지연 33 ms */
 #define LOW_LAT     400
 #include "sndrs.h"
+#include "sndlat.h"
 static SndRs rs;                                /* 부드러운 속도 맞춤 */
 extern int snd_sync_mode;                       /* 5.3.17: 1 기본(5.3.14 루틴), 2 시험 루틴 (x86msx.ini SndSync) */
 static uint32_t g_under, g_over; static int g_under_d;   /* 5.3.51: 소리 끊김 세기 (모자람 건너뜀 / 넘쳐 버림) */
@@ -118,22 +119,9 @@ static int cmd_corb(uint32_t verb, uint32_t *resp)
 
 static int ctrl_intel;                          /* 4.0.19: 열린 컨트롤러가 Intel */
 static int cmd_failed;                          /* 4.0.17: 마지막 cmd가 응답을 못 받음 */
-void (*hda_trace)(const char *);                /* 진단 추적 (fe_trace_ext) — 명령마다 한 줄 */
-static void htr(const char *what, uint32_t v)
-{
-    if (!hda_trace) return;
-    char l[48]; int k = 0;
-    for (const char *q = "hda "; *q; q++) l[k++] = *q;
-    for (const char *q = what; *q && k < 30; q++) l[k++] = *q;
-    l[k++] = ' ';
-    for (int i = 28; i >= 0; i -= 4) l[k++] = "0123456789ABCDEF"[(v >> i) & 15];
-    l[k] = 0;
-    hda_trace(l);
-}
 static uint32_t cmd(int cad, int nid, uint32_t verb_payload)
 {
     uint32_t v = ((uint32_t)cad << 28) | ((uint32_t)(nid & 0xFF) << 20) | (verb_payload & 0xFFFFF);
-    htr(use_immediate ? "cmd imm" : "cmd corb", v);
     uint32_t r = 0;
     int bad = 1;
     if (use_immediate) {
@@ -755,7 +743,7 @@ void hda_write2(const int16_t *mono, const int16_t *right, int n, int volume, in
     if (d < LOW_LAT) {                                            /* 모자람(프레임이 많이 늦음): 앞으로 건너뜀. 5.2.148: 건너뛴 자리에 낡은 소리가 남아 되풀이되던 것(음이탈·울림)을 무음으로 */
         g_ur_f[g_under & 7] = g_wr_n; g_ur_dd[g_under & 7] = (uint32_t)d; g_ur_ms[g_under & 7] = fe_now_ms();
         g_under++; g_under_d = d;
-        if (tgt_lat < 2800) { tgt_lat += 400; if (tgt_lat > 2800) tgt_lat = 2800; }   /* 8.0.22: 2800 상한을 넘겨 3040 이 되면 지연+한 프레임(800)이 넘침 기준(4096-256)에 닿아 매 프레임 소리 뒤쪽을 버렸음 (SNDGLITCH: lat=3040 OVER 가 프레임마다) */
+        tgt_lat = sndlat_after_underrun(tgt_lat, RING_FRAMES);   /* 8.0.138: 상한 계산은 sndlat.c (8.0.22 의 고정 2800 은 한 프레임 뒤 넘침 기준까지 여유가 5 ms 뿐이었음) */
         ok_frames = 0;
         int np = (pos + tgt_lat) % RING_FRAMES;
         for (int k = 0; k < tgt_lat; k++) { int q = (pos + k) % RING_FRAMES; ring[q * 2] = 0; ring[q * 2 + 1] = 0; }
@@ -781,7 +769,7 @@ void hda_write2(const int16_t *mono, const int16_t *right, int n, int volume, in
     int on = sndrs_run(&rs, mono, right, n, step, rl, rr, 2400);
     for (int i = 0; i < on; i++) {
         d = (wpos - pos + RING_FRAMES) % RING_FRAMES;
-        if (d > RING_FRAMES - 256) { g_over++; break; }           /* 넘침: 나머지 버림 */
+        if (d > RING_FRAMES - SNDLAT_OVER_MARGIN) { g_over++; tgt_lat = sndlat_after_overflow(tgt_lat, TARGET_LAT); break; }   /* 넘침: 나머지 버림 (8.0.138: 목표 지연도 한 단계 내림) */
         /* 직류 제거: y = x - x' + 0.996 y' */
         int32_t x = rl[i];
         dc_y = x - dc_x + (dc_y * 255) / 256;
@@ -820,33 +808,6 @@ void hda_write(const int16_t *mono, int n, int volume, int mute) { hda_write2(mo
 
 /* 출력 장치를 다시 고른다 (pref 0 자동, 1 아날로그, 2 디지털). 성공 0 */
 
-/* 4.0.102: 그래픽(HDMI) 코덱의 모니터 감지 — HDMI를 뽑았는지 알아내는 데만 씀 (소리 경로는 건드리지 않음). -1 모름, 0 없음, 1 있음 */
-int hda_hdmi_present(void)
-{
-    static int cad_g = -2, pins[6], np;
-    if (!ok || !g_codecs) return -1;
-    if (cad_g == -2) {
-        cad_g = -1; np = 0;
-        for (int cad = 0; cad < 15 && cad_g < 0; cad++) {
-            if (!(g_codecs & (1u << cad))) continue;
-            if ((param(cad, 0, 0x00) >> 16) != 0x8086) continue;
-            uint32_t sub = param(cad, 0, 0x04);
-            int start = (sub >> 16) & 0xFF, count = sub & 0xFF, afg = -1;
-            for (int n = start; n < start + count; n++) if ((param(cad, n, 0x05) & 0xFF) == 1) { afg = n; break; }
-            if (afg < 0) continue;
-            sub = param(cad, afg, 0x04);
-            int f = (sub >> 16) & 0xFF, c = sub & 0xFF;
-            for (int n = f; n < f + c && np < 6; n++) {
-                if (((param(cad, n, 0x09) >> 20) & 0xF) != 4) continue;
-                if (param(cad, n, 0x0C) & (1u << 7)) pins[np++] = n;
-            }
-            if (np) cad_g = cad;
-        }
-    }
-    if (cad_g < 0) return -1;
-    for (int i = 0; i < np; i++) if (cmd(cad_g, pins[i], 0xF0900) >> 31) return 1;
-    return 0;
-}
 
 int hda_select(int pref, char *status, int len)
 {

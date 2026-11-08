@@ -71,6 +71,6 @@ int main(int argc, char **argv)
         }
         if (f == 300) gmi_set_mode(g, GM_FM);           /* 중간에 바꾸기 (메인에서 음원을 만지는 경우 — 일 바깥) */
     }
-    printf("hash %08X energy %llu frames 600 midi %d par_frames %u\n", h, (unsigned long long)energy, midi, msx_mp_midi_n);
+    { extern unsigned msx_midi_frame_max; printf("midi frame max bytes %u\n", msx_midi_frame_max); } printf("hash %08X energy %llu frames 600 midi %d par_frames %u\n", h, (unsigned long long)energy, midi, msx_mp_midi_n);
     return 0;
 }

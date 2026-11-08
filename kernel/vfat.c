@@ -272,6 +272,15 @@ static int dir_child(const Vf *v, int d, int i, uint8_t *e)
     return 0;
 }
 
+/* 디렉토리 d 의 항목 수 (하위 디렉토리면 "."·".." 포함). dir_child 가 0 을 돌려줄 때까지의 개수와 같음 */
+static int dir_count(const Vf *v, int d)
+{
+    int n = d > 0 ? 2 : 0;
+    for (int j = 1; j < v->ndirs; j++) if (v->dirs[j].alive && v->dirs[j].parent == d) n++;
+    for (int j = 0; j < v->nfiles; j++) if (v->files[j].alive && v->files[j].parent == d) n++;
+    return n;
+}
+
 /* ---------------- 마운트 ---------------- */
 int vf_folder_mb(const VfHost *h, const char *root)
 {
@@ -306,6 +315,23 @@ int vf_auto_kind(const VfHost *h, const char *root, uint32_t size_mb)
     return size_mb < vf_min_mb(VF_FAT16) ? VF_FAT12 : VF_FAT16;
 }
 
+/* 8.0.169: 훑어 둔 폴더 전체가 차지할 클러스터 수 (하위 폴더 칸 + 파일, 클러스터 올림까지) — 배치 반복문과 같은 셈 */
+static uint32_t clusters_needed(const Vf *v)
+{
+    uint32_t total = 0;
+    for (int d = 1; d < v->ndirs; d++) {
+        uint32_t ents_n = 2;
+        for (int j = 1; j < v->ndirs; j++) if (v->dirs[j].parent == d) ents_n++;
+        for (int j = 0; j < v->nfiles; j++) if (v->files[j].parent == d) ents_n++;
+        total += (ents_n * 32 + v->clb - 1) / v->clb;
+    }
+    for (int f = 0; f < v->nfiles; f++) total += (v->files[f].size + v->clb - 1) / v->clb;
+    return total;
+}
+uint32_t vf_need_mb(const Vf *v)
+{
+    return (uint32_t)(((uint64_t)v->need_clus * v->clb + (1u << 20) - 1) >> 20);
+}
 int vf_mount(Vf *v, const VfHost *h, const char *root, uint32_t size_mb, int kind, int id, uint8_t *arena, char *err, int errlen)
 {
     memset(v, 0, sizeof *v);
@@ -364,6 +390,7 @@ int vf_mount(Vf *v, const VfHost *h, const char *root, uint32_t size_mb, int kin
                 }
             }
     }
+    v->need_clus = clusters_needed(v);                  /* 8.0.169: 못 담을 때 얼마나 모자란지 알려 주려고 (성공하면 used_clus 와 같음) */
     /* 루트에 다 들어가는가 (볼륨 이름 1칸) */
     int rootn = 1;
     for (int j = 1; j < v->ndirs; j++) if (v->dirs[j].parent == 0) rootn++;
@@ -414,11 +441,12 @@ int vf_mount(Vf *v, const VfHost *h, const char *root, uint32_t size_mb, int kin
     uint8_t sec[512];
     for (int d = 1; d < v->ndirs; d++) {
         uint32_t c = dfirst[d], idx = 0;
+        int count = dir_count(v, d);                    /* 8.0.165: 항목 수를 한 번만 셈. 클러스터가 큰 하드에서 빈 칸마다 dir_child 가 전체를 훑어 수 분 걸렸음 */
         while (c >= 2 && c < last) {
             for (uint32_t s = 0; s < v->spc; s++) {
                 memset(sec, 0, 512);
                 for (int k = 0; k < 16; k++, idx++) {
-                    uint8_t *e = sec + k * 32; int w = dir_child(v, d, (int)idx, e);
+                    uint8_t *e = sec + k * 32; int w = (int)idx < count ? dir_child(v, d, (int)idx, e) : 0;
                     if (!w) continue;
                     if (w == 1) w16(e + 26, idx == 0 ? dfirst[d] : v->dirs[d].parent ? dfirst[v->dirs[d].parent] : 0);
                     else if (w >= 10000) w16(e + 26, ffirst[w - 10000]); else w16(e + 26, dfirst[w - 2]);
@@ -508,8 +536,11 @@ static int cluster_clean(const Vf *v, uint32_t c)       /* 덮개에 쓴 섹터�
     return 1;
 }
 
-int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen)
+int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen) { return vf_sync2(v, tmp, tmpsize, err, errlen, 0); }
+int vf_sync2(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen, uint32_t budget_ms)
 {
+    uint32_t t0 = budget_ms && v->h && v->h->now_ms ? v->h->now_ms() : 0;
+#define OVER() (budget_ms && v->h->now_ms && (uint32_t)(v->h->now_ms() - t0) >= budget_ms)
     if (!v->fat) return 0;
     if (!v->dirty) return 0;
     err[0] = 0;
@@ -545,7 +576,7 @@ int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen)
     }
     /* 2. 디렉토리 → USB 디렉토리 (없으면 만듦) */
     char p[512], nm[16];
-    int written = 0;
+    int written = 0, partial_w = 0; (void)partial_w;
     for (int i = 1; i < nn; i++) {
         ne_host[i] = -1;
         if (!(ne[i].attr & 0x10)) continue;
@@ -561,6 +592,8 @@ int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen)
                 f = v->ndirs++;
                 dir_path(v, f, p, sizeof p);
                 if (v->h->mkdir) v->h->mkdir(v->h->ctx, p);
+                written++;
+                if (OVER()) goto partial;
             }
         }
         ne_host[i] = (int16_t)f;
@@ -613,6 +646,7 @@ int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen)
         if (v->h->write(v->h->ctx, p, tmp, ne[i].size)) { cpy(err, errlen, "write"); continue; }
         written++;
         v->files[f].size = ne[i].size;
+        partial_w = 1;
         for (uint32_t k = 2; k < v->nclus + 2; k++) if (v->own[k] == f + 1) v->own[k] = 0;
         c = ne[i].clus;
         for (uint32_t k = 0; k < nc && c >= 2 && c < v->nclus + 2; k++) {
@@ -620,6 +654,7 @@ int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen)
             for (uint32_t s = 0; s < v->spc; s++) pool_del(pkey(v, v->first_data + (c - 2) * v->spc + s));
             uint32_t nx = fat_get(v, c); c = fat_eoc(v, nx) ? 0 : nx;
         }
+        if (OVER()) goto partial;                       /* 8.0.42: 다음 프레임에 이어서 */
     }
     /* 4. 없어진 파일은 USB에서도 지움 */
     for (int j = 0; j < v->nfiles; j++) {
@@ -630,8 +665,80 @@ int vf_sync(Vf *v, uint8_t *tmp, uint32_t tmpsize, char *err, int errlen)
         v->files[j].alive = 0;
         for (uint32_t k = 2; k < v->nclus + 2; k++) if (v->own[k] == j + 1) v->own[k] = 0;
         written++;
+        if (OVER()) goto partial;
     }
     if (pdead > pcap / 4) pool_compact();
     v->dirty = 0;
     return err[0] ? -1 : written;
+partial:                                                /* 시간 제한: dirty 를 남겨 둠 — 이미 한 일은 기록돼 있어 다음 번에는 건너뜀 */
+    if (pdead > pcap / 4) pool_compact();
+    return written;
+#undef OVER
+}
+
+/* 8.0.62: DOS 가 보는 짧은 이름 경로(예 \\MP3\\C27479~1.MP3, 앞의 "A:" 는 무시) → USB 쪽 이름(긴 이름 가능). 메모리 표만 봄 (USB 안 읽음).
+ * 찾으면 1 (out 에 이름), 못 찾으면 0. 파일을 먼저, 없으면 폴더. */
+static int lfn_part(const char *s, int n, uint8_t o[11])
+{
+    memset(o, ' ', 11);
+    int k = 0, dot = -1;
+    for (int i = 0; i < n; i++) if (s[i] == '.') dot = i;
+    for (int i = 0; i < n; i++) {
+        char c = s[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+        if (i == dot) { k = 8; continue; }
+        if (dot >= 0 && i > dot) { if (k < 11) o[k++] = (uint8_t)c; }
+        else if (k < 8) o[k++] = (uint8_t)c;
+    }
+    return n > 0;
+}
+int vf_lfn(const Vf *v, const char *path, char *out, int max)
+{
+    if (!v || !v->files || !v->dirs || max < 2) return 0;
+    if (path[0] && path[1] == ':') path += 2;
+    int cur = 0;
+    while (*path == '\\') path++;
+    for (;;) {
+        const char *e = path; while (*e && *e != '\\') e++;
+        int n = (int)(e - path);
+        uint8_t k[11];
+        if (!lfn_part(path, n, k)) return 0;
+        int last = (*e == 0);
+        const char *hit = 0; int dirhit = -1;
+        if (last) for (int i = 0; i < v->nfiles; i++) if (v->files[i].alive && v->files[i].parent == cur && !memcmp(v->files[i].n83, k, 11)) { hit = v->str + v->files[i].host; break; }
+        if (!hit) for (int i = 1; i < v->ndirs; i++) if (v->dirs[i].alive && v->dirs[i].parent == cur && !memcmp(v->dirs[i].n83, k, 11)) { dirhit = i; hit = v->str + v->dirs[i].host; break; }
+        if (!hit) return 0;
+        if (last) { int q = 0; while (hit[q] && q < max - 1) { out[q] = hit[q]; q++; } out[q] = 0; return 1; }
+        if (dirhit < 0) return 0;
+        cur = dirhit; path = e + 1;
+        while (*path == '\\') path++;
+        if (!*path) return 0;
+    }
+}
+
+/* 8.0.66: DOS 짧은 경로의 파일 → USB 전체 경로(host)와 크기. 찾으면 1 (폴더·없음은 0). vf_lfn 과 같은 걸음 */
+int vf_find_file(const Vf *v, const char *path, char *host, int max, uint32_t *size)
+{
+    if (!v || !v->files || !v->dirs || max < 2) return 0;
+    if (path[0] && path[1] == ':') path += 2;
+    int cur = 0;
+    while (*path == '\\') path++;
+    for (;;) {
+        const char *e = path; while (*e && *e != '\\') e++;
+        int n = (int)(e - path);
+        uint8_t k[11];
+        if (!lfn_part(path, n, k)) return 0;
+        if (*e == 0) {
+            for (int i = 0; i < v->nfiles; i++) if (v->files[i].alive && v->files[i].parent == cur && !memcmp(v->files[i].n83, k, 11)) {
+                file_path(v, i, host, max); if (size) *size = v->files[i].size; return 1;
+            }
+            return 0;
+        }
+        int dirhit = -1;
+        for (int i = 1; i < v->ndirs; i++) if (v->dirs[i].alive && v->dirs[i].parent == cur && !memcmp(v->dirs[i].n83, k, 11)) { dirhit = i; break; }
+        if (dirhit < 0) return 0;
+        cur = dirhit; path = e + 1;
+        while (*path == '\\') path++;
+        if (!*path) return 0;
+    }
 }

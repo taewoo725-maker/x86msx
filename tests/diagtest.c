@@ -77,6 +77,17 @@ int main(void)
           DiagSum e[DA_N]; diag_judge(&c, L, n, e); diag_expect(&diag_pcs[pi], L, n, e);
           CHECK(e[DA_SND].st == DS_WARN && !strcmp(e[DA_SND].why, "codec_mismatch"), "codec mismatch %s", e[DA_SND].why); strcpy(L[hi], save); }
     }
+    {   /* 8.0.224: HDA 줄이 둘(그래픽 HDMI 소리가 먼저, 내장 소리가 "<- used")이어도 쓰는 줄 기준으로 판정 — 이지형 PC(#7) 거짓 경고 */
+        char save[64]; int hi = -1; for (int i = 0; i < n; i++) if (!strncmp(L[i], "HDA ", 4) && strstr(L[i], "codec")) hi = i;
+        if (hi >= 0 && pi >= 0 && n + 1 < 200) {
+            strcpy(save, L[hi]);
+            memmove(L[hi + 1], L[hi], (size_t)(n - hi) * sizeof L[0]);          /* 줄 하나 끼움 */
+            strcpy(L[hi], "HDA 65:00.1 1002:1640 codec 1002:AA01 no analog out");
+            strcpy(L[hi + 1], save);
+            DiagSum e[DA_N]; diag_judge(&c, L, n + 1, e); diag_expect(&diag_pcs[pi], L, n + 1, e);
+            CHECK(e[DA_SND].st == DS_OK, "hdmi hda first: snd %d %s", e[DA_SND].st, e[DA_SND].why);
+            memmove(L[hi], L[hi + 1], (size_t)(n - hi) * sizeof L[0]); }
+    }
     /* 진단 안 됨: 줄이 없으면 */
     { DiagSum e[DA_N]; DiagCtx z = { "", "", "", "", "?", 0, 0, 0 }; diag_judge(&z, L, 0, e);
       CHECK(e[DA_KBD].st == DS_NA && e[DA_SND].st == DS_NA && e[DA_TP].st == DS_NA && e[DA_PERF].st == DS_NA, "na %d %d %d %d", e[DA_KBD].st, e[DA_SND].st, e[DA_TP].st, e[DA_PERF].st);
@@ -126,15 +137,17 @@ int main(void)
         int ui = diag_pc_user_add(L, n, u, "5.2.26");
         CHECK(ui == diag_npcs && diag_pc_count() == diag_npcs + 1 && diag_pc_is_user(ui), "add %d", ui);
         const DiagPc *up = diag_pc(ui);
-        CHECK(up && up->pc == 6 && !strcmp(up->smbios, "LG Electronics 16Z90S-GA5VK") && up->codec && !strcmp(up->codec, "10EC:0298") && up->ex[DA_TP] == EX_UNSUP && up->ex[DA_SND] == EX_OK, "user pc %d '%s' '%s'", up ? up->pc : -1, up && up->smbios ? up->smbios : "", up && up->codec ? up->codec : "");
+        int diag_npcs_pc_next = up ? up->pc : -1;   /* 내장 PC 가 늘면 번호가 밀림 — 번호는 지금 목록 끝 다음 */
+        { int mx = 0; for (int i = 0; i < diag_npcs; i++) if (diag_pc(i)->pc > mx) mx = diag_pc(i)->pc; CHECK(diag_npcs_pc_next == mx + 1, "next pc number %d", diag_npcs_pc_next); }
+        CHECK(up && up->pc == diag_npcs_pc_next && !strcmp(up->smbios, "LG Electronics 16Z90S-GA5VK") && up->codec && !strcmp(up->codec, "10EC:0298") && up->ex[DA_TP] == EX_UNSUP && up->ex[DA_SND] == EX_OK, "user pc %d '%s' '%s'", up ? up->pc : -1, up && up->smbios ? up->smbios : "", up && up->codec ? up->codec : "");
         CHECK(diag_pc_auto(L, n) == ui, "auto user first");
         CHECK(diag_pc_user_add(L, n, u, "5.2.27") == ui && diag_pc_count() == diag_npcs + 1, "same pc replaces");
         int tl = diag_pc_user_save(tb, sizeof tb);
-        CHECK(tl > 100 && strstr(tb, "pc=6 name=\"LG Electronics 16Z90S-GA5VK\"") && strstr(tb, " ex=OOOOOXUOXO") , "save:\n%s", tb);
-        strcat(tb, "pc=9 name=\"Test box\" smbios=\"ABC-123\" gpu=- codec=- boot=legacy ex=ooxn note=\"hand made\"\r\n# comment\r\n");
+        { char want[64]; snprintf(want, sizeof want, "pc=%d name=\"LG Electronics 16Z90S-GA5VK\"", diag_npcs_pc_next); CHECK(tl > 100 && strstr(tb, want) && strstr(tb, " ex=OOOOOXUOXO") , "save:\n%s", tb); }
+        strcat(tb, "pc=99 name=\"Test box\" smbios=\"ABC-123\" gpu=- codec=- boot=legacy ex=ooxn note=\"hand made\"\r\n# comment\r\n");
         CHECK(diag_pc_user_load(tb, (int)strlen(tb)) == 2, "load 2");
         const DiagPc *t9 = diag_pc(diag_npcs + 1);
-        CHECK(t9 && t9->pc == 9 && !t9->gpu && !t9->codec && t9->ex[DA_SND] == EX_UNSUP && t9->ex[DA_KBD] == EX_NONE && t9->ex[DA_PERF] == EX_UNKNOWN && !strcmp(t9->boot, "legacy"), "parsed");
+        CHECK(t9 && t9->pc == 99 && !t9->gpu && !t9->codec && t9->ex[DA_SND] == EX_UNSUP && t9->ex[DA_KBD] == EX_NONE && t9->ex[DA_PERF] == EX_UNKNOWN && !strcmp(t9->boot, "legacy"), "parsed");
         diag_pc_user_load("", 0); n--;
     }
     printf("diagtest: %d/%d passed\n", checks - fails, checks);

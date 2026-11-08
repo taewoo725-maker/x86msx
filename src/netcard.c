@@ -84,6 +84,9 @@ static int udp_handle_ok(NetCard *nc, int h)
 static void put16(uint8_t *p, unsigned v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 
 /* 명령 실행: 결과를 바로 계산해 두고, BUSY만 시간을 두고 푼다. */
+int (*netcard_bootwait_cb)(int start);
+void (*netcard_bootsetup_cb)(void);
+int (*netcard_boottext_cb)(char *buf, int max);
 uint32_t netcard_act;                                   /* 명령을 실행할 때마다 늘어남 (네트워크 아이콘이 '쓰는 중'을 알아봄) */
 static void run_cmd(NetCard *nc, uint8_t cmd)
 {
@@ -313,6 +316,22 @@ static void run_cmd(NetCard *nc, uint8_t cmd)
         host_rc(nc, h->echo_send(h->ctx, &nc->args[0], nc->args[4], (uint16_t)id, (uint16_t)seq, (uint16_t)len));
         break;
     }
+    case NC_CMD_BOOT_WAIT:
+        if (nc->nargs != 1) { fail(nc, NC_E_BADARG); break; }
+        { int r = netcard_bootwait_cb ? netcard_bootwait_cb(nc->args[0] != 0) : 0;
+          nc->res[0] = (uint8_t)(r & 1); nc->res[1] = (uint8_t)((r >> 1) & 1); nc->res[2] = (uint8_t)((r >> 2) & 1); nc->nres = 3; }
+        break;
+    case NC_CMD_BOOT_TEXT:
+        if (nc->nargs != 0) { fail(nc, NC_E_BADARG); break; }
+        { char tb[44]; int n = netcard_boottext_cb ? netcard_boottext_cb(tb, 41) : 0;
+          if (n < 0) n = 0;
+          if (n > 40) n = 40;
+          nc->res[0] = (uint8_t)n; memcpy(&nc->res[1], tb, (size_t)n); nc->nres = 1 + n; }
+        break;
+    case NC_CMD_BOOT_SETUP:
+        if (nc->nargs != 0) { fail(nc, NC_E_BADARG); break; }
+        if (netcard_bootsetup_cb) netcard_bootsetup_cb();
+        break;
     case NC_CMD_ECHO_RECV:
         if (nc->nargs != 0) { fail(nc, NC_E_BADARG); break; }
         if (!h->echo_recv) { fail(nc, NC_E_NETDOWN); break; }

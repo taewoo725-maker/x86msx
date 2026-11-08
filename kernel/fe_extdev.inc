@@ -91,6 +91,8 @@ static void moon_eject(int n) { if (cart_special[n] == 134 && !msx_dev(M, MDEV_M
 /* Gfx9000 (V9990) 은 fe_v9990.inc 의 v9_cart_insert·v9_cart_eject */
 static int v9_ext_insert(int n, int kind, int quiet, uint32_t *size) { (void)kind; int ab; int r = v9_cart_insert(n, quiet, size, &ab); return ab ? EXT_ABORT : r; }
 
+static int v2_ext_insert(int n, int kind, int quiet, uint32_t *size) { (void)kind; int ab; int r = v2_cart_insert(n, quiet, size, &ab); return ab ? EXT_ABORT : r; }   /* 8.0.94 V9968 카트리지 */
+
 /* 표: 차례 = 빼기 차례 (예전 cart_remove: MSX-AUDIO → Joyrex → 외장 MSX-MIDI → Gfx9000 → MoonSound) */
 static const ExtDev ext_devs[] = {
     { SPK_AUDIO,    audio_insert,    audio_eject },
@@ -99,6 +101,7 @@ static const ExtDev ext_devs[] = {
     { SPK_JOYREX,   joyrex_insert,   joyrex_eject },
     { SPK_MSXMIDI,  msxmidi_insert,  msxmidi_eject },
     { SPK_V9990,    v9_ext_insert,   v9_cart_eject },
+    { SPK_V9968,    v2_ext_insert,   v2_cart_eject },
     { SPK_MOON,     moon_insert,     moon_eject },
 };
 #define EXT_N ((int)(sizeof ext_devs / sizeof ext_devs[0]))

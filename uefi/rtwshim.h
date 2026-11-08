@@ -62,8 +62,13 @@ enum { RF_PATH_A = 0, RF_PATH_B = 1, RTW_RF_PATH_MAX = 2 };
 #define PPG_5GL1_TXA 0x1ec
 struct rtw_backup_info { u8 len; u32 reg; u32 val; };
 struct rtw_dm_info { u32 dack_adck[RTW_RF_PATH_MAX]; u16 dack_msbk[RTW_RF_PATH_MAX][2][DACK_MSBK_BACKUP_NUM]; u8 dack_dck[RTW_RF_PATH_MAX][2][DACK_DCK_BACKUP_NUM]; };
-struct rtw_hal_s { int rf_path_num; };
-struct rtw_dev { volatile uint8_t *m; struct rtw_hal_s hal; struct rtw_dm_info dm_info; int nerr; const char *err1; };
+/* 칩 종류(is21: 1=RTL8821C, 0=RTL8822C)에 따라 달라지는 값만 둔다 - RF 레지스터 접근 주소와 채널 설정용 값 */
+struct rtw_hal { int rf_path_num; bool rfe_btg; u32 ch_param[3]; };
+struct rtw_efuse { u8 tx_bb_swing_setting_2g, tx_bb_swing_setting_5g; };
+struct rtw_dev { volatile uint8_t *m; struct rtw_hal hal; struct rtw_efuse efuse; struct rtw_dm_info dm_info; int nerr; const char *err1; int is21; };
+#define MASKBYTE2 0x00ff0000u
+#define rtw_regd_srrc(d) 0                    /* 규제 도메인 정보는 아직 없음: 기본 필터 사용 */
+#define rtw8821c_pwrtrack_init(d) ((void)0)   /* 송신 전력 추적은 나중 단계 */
 extern const uint8_t *rtw_ef_phy_p;
 static inline int shim_ffs(u32 x) { int s = 0; while (!((x >> s) & 1)) s++; return s; }
 #define FIELD_GET(mask, v) (((v) & (mask)) >> shim_ffs(mask))
@@ -78,6 +83,10 @@ static inline u32 rtw_read32(struct rtw_dev *d, u32 a) { return *(volatile u32 *
 static inline void rtw_write32(struct rtw_dev *d, u32 a, u32 v) { *(volatile u32 *)(d->m + a) = v; }
 static inline void rtw_write8(struct rtw_dev *d, u32 a, u8 v) { d->m[a] = v; }
 static inline void rtw_write16(struct rtw_dev *d, u32 a, u16 v) { *(volatile u16 *)(d->m + a) = v; }
+static inline void rtw_write8_set(struct rtw_dev *d, u32 a, u8 b) { rtw_write8(d, a, (u8)(rtw_read8(d, a) | b)); }
+static inline void rtw_write8_clr(struct rtw_dev *d, u32 a, u8 b) { rtw_write8(d, a, (u8)(rtw_read8(d, a) & ~b)); }
+static inline void rtw_write8_mask(struct rtw_dev *d, u32 a, u32 mask, u32 v) { u8 o = rtw_read8(d, a); rtw_write8(d, a, (u8)((o & ~mask) | ((v << shim_ffs(mask)) & mask))); }
+static inline void rtw_write16_set(struct rtw_dev *d, u32 a, u16 b) { rtw_write16(d, a, (u16)(*(volatile u16 *)(d->m + a) | b)); }
 static inline u32 rtw_read32_mask(struct rtw_dev *d, u32 a, u32 mask) { return (rtw_read32(d, a) & mask) >> shim_ffs(mask); }
 static inline void rtw_write32_mask(struct rtw_dev *d, u32 a, u32 mask, u32 v) { u32 o = rtw_read32(d, a); rtw_write32(d, a, (o & ~mask) | ((v << shim_ffs(mask)) & mask)); }
 static inline void rtw_write32_set(struct rtw_dev *d, u32 a, u32 b) { rtw_write32(d, a, rtw_read32(d, a) | b); }
@@ -85,13 +94,16 @@ static inline void rtw_write32_clr(struct rtw_dev *d, u32 a, u32 b) { rtw_write3
 static inline void rtw_restore_reg(struct rtw_dev *d, struct rtw_backup_info *b, u32 n)
 { for (u32 i = 0; i < n; i++) { if (b[i].len == 1) rtw_write8(d, b[i].reg, (u8)b[i].val); else if (b[i].len == 2) rtw_write16(d, b[i].reg, (u16)b[i].val); else rtw_write32(d, b[i].reg, b[i].val); } }
 /* RF 레지스터: 주소 0 이외는 직접 접근(0x3C00/0x4C00 + 주소*4), 주소 0 쓰기는 SIPI(0x1808/0x4108) */
-static inline u32 rtw_read_rf(struct rtw_dev *d, int p, u32 addr, u32 mask) { return rtw_read32_mask(d, (p ? 0x4C00u : 0x3C00u) + ((addr & 0xff) << 2), mask & RFREG_MASK); }
+/* RF 직접 읽기/쓰기 주소와 SIPI(주소 0 쓰기) 레지스터: 8822C = 0x3C00/0x4C00, 0x1808/0x4108 / 8821C = 0x2800/0x2C00, 0xC90/0xE90 */
+static inline u32 rf_direct_base(struct rtw_dev *d, int p) { return d->is21 ? (p ? 0x2C00u : 0x2800u) : (p ? 0x4C00u : 0x3C00u); }
+static inline u32 rf_sipi_reg(struct rtw_dev *d, int p) { return d->is21 ? (p ? 0xE90u : 0xC90u) : (p ? 0x4108u : 0x1808u); }
+static inline u32 rtw_read_rf(struct rtw_dev *d, int p, u32 addr, u32 mask) { return rtw_read32_mask(d, rf_direct_base(d, p) + ((addr & 0xff) << 2), mask & RFREG_MASK); }
 static inline void rtw_write_rf(struct rtw_dev *d, int p, u32 addr, u32 mask, u32 data)
 {
     addr &= 0xff; mask &= RFREG_MASK;
-    if (addr) { rtw_write32_mask(d, (p ? 0x4C00u : 0x3C00u) + (addr << 2), mask, data); shim_us(1); return; }
-    if (mask != RFREG_MASK) { u32 o = rtw_read_rf(d, p, 0, RFREG_MASK); data = (o & ~mask) | (data << shim_ffs(mask)); }
-    rtw_write32(d, p ? 0x4108 : 0x1808, ((addr << 20) | (data & 0xfffff)) & 0x0fffffff); shim_us(13);
+    if (addr && !d->is21) { rtw_write32_mask(d, rf_direct_base(d, p) + (addr << 2), mask, data); shim_us(1); return; }   /* 8821C 는 리눅스 ops->write_rf = SIPI(모든 주소), 읽기만 직접 */
+    if (mask != RFREG_MASK) { u32 o = rtw_read_rf(d, p, addr, RFREG_MASK);   /* 일부 비트만 쓸 때는 그 주소의 현재 값을 읽어 합친다 (리눅스 write_rf_reg_sipi) */ data = (o & ~mask) | (data << shim_ffs(mask)); }
+    rtw_write32(d, rf_sipi_reg(d, p), ((addr << 20) | (data & 0xfffff)) & 0x0fffffff); shim_us(13);
 }
 #define swap(a, b) do { __typeof__(a) _t = (a); (a) = (b); (b) = _t; } while (0)
 /* 리눅스 util.c check_hw_ready: 50마이크로초 간격으로 최대 50밀리초 기다림 (마스크 읽기 값이 target 과 같아질 때까지) */

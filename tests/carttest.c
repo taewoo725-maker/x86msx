@@ -60,6 +60,14 @@ static int mapper_tests(const char *profile, int *total)
         for (unsigned i = 0; i < 20; i++) { g[o++] = 0x32; g[o++] = 0x00; g[o++] = (uint8_t)((i & 1) ? 0x70 : 0x60); }
         f += expect("guess 1MiB 6000/7000 writes -> ASCII16", cart_guess_mapper(g, sizeof g), MAPPER_ASCII16); (*total)++;
     }
+    {   /* 8.0.231: Al Alamiah 30-in-1 메뉴 머리(쓰기 주소가 없어도) → KonamiSCC. 머리가 하나라도 다르면 해당 없음 */
+        static uint8_t g[1u << 20];
+        static const uint8_t head[16] = { 0xB0, 0x90, 0x70, 0x50, 0x14, 0x80, 0x44, 0x80, 0x76, 0x80, 0x94, 0x80, 0x74, 0x7C, 0x8A, 0x7C };
+        memset(g, 0, sizeof g); memcpy(g, head, sizeof head); g[0x4000] = 'A'; g[0x4001] = 'B'; g[0x4002] = 0x7E; g[0x4003] = 0x40;
+        f += expect("guess Al Alamiah 30-in-1 menu head -> KonamiSCC", cart_guess_mapper(g, sizeof g), MAPPER_KONAMI_SCC); (*total)++;
+        g[5] ^= 1;
+        f += expect("guess 1MiB with a different head, no bank writes -> ASCII16", cart_guess_mapper(g, sizeof g), MAPPER_ASCII16); (*total)++;
+    }
     /* Leonard처럼: 0쪽 "AB"는 데이터(예약 칸 ≠ 0), 1쪽이 진짜 머리(INIT 0x8010) → 0x4000에서 시작 */
     memset(big, 0, 0x8000);
     big[0] = 'A'; big[1] = 'B'; big[2] = 0x10; big[3] = 0x80; big[10] = 0x8D; big[11] = 0xB1;

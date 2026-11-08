@@ -12,6 +12,7 @@ extern int uefi_net_online(void);
 extern int uefi_net_has_nic(void);
 extern void uefi_net_lease_set(const uint8_t ip[4]);                   /* 마지막으로 받은 주소를 알려 줌 (DHCP INIT-REBOOT) */
 extern void uefi_net_select(int wired);                               /* 사용자가 유선을 골랐는지 (USB 랜 드라이버를 쓸지 정함) */
+extern int uefi_wifi_unusable(void);                                 /* 8.0.207: 1 = 이 PC 에서 무선랜 안 됨, 0 = 됨, -1 = 아직 모름 */
 extern int uefi_net_wifi_live(void);                                  /* 1 = 무선 실시간(lwIP) 모드 */
 extern void uefi_net_diag(char *o, int max);
 extern int uefi_net_ipinfo(uint8_t out[20]);
@@ -37,6 +38,7 @@ extern void net_config(int manual, const uint8_t ip[4], const uint8_t mask[4], c
 static int uefi_net_online(void) { return net_online ? net_online() : 0; }
 static int uefi_net_has_nic(void) { return net_hw_present ? net_hw_present() : 0; }
 static int uefi_net_wifi_live(void) { return 0; }
+static int uefi_wifi_unusable(void) { return 0; }
 static void uefi_net_select(int wired) { (void)wired; }
 extern void net_lease_set(const uint8_t ip[4]) __attribute__((weak));
 static void uefi_net_lease_set(const uint8_t ip[4]) { if (net_lease_set) net_lease_set(ip); }
@@ -58,7 +60,6 @@ static int uefi_wifi_state(void) { return 0; }
 extern int fe_test_net __attribute__((weak));
 static int net_has_wired(void) { return uefi_wired_present() || (&fe_test_net && (fe_test_net & 1)); }
 static int net_has_wifi(void) { return uefi_wifi_present() || (&fe_test_net && (fe_test_net & 2)); }
-static int net_any_adapter(void) { return net_has_wired() || net_has_wifi(); }
 static int net_dmode;                                   /* 지금 열린 창 = 0 유선 네트워크 / 1 무선 네트워크 (메뉴가 따로) */
 static int net_wifi, net_manual;                        /* 연결 방식(우선): 0 유선 / 1 무선, 0 자동(DHCP) / 1 수동 */
 static int net_mem_wifi = 1;                            /* 무선을 마지막으로 켰나(1)/껐나(0) — 카트리지를 다시 꽂을 때 되살림. 유선은 꽂으면 항상 켜짐 */
@@ -117,29 +118,157 @@ static void net_wifi_push(void)                          /* 고른 공유기·�
     else uefi_wifi_connect(net_ssid, net_pass);
 }
 
-static int net_cart_slot(void)
+#define NET_CODE_ETH  159                                /* 8.0.45: X86Ethernet (유선 전용, 예전 이름 X86Network 의 저장 번호 그대로) */
+#define NET_CODE_WIFI 168                                /* 8.0.45: x86wifi (무선 전용) */
+/* 8.0.45: 부팅 중 IP 기다리기. 네트워크 롬(INIT)이 "계속 기다릴까?"를 물을 때마다 불린다.
+ * 네트워크 카트리지가 꽂혀 있고 유선·무선이 켜져 있을 때만 기다리고, 주소를 받거나 · 제한 시간(ini NetBootWait 초, 0 = 안 기다림) · ESC 면 곧바로 부팅한다. */
+static int net_kind_slot(int wifi);
+static int net_bw_s = 15;
+#define BW_DECIDE_MS 8000u                                 /* 8.0.207 무선 카트리지: 이 PC 에서 무선랜이 되는지 판단이 날 때까지 기다리는 최대 시간 */
+#define BW_GRACE_MS 3000u                                  /* 8.0.46 무선 카트리지: 안내 화면에서 F2 를 기다려 주는 시간 */
+static uint32_t bw_t0, bw_last, bw_grace, bw_hold, bw_nt0; static int bw_done, bw_setup, bw_txt_done;
+#define BW_NTP_MS 8000u                                    /* 8.0.49 인터넷 시간 맞추기를 기다려 주는 최대 시간 */
+#define BW_TEXT_MS 1800u                                   /* 8.0.49 안내 화면의 Clock: 줄을 보여 주는 시간 */
+static int bw_pending = 1, bw_show;                        /* 안내 화면·F2 대기는 컴퓨터를 켠 뒤 첫 부팅(과 카트리지를 새로 꽂은 첫 부팅)에만. MSX 만 다시 켤 때는 받아 둔 IP 로 바로 부팅 */
+int fe_test_bw_starts, fe_test_bw_shows;                   /* 시험 틀 */
+uint32_t fe_test_bw_el;                                  /* 시험 틀: 이번 기다림이 지금까지 얼마나 됐나 (ms) */
+int fe_test_bootwait(void) { return bw_done; }
+static void net_bootsetup(void)                          /* 롬(INIT)에서 부팅 중 F2 → 네트워크 설정 창 (무선 창) */
+{
+    if (net_kind_slot(1) < 0) return;                    /* 8.0.51: 이 PC 에 무선 어댑터가 없어도 카트리지가 있으면 창은 열린다 (상태 줄이 이유를 보임) */
+    bw_setup = 1; open_net(1);
+}
+/* 8.0.49: 인터넷 시간. IP 를 받으면 SNTP(src/ntpc.inc)로 시간을 받아 MSX 시계와 PC 시계를 맞춘다.
+ * 결과 글자는 롬팩 안내 화면의 "Clock:" 줄에도 쓰인다. ini NtpOn(기본 1) · NtpTz(분, 기본 540 = 한국 +9) */
+#include "../src/ntpc.inc"
+int ntp_on = 1, ntp_tz = 540;
+static NtpC ntp_c; static int ntp_busy, ntp_tried, ntp_txt_new; static char ntp_txt[48];
+int fe_test_ntp_state;                                   /* 시험 틀: 0 아직 1 맞춤 2 실패 */
+static void ntp_set_txt(const char *a, const char *b) { copy_str(ntp_txt, sizeof ntp_txt, a); if (b) str_append(ntp_txt, sizeof ntp_txt, b); }
+static void ntp_apply(uint32_t utc)
+{
+    uint32_t loc = (uint32_t)((int32_t)utc + ntp_tz * 60);
+    int tm[6]; ntpc_civil(loc, tm);
+    if (P.set_time && P.set_time(tm)) { ntp_set_txt("Clock: cannot set PC clock", 0); fe_test_ntp_state = 2; return; }   /* PC 시계를 못 바꾸면 곧 PC 시계로 되돌아가므로 하지 않음 */
+    msx_rtc_set(M, ntpc_rtc_secs(loc)); M->rtc_delta = 0;
+    char b[40], n[8]; b[0] = 0;
+    for (int i = 0; i < 6; i++) { int_to_str(n, sizeof n, tm[i]); if (tm[i] < 10 && i > 0) str_append(b, sizeof b, "0"); str_append(b, sizeof b, n); if (i < 2) str_append(b, sizeof b, "-"); else if (i == 2) str_append(b, sizeof b, " "); else if (i < 5) str_append(b, sizeof b, ":"); }
+    ntp_set_txt("Clock: ", b); fe_test_ntp_state = 1;
+}
+/* 틱마다 부름. 돌고 있으면 1. IP 가 없으면 아무것도 안 하고, IP 를 (다시) 받으면 한 번 맞춘다 */
+/* 8.0.54: 고를 수 있는 시간 서버 (ini NtpServer = 번호). 고른 것을 먼저, 나머지는 ntpc_start 가 예비로 붙임 */
+static const char *const ntp_srv_name[] = { "ntp.kriss.re.kr", "time.google.com", "kr.pool.ntp.org", "pool.ntp.org", "time.windows.com", "time.apple.com", "time.cloudflare.com" };
+#define NTP_SRV_N 7
+static int ntp_srv;
+static const char *ntp_srv_pick(void) { return ntp_srv_name[(ntp_srv < 0 || ntp_srv >= NTP_SRV_N) ? 0 : ntp_srv]; }
+static int ntp_step(uint32_t now)
+{
+    if (!ntp_on || !msx_net_host) { ntp_busy = 0; return 0; }
+    if (!uefi_net_online()) { ntp_busy = 0; ntp_tried = 0; return 0; }
+    if (!ntp_busy && !ntp_tried) { ntpc_start(&ntp_c, msx_net_host, ntp_srv_pick(), now); ntp_busy = 1; ntp_tried = 1; ntp_txt[0] = 0; }
+    if (!ntp_busy) return 0;
+    int r = ntpc_poll(&ntp_c, now);
+    if (r == NTPC_RUN) return 1;
+    ntp_busy = 0; ntp_txt_new = 1;
+    if (r == NTPC_OK) ntp_apply(ntp_c.unix_utc);
+    else { ntp_set_txt(ntp_c.reason == 1 ? "Clock: no network" : ntp_c.reason == 2 ? "Clock: time server not found" : "Clock: no reply from time server", 0); fe_test_ntp_state = 2; }
+    return 0;
+}
+/* 반환: 비트0 = 더 기다림, 비트1 = 무선(x86wifi) 카트리지 (롬이 F2 안내 화면을 그림), 비트2 = 롬 화면에 찍을 줄이 생김 (롬이 BOOT_TEXT 로 가져가 한 줄 찍음)
+ * 8.0.51: 연결 상태("Wi-Fi: connected  IP")·시계 줄은 PC 화면 알림이 아니라 카트리지(롬) 화면에 나온다. 롬 화면이 있을 때는 PC 알림을 띄우지 않는다 */
+static char bw_ln[48]; static int bw_ln_pend, bw_ip_said, bw_fin;
+static void bw_say(const char *t) { copy_str(bw_ln, sizeof bw_ln, t); bw_ln_pend = 1; }
+static int net_boottext(char *buf, int max)              /* 롬이 가져가는 줄 (한 번 가져가면 비움) */
+{
+    int n = bw_ln_pend ? (int)strlen(bw_ln) : 0; if (n >= max) n = max - 1;
+    if (n) memcpy(buf, bw_ln, (size_t)n);
+    buf[n] = 0; bw_ln_pend = 0;
+    return n;
+}
+static int bw_end(uint32_t now, int fl, const char *msg)  /* 기다림을 끝낸다. 롬 화면이 있으면 마지막 줄을 읽을 시간을 준다 */
+{
+    if (!bw_show || !msg) { bw_done = 1; return 0; }
+    bw_say(msg); bw_hold = now ? now : 1; bw_fin = 1;
+    return 1 | fl | 4;
+}
+static int net_bootwait(int start)
+{
+    uint32_t now = P.ms();
+    int wifi = !net_wired_on && net_kind_slot(1) >= 0;   /* 8.0.51: 안내 화면은 무선 카트리지가 꽂혀 있으면 (PC 에 무선 어댑터가 없거나 꺼져 있어도) 나온다 */
+    if (start) { fe_test_bw_starts++; bw_show = wifi; bw_txt_done = 0; bw_ln_pend = 0; bw_ip_said = 0; bw_fin = 0; if (bw_show) fe_test_bw_shows++;   /* 8.0.51: 안내 화면·F2 대기는 MSX 가 부팅할 때마다 (무선 카트리지가 있으면) */
+         bw_done = 0; bw_setup = 0; bw_hold = 0; bw_nt0 = 0; bw_t0 = now; bw_last = now - 1000; bw_grace = bw_show ? now + BW_GRACE_MS : 0; }
+    int fl = bw_show ? 2 : 0;
+    fe_test_bw_el = start ? 0 : now - bw_t0;
+    if (bw_done) return 0;
+    if (bw_fin) { if (bw_ln_pend || now - bw_hold < BW_TEXT_MS) return 1 | fl | (bw_ln_pend ? 4 : 0); bw_done = 1; return 0; }   /* 마지막 줄을 읽을 시간 */
+    if (bw_setup) {                                                                  /* F2 로 연 설정 창이 열려 있는 동안은 붙잡는다 */
+        if (dialog == 18) return 1 | fl;
+        bw_setup = 0; bw_t0 = now; bw_grace = 0;                                     /* 닫았다: 이제부터 IP 기다리기 */
+    }
+    if (!(net_wired_on || net_wifi_on) && !bw_show) { bw_done = 1; return 0; }
+    if (!(M->kbd[7] & 4)) { bw_done = 1; if (!bw_show) toast(nt("네트워크 기다리기를 건너뜁니다", "Skipping the network wait", "ネットワーク待ちをスキップします"), 0); return 0; }   /* ESC (눌림 = 0) */
+    if (bw_grace && now < bw_grace) return 1 | fl;                                   /* F2 를 기다리는 짧은 시간 (무선 카트리지) */
+    if (bw_show && !net_wired_on) {                                                  /* 8.0.207: 무선 카트리지가 꽂혀 있는데 이 PC 에서 무선랜이 안 되면, 기다리지 말고 알리고 통과 */
+        int unusable = uefi_wifi_unusable();
+        if (unusable < 0 && now - bw_t0 < BW_DECIDE_MS) return 1 | fl;               /* 무선 시작 판단이 끝날 때까지 잠깐 (켠 뒤 5초쯤) */
+        if (unusable != 0) { toast(nt("무선랜이 동작을 안합니다", "Wi-Fi is not working on this PC", "無線LANは動作しません"), 0); return bw_end(now, fl, "Wi-Fi: not working on this PC"); }
+    }
+    if (!(net_wired_on || net_wifi_on)) return bw_end(now, fl, net_has_wifi() ? "Wi-Fi: off" : "Wi-Fi: no adapter found");   /* 안내 화면만 보이고 네트워크는 꺼져 있음 → 기다릴 IP 없음 */
+    if (net_bw_s <= 0) { bw_done = 1; return 0; }
+    if (uefi_net_online()) {                                                         /* 주소를 받았다 (다시 켠 때는 이미 받아 둔 채라 바로 지나감) */
+        if (bw_show && !bw_ip_said) {                                                /* 롬 화면: "Wi-Fi: connected  192.168.0.50" */
+            uint8_t ii[20]; char b[48], nb[8]; bw_ip_said = 1;
+            copy_str(b, sizeof b, "Wi-Fi: connected");
+            if (uefi_net_ipinfo(ii) == 0 && (ii[0] | ii[1] | ii[2] | ii[3])) { str_append(b, sizeof b, "  "); for (int k = 0; k < 4; k++) { int_to_str(nb, sizeof nb, ii[k]); str_append(b, sizeof b, nb); if (k < 3) str_append(b, sizeof b, "."); } }
+            bw_say(b); bw_hold = now ? now : 1;
+        }
+        if (ntp_on && (ntp_busy || !ntp_tried)) {                                    /* 8.0.49: 인터넷 시간 맞추는 동안 붙잡는다 (최대 BW_NTP_MS) */
+            if (!bw_nt0) bw_nt0 = now;
+            if (ntp_step(now) && now - bw_nt0 < BW_NTP_MS) return 1 | fl | (bw_ln_pend ? 4 : 0);
+            if (ntp_busy) { bw_done = 1; return 0; }                                 /* 너무 오래 걸림: 그냥 부팅 (맞추기는 뒤에서 계속) */
+        }
+        if (bw_show && ntp_txt[0] && !bw_txt_done && !bw_ln_pend) { bw_txt_done = 1; ntp_txt_new = 0; bw_say(ntp_txt); bw_hold = now ? now : 1; }
+        if (bw_show && (bw_ln_pend || (bw_hold && now - bw_hold < BW_TEXT_MS))) return 1 | fl | (bw_ln_pend ? 4 : 0);   /* 줄을 읽을 시간 */
+        bw_done = 1; return 0;
+    }
+    if (net_wifi_on && !net_wired_on && !net_ssid[0] && !net_sv_n) return bw_end(now, fl, "Wi-Fi: no network set (F2)");   /* 붙을 공유기가 없는데 기다릴 이유가 없다 */
+    if (now - bw_t0 >= (uint32_t)net_bw_s * 1000u) { if (!bw_show) toast(nt("네트워크에 연결하지 못해 그냥 부팅합니다", "No network yet - booting anyway", "ネットワークに接続できず、そのまま起動します"), 0); return bw_end(now, fl, "Wi-Fi: not connected"); }
+    if (!bw_show && now - bw_last >= 900) {                                          /* 롬 화면이 없을 때(유선)만 PC 화면 알림 */
+        char b[96], nb[12]; int left = net_bw_s - (int)((now - bw_t0) / 1000u);
+        copy_str(b, sizeof b, nt("네트워크 연결 중... ", "Connecting to the network... ", "ネットワーク接続中... ")); int_to_str(nb, sizeof nb, left); str_append(b, sizeof b, nb); str_append(b, sizeof b, nt("초 (ESC 건너뛰기)", "s (ESC to skip)", "秒 (ESCでスキップ)"));
+        bw_last = now; toast(b, 0);
+    }
+    return 1 | fl;
+}
+
+static int net_cart_slot(void)                           /* 둘 중 아무거나 (먼저 찾은 것) */
 {
     for (int k = 0; k < MSX_CART_SLOTS; k++) if (M->cart[k].present && M->cart[k].mapper == MAPPER_NET) return k;
     return -1;
 }
-static void net_cart_ensure(void)                       /* 스위치를 켜면 네트워크 카트리지가 없을 때 알아서 꽂는다 */
+static int net_kind_slot(int wifi)                       /* 8.0.45: 무선(x86wifi) 또는 유선(그 밖의 네트워크 카트리지) 카트리지 */
 {
-    if (net_cart_slot() >= 0) return;
-    int f = free_cart_slot(); if (f >= 0) special_apply(f, special_kind(159), 1);   /* 번호를 SPK_NET(만드는 법 26)로 넘겨 엉뚱한 카트리지가 꽂히거나 안 꽂히던 것 → 카탈로그 번호 59 (코드 159) */
+    for (int k = 0; k < MSX_CART_SLOTS; k++) if (M->cart[k].present && M->cart[k].mapper == MAPPER_NET && (cart_special[k] == NET_CODE_WIFI) == (wifi != 0)) return k;
+    return -1;
+}
+static void net_cart_ensure(int wifi)                   /* 스위치를 켜면 그 종류의 네트워크 카트리지가 없을 때 알아서 꽂는다 */
+{
+    if (net_kind_slot(wifi) >= 0) return;
+    int f = free_cart_slot(); if (f >= 0) special_apply(f, special_kind(wifi ? NET_CODE_WIFI : NET_CODE_ETH), 1);   /* 번호를 SPK_NET(만드는 법 26)로 넘겨 엉뚱한 카트리지가 꽂히거나 안 꽂히던 것 → 카탈로그 번호 59 (코드 159) */
 }
 /* 줄: 0 유선 켜기 1 무선 켜기 2 연결 방식 [3 무선 이름 4 암호] 5 주소 6 IP 7 마스크 8 게이트웨이 9 DNS */
 static int net_rows(int *r)
 {
     int n = 0;                                           /* 카드가 꽂혀 있을 때만 이 창이 열리므로 켜기·끄기 줄을 다시 보인다 (끄면 네트워크만 멈추고 카드는 그대로) */
-    if (!net_dmode) r[n++] = 0;                          /* 유선·무선 창을 따로 — 유선 창은 켜기 + 주소, 무선 창은 켜기 + 네트워크·암호 + 주소 */
-    else { r[n++] = 1; r[n++] = 3; r[n++] = 4; }
+    if (!net_dmode) { r[n++] = 0; r[n++] = 10; r[n++] = 11; r[n++] = 13; r[n++] = 12; }                          /* 유선·무선 창을 따로 — 유선 창은 켜기 + 주소, 무선 창은 켜기 + 네트워크·암호 + 주소 */
+    else { r[n++] = 1; r[n++] = 3; r[n++] = 4; r[n++] = 10; r[n++] = 11; r[n++] = 13; r[n++] = 12; }   /* 13 = 시간 서버 (8.0.54) */   /* 10 = 부팅시 기다리는 시간 (롬팩 INIT 이 묻는 시간, 유선·무선 같은 값) */
     r[n++] = 5; r[n++] = 6; r[n++] = 7; r[n++] = 8; r[n++] = 9;
     return n;
 }
 static char *net_field(int row) { return row == 3 ? (net_pend ? net_pssid : net_ssid) : row == 4 ? (net_pend ? net_ppass : net_pass) : row == 6 ? net_ip : row == 7 ? net_mask : row == 8 ? net_gw : net_dns; }
 static int net_field_max(int row) { return row == 3 ? 32 : row == 4 ? 63 : 15; }
 static int net_win_on(void) { return net_dmode ? net_wifi_on : net_wired_on; }   /* 이 창(무선/유선)의 스위치 */
-static int net_row_enabled(int row) { if (row <= 1) return 1; if (!net_win_on()) return 0; return row < 5 ? 1 : (row == 5 || net_manual); }   /* 꺼져 있으면 켜기·끄기 줄만 살아 있고 나머지는 흐리게 */
+static int net_row_enabled(int row) { if (row <= 1 || row == 11 || row == 12 || row == 13) return 1; if (!net_win_on()) return 0; if (row == 10) return 1; return row < 5 ? 1 : (row == 5 || net_manual); }   /* 꺼져 있으면 켜기·끄기 줄만 살아 있고 나머지는 흐리게 */
 
 static void net_status_text(char *t, int max)
 {
@@ -147,7 +276,7 @@ static void net_status_text(char *t, int max)
     if (!net_has_wifi()) net_wifi = net_wifi_on = 0;   /* 무선 어댑터가 없으면 무선은 꺼진 것으로 */
     if (!net_has_wired()) net_wired_on = 0;             /* 유선 랜카드가 없으면 유선도 꺼진 것으로 */
     if (!(net_dmode ? net_wifi_on : net_wired_on)) { copy_str(t, max, nt("꺼짐", "Off", "オフ")); return; }   /* 이 창(무선/유선)의 스위치가 꺼져 있으면 꺼짐 */
-    if (net_cart_slot() < 0) { copy_str(t, max, nt("꺼짐 (네트워크 카트리지를 끼우지 못함)", "Off (cartridge not inserted)", "オフ (カートリッジ未挿入)")); return; }
+    if (net_kind_slot(net_dmode) < 0) { copy_str(t, max, nt("꺼짐", "Off", "オフ")); return; }
     uint8_t ii[20];
     if (uefi_net_online() && uefi_net_ipinfo(ii) == 0) {
         copy_str(t, max, nt("연결됨", "Connected", "接続済み"));
@@ -156,24 +285,25 @@ static void net_status_text(char *t, int max)
     }
     if (net_wifi_on && !net_wired_on && uefi_net_wifi_live()) {                          /* 윈도우처럼 단계별 안내 */
         int ws = uefi_wifi_state();
-        if (net_pend == 1) copy_str(t, max, nt("암호를 입력하고 Enter", "Type the password and press Enter", "パスワードを入力して Enter"));
-        else if (ws == 0) copy_str(t, max, nt("무선 네트워크를 고르세요 (무선 네트워크 줄에서 Enter)", "Choose a wireless network (press Enter on the network row)", "無線ネットワークを選んでください (ネットワーク行で Enter)"));
-        else if (ws == 2) copy_str(t, max, nt("연결됨 - 주소를 받는 중", "Connected - getting an address", "接続済み - アドレス取得中"));
-        else if (ws == 3) copy_str(t, max, nt("공유기를 찾지 못함 (이름 확인. 2.4GHz WPA2 만 지원)", "Network not found (2.4GHz WPA2 only)", "ネットワークが見つかりません (2.4GHz WPA2 のみ)"));
-        else if (ws == 4) copy_str(t, max, nt("접속하지 못함 (암호를 확인하세요)", "Could not connect (check the password)", "接続できません (パスワードを確認)"));
+        if (net_pend == 1) copy_str(t, max, nt("암호 입력 후 Enter", "Type password, Enter", "パスワード入力後 Enter"));
+        else if (ws == 0) copy_str(t, max, nt("무선 네트워크를 고르세요", "Choose a network", "ネットワークを選択"));
+        else if (ws == 2) copy_str(t, max, nt("연결됨 - 주소 받는 중", "Connected - getting IP", "接続済み - IP取得中"));
+        else if (ws == 3) copy_str(t, max, nt("공유기 못 찾음 (2.4GHz WPA2만)", "Not found (2.4GHz WPA2)", "見つかりません (2.4GHz WPA2)"));
+        else if (ws == 4) copy_str(t, max, nt("접속 실패 (암호 확인)", "Failed (check password)", "接続失敗 (パスワード確認)"));
         else copy_str(t, max, nt("연결하는 중...", "Connecting...", "接続中..."));
         return;
     }
-    if (net_wifi_on && !net_wired_on) { copy_str(t, max, nt("무선 카드를 찾았지만 아직 연결 기능이 없음 (노트북 무선 스위치·Fn 키로 켜 두세요)", "Wi-Fi card found, but connecting is not available yet (turn the laptop radio on with its switch / Fn key)", "無線カードあり、接続機能は未対応 (ノートPCの無線スイッチ/Fnキーでオン)")); return; }
-    if (!uefi_net_has_nic() && net_has_wired()) { copy_str(t, max, nt("유선 랜 장치를 찾았지만 X86MSX 에 이 장치용 드라이버가 아직 없음 (케이블 문제가 아님)", "Wired adapter found, but there is no driver for it yet", "有線LAN機器は見つかりましたが、この機器のドライバーはまだありません")); return; }
-    if (!uefi_net_has_nic()) { copy_str(t, max, nt("유선 랜카드를 찾지 못함 (펌웨어가 이 랜카드를 지원하지 않음)", "No wired network card found (firmware does not support it)", "有線LANカードが見つかりません (ファームウェア未対応)")); return; }
-    copy_str(t, max, nt("연결 안 됨 (케이블·공유기를 확인하세요, 주소를 기다리는 중)", "Not connected (waiting for an address)", "未接続 (アドレス待ち)"));
+    if (net_wifi_on && !net_wired_on) { copy_str(t, max, nt("무선 연결 불가", "Wi-Fi unavailable", "無線不可")); return; }
+    if (!uefi_net_has_nic() && net_has_wired()) { copy_str(t, max, nt("유선 드라이버 없음", "No wired driver", "有線ドライバなし")); return; }
+    if (!uefi_net_has_nic()) { copy_str(t, max, nt("유선 랜카드 없음", "No wired adapter", "有線LANなし")); return; }
+    copy_str(t, max, nt("연결 안 됨", "Not connected", "未接続"));
 }
 
-static void open_net(int mode) { net_dmode = mode < 0 ? (net_has_wifi() && (net_wifi || !net_has_wired())) : mode != 0; net_edit = -1; if (net_scanning) uefi_wifi_scan_stop(); net_scanning = 0; net_ap_mode = 0; if (net_pend == 1) net_pend = 0; open_dialog(18); }
+static void open_net(int mode) { net_dmode = mode < 0 ? (net_kind_slot(1) >= 0 && net_kind_slot(0) < 0 ? 1 : net_kind_slot(0) >= 0 && net_kind_slot(1) < 0 ? 0 : (net_has_wifi() && (net_wifi || !net_has_wired()))) : mode != 0; net_edit = -1; if (net_scanning) uefi_wifi_scan_stop(); net_scanning = 0; net_ap_mode = 0; if (net_pend == 1) net_pend = 0; open_dialog(18); }
 
 static void net_tick(void)                              /* 왼쪽 아래 인터넷 아이콘: 주소를 받으면 보이고, 못 받으면 사라짐 */
 {
+    ntp_step(P.ms());                                          /* 8.0.49: IP 를 받으면 인터넷 시간 한 번 */
     uefi_net_select(net_wired_on && !net_wifi_on);             /* 5.2.110 */
     {   /* DHCP 규격(RFC 2131 INIT-REBOOT): 마지막으로 받은 주소를 기억해 두었다가 다음에 먼저 요청 (윈도우처럼). 유선·무선 따로, 무선은 같은 공유기일 때만 */
         int k = net_wired_on ? 0 : net_wifi_on ? 1 : -1;
@@ -187,22 +317,26 @@ static void net_tick(void)                              /* 왼쪽 아래 인터�
             uint8_t b4[4]; memcpy(b4, &use, 4); uefi_net_lease_set(b4);
         }
     }
-    { static int boot_chk;                                     /* 전체 상태 저장 OFF 이면 켤 때 네트워크 카드가 빠져 있고 유선·무선도 꺼진 채로 시작 */
-      if (!boot_chk) { boot_chk = 1;
-          if (!global_save) { int k = net_cart_slot(); if (k >= 0) { cart_remove(k); cart_special[k] = 0; cart_path[k][0] = 0; cart_name[k][0] = 0; cart_mapper[k] = -1; cart_size[k] = 0; } net_wired_on = net_wifi_on = 0; } } }
-    { static int had = -1; int cs = net_cart_slot() >= 0;      /* 카드를 꽂으면 켜짐으로 시작, 빼면 꺼짐. 꽂혀 있는 동안은 창에서 켜고 끌 수 있다 */
+    { static int had_w = -1, had_f = -1;                       /* 8.0.45: 유선(X86Ethernet)·무선(x86wifi) 카트리지를 따로 본다. 꽂으면 그 쪽이 켜짐으로 시작, 빼면 그 쪽이 꺼짐 */
+      int cw = net_kind_slot(0) >= 0, cf = net_kind_slot(1) >= 0;
       if (!net_has_wired() && net_has_wifi()) net_wifi = 1;
-      if (had < 0) had = cs;
-      if (cs && !had) {
-          int w = net_has_wired(), f = !w && net_has_wifi() && net_mem_wifi;   /* 유선은 꽂으면 항상 켜짐, 유선이 없으면 무선은 전에 켰나/껐나를 따름 */
-          if (w) net_wifi = 0; else if (f) net_wifi = 1;
-          if (w != net_wired_on || f != net_wifi_on) { net_wired_on = w; net_wifi_on = f; settings_changed(); }
-          net_renew_call();                                    /* 꽂으면 주소 다시 받기 */
+      {   /* 예전 판(X86Network 하나로 유선·무선 겸용)에서 무선만 켜 두었던 설정 → 그 카트리지를 x86wifi 로 바꿔 준다 */
+          static int mig; int k = net_kind_slot(0);
+          if (!mig) { mig = 1; if (k >= 0 && !cf && net_wifi_on && !net_wired_on && net_has_wifi()) { cart_special[k] = NET_CODE_WIFI; copy_str(cart_name[k], sizeof cart_name[k], "x86wifi"); cw = 0; cf = 1; settings_changed(); } }
       }
-      if (!cs && (net_wired_on || net_wifi_on)) { if (net_wifi_on) net_mem_wifi = 1; net_wired_on = net_wifi_on = 0; settings_changed(); }
-      had = cs; }
+      if (had_w < 0) { had_w = cw; had_f = cf; }
+      if ((cw && !had_w) || (cf && !had_f)) {                  /* 꽂았을 때 — 둘 다 꽂혀 있으면 무선(x86wifi)이 기본, 한쪽만이면 그쪽. 한쪽을 켜면 다른 쪽은 꺼진다 */
+          if (cf && net_has_wifi()) { net_wifi_on = 1; net_wifi = 1; net_wired_on = 0; settings_changed(); }
+          else if (cw && net_has_wired()) { net_wired_on = 1; net_wifi_on = 0; net_wifi = 0; settings_changed(); }
+      }
+      if (cf && !had_f) bw_pending = 1;                        /* x86wifi 를 새로 꽂으면 그 첫 부팅에 안내 화면 */
+      if ((cw && !had_w) || (cf && !had_f)) net_renew_call();
+      if (cf && !had_f && net_has_wifi() && !net_ssid[0] && !net_sv_n) toast(nt("x86wifi: 옵션 > 네트워크 > 무선 네트워크에서 연결할 공유기를 고르세요", "x86wifi: pick a network in Options > Network > Wireless", "x86wifi: オプション > ネットワーク > 無線 でネットワークを選んでください"), 0);  /* 꽂으면 주소 다시 받기 */
+      if (!cw && net_wired_on) { net_wired_on = 0; settings_changed(); }
+      if (!cf && net_wifi_on) { net_mem_wifi = 1; net_wifi_on = 0; settings_changed(); }
+      had_w = cw; had_f = cf; }
     { static int pushed, last_ws = -1;                    /* 카드를 꽂으면 저장된 공유기로 접속, 상태가 바뀌면 알림·창 다시 그림 */
-      int cs2 = net_cart_slot() >= 0;
+      int cs2 = net_kind_slot(1) >= 0;                          /* 무선 접속·알림은 x86wifi 가 꽂혀 있을 때만 */
       if (!cs2) pushed = 0;
       else if (!pushed && net_wifi && net_wifi_on && (net_ssid[0] || net_sv_n) && !net_pend && uefi_net_wifi_live()) {
           /* 저장한 네트워크가 여럿이면 잠깐(약 4초) 찾아서 지금 보이는 것 중 신호가 가장 센 곳에 붙는다 (윈도처럼). 하나면 바로 */
@@ -269,14 +403,29 @@ static void net_tick(void)                              /* 왼쪽 아래 인터�
     }
 }
 
-static void draw_net(void)
+/* 8.0.53: 설정 줄 화면의 창 높이 = 머리 + 줄 + 상태·진단 + 명령줄 (빈 공간 없이). 목록 화면(공유기 찾기·저장 목록)은 0 = 기본 크기 */
+static uint32_t net_card_h(void)
+{
+    if (net_scanning) return 0;
+    int rows[14], n = net_rows(rows);
+    int sv = ui_tight; ui_tight = 1;                      /* 이 창은 줄 사이를 좁게 */
+    uint32_t rh = ui_row_h();
+    ui_tight = sv;
+    uint32_t h = ui_head_h() + 4 * S + (uint32_t)n * rh + 3 * S + 6 * S + rh + LH + 10 * S + ui_cmdbar_h() + 3 * S;
+    uint32_t mx = D.h > 26 * S ? D.h - 26 * S : D.h;
+    return h > mx ? mx : h;
+}
+
+static void draw_net_in(void);
+static void draw_net(void) { int sv = ui_tight; ui_tight = net_scanning ? sv : 1; draw_net_in(); ui_tight = sv; }   /* 8.0.53 설정 줄 화면은 줄 간격을 좁게 */
+static void draw_net_in(void)
 {
     UiRect o;
     char st[96];
     net_status_text(st, sizeof st);
     UiRect b = ui_full_card(net_dmode ? nt("무선 네트워크", "Wireless network", "無線ネットワーク") : nt("유선 네트워크", "Wired network", "有線ネットワーク"), 0, 0, &o);
     hit_add(hc_none, 0, 0, 0, 0, o.x, o.y, o.w, o.h);
-    uint32_t cy = dlg_cmd_y(), rh = ui_row_h(), x = b.x + 12 * S, w = b.w > 24 * S ? b.w - 24 * S : b.w, vx = b.x + b.w * 42 / 100, y = b.y + 8 * S;
+    uint32_t cy = dlg_cmd_y(), rh = ui_row_h(), x = b.x + 5 * S, w = b.w > 10 * S ? b.w - 10 * S : b.w, vx = b.x + b.w * 40 / 100, y = b.y + 4 * S;   /* 8.0.53: 안쪽 여백 줄임 */
     if (net_scanning && net_ap_mode == 3) {              /* 저장한 공유기 목록 (Del 로 지움) */
         text_clip(x + 6 * S, y, nt("저장한 무선 네트워크", "Saved wireless networks", "保存したネットワーク"), C_MUTED, 0xFF, w);
         y += LH + 8 * S;
@@ -317,7 +466,7 @@ static void draw_net(void)
             : nt("Enter 고르기   Del 저장한 목록·지우기   F5 다시 찾기   Esc 돌아가기", "Enter select   Del saved list   F5 rescan   Esc back", "Enter 選択   Del 保存一覧   F5 再検索   Esc 戻る"));
         return;
     }
-    int rows[10], n = net_rows(rows);
+    int rows[14], n = net_rows(rows);
     char got[4][20]; int have = 0;                       /* 자동(DHCP)이면 받아 온 주소를 칸에 보여 준다 */
     if (!net_manual && (net_wired_on || net_wifi_on) && net_cart_slot() >= 0 && uefi_net_online()) { uint8_t ii[20]; if (uefi_net_ipinfo(ii) == 0) { have = 1;
         for (int k = 0; k < 4; k++) { got[k][0] = 0; for (int i = 0; i < 4; i++) { char q[8]; int_to_str(q, sizeof q, ii[k * 4 + i]); str_append(got[k], 20, q); if (i < 3) str_append(got[k], 20, "."); }
@@ -333,18 +482,28 @@ static void draw_net(void)
         case 2: lab = nt("연결 방식", "Connection", "接続方式"); val = net_wifi ? nt("무선 (Wi-Fi)", "Wireless (Wi-Fi)", "無線 (Wi-Fi)") : nt("유선 (이더넷)", "Wired (Ethernet)", "有線 (イーサネット)"); break;
         case 3: lab = nt("무선 네트워크", "Wireless network", "無線ネットワーク"); val = net_pend ? net_pssid : net_ssid[0] ? net_ssid : nt("(Enter: 찾기)", "(Enter: scan)", "(Enter: 検索)"); kind = UV_ACTION; break;
         case 4: lab = nt("암호", "Password", "パスワード"); { const char *pp = net_pend ? net_ppass : net_pass; for (int k = 0; pp[k] && k < 40; k++) vb[k] = '*'; } val = vb; kind = UV_TEXT; break;
+        case 10: lab = nt("부팅시 기다리는 시간", "Boot wait time", "起動時の待ち時間");
+                 if (net_bw_s <= 0) val = nt("안 기다림", "Off", "待たない");
+                 else { int_to_str(vb, sizeof vb, net_bw_s); str_append(vb, sizeof vb, nt("초", " s", "秒")); val = vb; } break;
+        case 11: lab = nt("시간 자동 맞춤", "Set clock from Internet", "時計を自動で合わせる"); kind = UV_TOGGLE; break;
+        case 13: lab = nt("시간 서버", "Time server", "時刻サーバー"); copy_str(vb, sizeof vb, ntp_srv_pick()); if (ntp_srv == 0) str_append(vb, sizeof vb, nt(" (한국표준)", " (KRISS)", " (韓国標準)")); val = vb; break;
+        case 12: lab = nt("시간대", "Time zone", "タイムゾーン");
+                 { int a = ntp_tz < 0 ? -ntp_tz : ntp_tz; char nb[8]; copy_str(vb, sizeof vb, "UTC"); str_append(vb, sizeof vb, ntp_tz < 0 ? "-" : "+");
+                   int_to_str(nb, sizeof nb, a / 60); str_append(vb, sizeof vb, nb); str_append(vb, sizeof vb, ":"); if (a % 60 < 10) str_append(vb, sizeof vb, "0"); int_to_str(nb, sizeof nb, a % 60); str_append(vb, sizeof vb, nb);
+                   if (ntp_tz == 540) str_append(vb, sizeof vb, nt(" (한국)", " (Korea)", " (韓国)")); else if (ntp_tz == 0) str_append(vb, sizeof vb, " (UTC)"); }
+                 val = vb; break;
         case 5: lab = nt("주소 설정", "Address", "アドレス設定"); val = net_manual ? nt("수동", "Manual", "手動") : nt("자동 (DHCP)", "Automatic (DHCP)", "自動 (DHCP)"); break;
         case 6: lab = "IP"; val = net_ip; kind = UV_TEXT; break;
         case 7: lab = nt("서브넷 마스크", "Subnet mask", "サブネットマスク"); val = net_mask; kind = UV_TEXT; break;
         case 8: lab = nt("게이트웨이", "Gateway", "ゲートウェイ"); val = net_gw; kind = UV_TEXT; break;
         default: lab = "DNS"; val = net_dns; kind = UV_TEXT; break;
         }
-        if (have && r >= 6) val = got[r - 6];
+        if (have && r >= 6 && r <= 9) val = got[r - 6];   /* 8.0.54: IP 네 줄만 (10·12번 줄까지 걸려 배열 밖을 보여 주던 버그) */
         if (net_edit == r) { copy_str(vb, sizeof vb, ""); for (int k = 0; k < net_elen && k < 70; k++) vb[k] = r == 4 ? '*' : net_ebuf[k]; vb[net_elen < 70 ? net_elen : 70] = 0; str_append(vb, sizeof vb, "_"); val = vb; kind = UV_TEXT; }
-        ui_row(x, y, w, vx, lab, val, 0, kind, r == 0 ? net_wired_on : r == 1 ? net_wifi_on : 0, foc, en);
+        ui_row(x, y, w, vx, lab, val, 0, kind, r == 0 ? net_wired_on : r == 1 ? net_wifi_on : r == 11 ? ntp_on : 0, foc, en);
     }
-    y += 6 * S;
-    fe_fill(x, y, w, S, C_LINE); y += 10 * S;
+    y += 3 * S;
+    fe_fill(x, y, w, S, C_LINE); y += 6 * S;
     text_clip(x + 18 * S, y, nt("상태", "Status", "状態"), C_MUTED, 0xFF, vx - x - 26 * S);
     text_clip(vx, y, st, net_vis_now ? C_OK : C_TEXT, 0xFF, b.x + b.w - vx - 14 * S);
     { char dg[96]; uefi_net_diag(dg, sizeof dg); y += rh;                          /* 진단 줄: 실기에서 왜 안 잡히는지 볼 수 있게 */
@@ -362,7 +521,7 @@ static void net_scan_now(void)
 
 static void netdlg_key(int key)
 {
-    int rows[10], n = net_rows(rows);
+    int rows[14], n = net_rows(rows);
     if (net_sel >= n) net_sel = n - 1;
     if (!net_win_on()) net_sel = 0;                      /* 꺼져 있으면 포인터는 켜기·끄기 줄에만 */
     if (!net_win_on() && (key == 0xC8 || key == 0xD0)) return;
@@ -437,9 +596,16 @@ static void netdlg_key(int key)
     case 0xC8: if (net_sel > 0) net_sel--; break;
     case 0xD0: if (net_sel + 1 < n) net_sel++; break;
     case 0xCB: case 0xCD: case 0x39: case 0x1C: case 0x9C:
-        if (r == 0) { net_wired_on = !net_wired_on; if (net_wired_on) { net_wifi = 0; net_wifi_on = 0; } settings_changed(); if (net_wired_on) { net_cart_ensure(); net_renew_call(); } }   /* 한 번에 하나만 (유선을 켜면 무선이 꺼짐) */
-        else if (r == 1) { net_wifi_on = !net_wifi_on; net_mem_wifi = net_wifi_on; if (net_wifi_on) { net_wifi = 1; net_wired_on = 0; net_cart_ensure(); } settings_changed(); }
+        if (r == 0) { net_wired_on = !net_wired_on; if (net_wired_on) { net_wifi = 0; net_wifi_on = 0; } settings_changed(); if (net_wired_on) { net_cart_ensure(0); net_renew_call(); } }   /* 한 번에 하나만 (유선을 켜면 무선이 꺼짐) */
+        else if (r == 1) { net_wifi_on = !net_wifi_on; net_mem_wifi = net_wifi_on; if (net_wifi_on) { net_wifi = 1; net_wired_on = 0; net_cart_ensure(1); } settings_changed(); }
         else if (r == 2) { net_wifi = !net_wifi; settings_changed(); if (!net_wifi && rows[net_sel] >= 3 && rows[net_sel] <= 4) for (int q = 0; q < n; q++) if (rows[q] == 2) net_sel = q; }
+        else if (r == 10 && net_row_enabled(r)) {                /* 0(안 기다림) 5 10 15 30 60 초 */
+            static const int bwv[] = { 0, 5, 10, 15, 30, 60 }; int ix = 0;
+            for (int q = 0; q < 6; q++) if (net_bw_s >= bwv[q]) ix = q;
+            ix = key == 0xCB ? (ix + 5) % 6 : (ix + 1) % 6; net_bw_s = bwv[ix]; settings_changed(); }
+        else if (r == 11) { ntp_on = !ntp_on; if (ntp_on) ntp_tried = 0; settings_changed(); }          /* 켜면 곧바로 한 번 맞춤 */
+        else if (r == 13) { ntp_srv = key == 0xCB ? (ntp_srv + NTP_SRV_N - 1) % NTP_SRV_N : (ntp_srv + 1) % NTP_SRV_N; ntp_tried = 0; settings_changed(); }   /* 8.0.54 시간 서버 고르기. 바꾸면 다시 맞춤 */
+        else if (r == 12) { ntp_tz += (key == 0xCB) ? -30 : 30; if (ntp_tz > 840) ntp_tz = -720; if (ntp_tz < -720) ntp_tz = 840; ntp_tried = 0; settings_changed(); }   /* 30분 단위. 바꾸면 다시 맞춤 */
         else if (r == 5) {
             if (!net_manual) {                                   /* 자동 → 수동: 지금 받아 온 값을 그대로 채워 둔다 (5.0.109) */
                 uint8_t ii[20];
@@ -462,7 +628,7 @@ static void netdlg_key(int key)
 /* 설정 파일 */
 static void net_save_keys(char *b)
 {
-    if (global_save) { net_sv_wired = net_wired_on; net_sv_wifi = net_wifi_on; }          /* OFF 인 동안 켜고 끈 값은 저장하지 않음 (ON 으로 돌아오면 마지막 ON 때의 값) */
+    net_sv_wired = net_wired_on; net_sv_wifi = net_wifi_on;
     ini_num(b, "NetWifiMem", net_mem_wifi); ini_num(b, "NetLeaseW", (int)net_lease[0]); ini_num(b, "NetLeaseF", (int)net_lease[1]); ini_put(b, "NetLeaseSSID", net_lease_ssid);
     ini_num(b, "NetWifi", net_wifi); ini_num(b, "NetWiredOn", net_sv_wired); ini_num(b, "NetWifiOn", net_sv_wifi); ini_num(b, "NetManual", net_manual);
     ini_put(b, "NetIP", net_ip); ini_put(b, "NetMask", net_mask); ini_put(b, "NetGW", net_gw); ini_put(b, "NetDNS", net_dns);
@@ -494,5 +660,9 @@ static int net_load_key(const char *k, const char *v)
 }
 
 /* 네트워크 카트리지가 슬롯에 있나 (레거시 판 kmain이 랜카드·lwIP를 돌릴지 정한다. 없으면 네트워크 쪽 코드는 전혀 실행하지 않는다) */
-int fe_net_cart_present(void) { return net_cart_slot() >= 0 && (net_wired_on || net_wifi_on); }   /* 카드가 있고 켜져 있을 때만 네트워크 소스가 돈다 */
+int fe_net_cart_present(void) { return (net_kind_slot(0) >= 0 && net_wired_on) || (net_kind_slot(1) >= 0 && net_wifi_on); }   /* 카드가 있고 켜져 있을 때만 네트워크 소스가 돈다 */
 static int net_cart_present(void) { return net_cart_slot() >= 0; }
+static int net_wired_cart_present(void) { return net_kind_slot(0) >= 0; }   /* 8.0.45 */
+static int net_wifi_cart_present(void) { return net_kind_slot(1) >= 0; }
+
+int fe_test_net_state(void) { return (net_wired_on ? 1 : 0) | (net_wifi_on ? 2 : 0) | (net_kind_slot(0) >= 0 ? 4 : 0) | (net_kind_slot(1) >= 0 ? 8 : 0); }   /* 8.0.45 시험 틀: 켜짐(유선 1·무선 2) + 카트리지(유선 4·무선 8) */

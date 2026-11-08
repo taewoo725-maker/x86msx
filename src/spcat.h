@@ -17,12 +17,13 @@
 
 /* 만드는 법 (fe.c special_apply 의 switch) */
 enum { SPK_DISK, SPK_SCC, SPK_FMPAC, SPK_DOS2, SPK_MAPRAM, SPK_SCCI, SPK_IDE, SPK_AUDIO, SPK_AUDIOROM, SPK_PAC, SPK_MEGARAM, SPK_RAM, SPK_JOYREX, SPK_MOON,
-       SPK_ESERAM, SPK_MFR, SPK_BEER, SPK_GIDE, SPK_ESESCC, SPK_GOUDA, SPK_CA1, SPK_SFG, SPK_VHD, SPK_MEGASCSI, SPK_WAVESCSI, SPK_V9990, SPK_NET, SPK_FLASH, SPK_HBI55, SPK_MFRP, SPK_RS232, SPK_MSXMIDI,
+       SPK_ESERAM, SPK_MFR, SPK_BEER, SPK_GIDE, SPK_ESESCC, SPK_GOUDA, SPK_CA1, SPK_SFG, SPK_VHD, SPK_MEGASCSI, SPK_WAVESCSI, SPK_V9990, SPK_NET, SPK_FLASH, SPK_HBI55, SPK_MFRP, SPK_RS232, SPK_MSXMIDI, SPK_MMEDIA, SPK_V9968,
        SPK_NOT_YET };   /* SPK_NOT_YET: 메뉴에 자리만 (흐림) — blueMSX 에 있지만 아직 안 만든 것 */
 
 /* 메뉴 묶음 (▶ 하위 메뉴). SPG_ROOT = 맨 위 */
 enum { SPG_ROOT, SPG_ESESCC, SPG_IDE, SPG_SCSI, SPG_MEGASCSI, SPG_WAVESCSI, SPG_NOWIND, SPG_EXTRAM, SPG_MEGARAM, SPG_ESERAM, SPG_FLASHROM, SPG_FLASHCART,
-       SPG_DISK, SPG_AUDIO, SPG_NET, SPG_N };
+       SPG_DISK, SPG_AUDIO, SPG_NET, SPG_X86, SPG_N };   /* SPG_X86 (8.0.140): 이름이 X86 으로 시작하는 카트리지를 모은 "X86MSX" 묶음 */
+#define SPG_HIDDEN SPG_N          /* 부모를 이 값으로 두면 메뉴에 안 나옴 (비어 버린 묶음) */
 
 typedef struct {
     uint8_t id, parent;         /* 묶음 번호, 부모 묶음 */
@@ -47,5 +48,4 @@ extern const SpGroup sp_groups[SPG_N];
 const SpCart *spcat_at(int i);          /* i 번째 줄 (0 ~ spcat_count()-1) */
 int spcat_count(void);
 const SpCart *spcat_kind(int kind);     /* kind 번호로 (없으면 0) */
-int spcat_max_kind(void);               /* 가장 큰 kind + 1 */
 #endif

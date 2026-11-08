@@ -14,7 +14,7 @@ static uint8_t dummy_v9[16];
 int main(void)
 {
     static const char *const ms[] = { "tests/machines/cbios2", "tests/machines/cbios2p", "tests/machines/cbios2_dos2fdc", "machines/C-BIOS" };
-    static const int mp[] = { MAPPER_BEERIDE, MAPPER_GOUDA, MAPPER_GIDE, MAPPER_ZEMINA90, MAPPER_MEGARAM, MAPPER_HBI55, MAPPER_RS232, MAPPER_SFG, MAPPER_SUNRISE, MAPPER_KONAMI };
+    static const int mp[] = { MAPPER_BEERIDE, MAPPER_GOUDA, MAPPER_GIDE, MAPPER_ZEMINA90, MAPPER_MEGARAM, MAPPER_HBI55, MAPPER_RS232, MAPPER_SFG, MAPPER_SUNRISE, MAPPER_KONAMI, MAPPER_MMEDIA };   /* 8.0.55 X86MV */
     char err[256]; int states = 0, machines = 0;
     for (unsigned i = 0; i < sizeof ms / sizeof ms[0]; i++) {
         if (msx_host_init(&m, ms[i], err, sizeof err)) continue;

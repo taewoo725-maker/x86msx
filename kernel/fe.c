@@ -17,6 +17,9 @@
 #include "../src/vdpk.h"
 #include "../src/persist.h"
 #include "../src/media.h"
+#include "../src/mvsnd.h"
+#include "../src/mmvid.h"
+#include "../src/mmusb.h"
 #include "diag.h"
 #include "input.h"
 #include "font.h"
@@ -138,7 +141,12 @@ static void monitor_tint(uint8_t *r, uint8_t *g, uint8_t *b)
 static char wc_status[32] = "WC: ?", snd_status[32] = "snd: off", usb_status[32] = "", vs_status[64] = "";
 static int measured_speed = 100, measured_busy;
 /* 4.0.15: 구간별 시간 계측 (진단 화면). 0 코어 1 소리 2 MIDI 3 화면 4 가상하드·USB */
-enum { PF_CORE, PF_AUDIO, PF_MIDI, PF_VIDEO, PF_IO, PF_POLL, PF_BLIT, PF_USBW, PF_IDLE, PF_FILE, PF_MOUSE, PF_SYNTH, PF_N };   /* PF_SYNTH = MIDI 합성기 렌더 (core 에서 따로 뗌) */
+enum { PF_CORE, PF_AUDIO, PF_MIDI, PF_VIDEO, PF_IO, PF_POLL, PF_BLIT, PF_USBW, PF_IDLE, PF_FILE, PF_MOUSE, PF_SYNTH, PF_TICK, PF_N };   /* PF_SYNTH = MIDI 합성기 렌더 (core 에서 따로 뗌), PF_TICK = 프레임 틱(장치 상태·LED·슬롯 표·녹화 등 8.0.199) */
+/* 8.0.199: 메뉴를 여는 순간 SNDGLITCH/STALL 기록을 USB 에 쓰면 이 PC 에서 2.5~5초 멈췄음 → 마우스·키 입력이 3초 멈춘 뒤에 씀.
+ * log_write_go: 지금 기록 파일을 써도 되는가 (프레임마다 갱신). log_wrote_ms: 마지막으로 기록을 쓴 때 (그 쓰기가 만든 멈춤은 STALL 에 넣지 않음) */
+static int log_write_go = 1;
+static uint32_t log_wrote_ms;
+static const char *const pf_names[PF_N + 1] = { "core", "audio", "midi", "video", "io", "poll", "blit", "usbw", "idle", "file", "mouse", "synth", "tick", "other" };   /* 8.0.201: 이름 표 한 곳 (pf_text·소리 끊김 기록 공용) */
 static uint64_t pf_acc[PF_N], pf_max[PF_N], pf_t0;
 static uint32_t pf_ms0, pf_pct[PF_N + 1], pf_worst[PF_N];
 static inline uint64_t pf_now(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
@@ -160,16 +168,19 @@ static void pf_window(uint32_t now)
         pf_acc[k] = pf_max[k] = 0;
     }
     pf_wpct = (uint32_t)(pf_wacc >> 16) * 100u / e16; pf_wacc = 0;
+    { extern int diag_file_pct; diag_file_pct = (int)pf_pct[PF_FILE]; }   /* 8.0.210: 진단 판정이 "파일 쓰는 동안의 느림"을 가려내도록 */
     pf_pct[PF_N] = sum < 100 ? 100 - sum : 0;
     pf_t0 = pf_now(); pf_ms0 = now;
 }
 /* 최근 파일 (2.12): 0 롬, 1 디스크, 2 테이프 */
 static char rc_path[3][8][FE_PATH_MAX], rc_name[3][8][64];
-static int recent_kind_of(int k) { return k < 4 || k == 7 ? 0 : k < 6 ? 1 : 2; }   /* 메뉴 번호(0~7, 3.6.7: 7 = 카트리지 5) → 목록 종류 */
+#define RECENT_MENUS 11                              /* 8.0.181: 최근 파일 메뉴 = 카트리지 8칸 + 디스크 A·B + 테이프 */
+static int recent_kind_of(int k) { return k < 4 || k == 7 || k >= 8 ? 0 : k < 6 ? 1 : 2; }   /* 메뉴 번호(0~3 카트 1~4, 4·5 디스크, 6 테이프, 7 카트 5, 8~10 카트 6~8) → 목록 종류 */
+static int recent_cart_of(int k) { return k < 4 ? k : k == 7 ? 4 : k - 3; }                   /* 카트리지용 메뉴 번호 → 카트 번호 */
 static void recent_add(int kind, const char *path, const char *name);
 static char cart_name[MSX_CART_SLOTS][64];
 static char cart_path[MSX_CART_SLOTS][FE_PATH_MAX];  /* 마지막 상태 저장용 */
-static int cart_mapper[MSX_CART_SLOTS] = { -1, -1, -1, -1, -1 };   /* 사용자가 고른 매퍼, -1 = 자동 */
+static int cart_mapper[MSX_CART_SLOTS] = { -1, -1, -1, -1, -1, -1, -1, -1 };   /* 사용자가 고른 매퍼, -1 = 자동 */
 static uint32_t cart_size[MSX_CART_SLOTS];
 static int slot_expand;                     /* 카트리지 슬롯 확장: 0 없음, 1 슬롯 1, 2 슬롯 2 */
 static char machine_name[128] = FALLBACK_MACHINE;
@@ -192,14 +203,18 @@ static int disk_drives(void);
 static int vhd_cart(void);
 static void vhd_img_chg(void);
 static uint32_t vhd_img_off, vhd_img_n;                /* 장치 8로 보이는 구간 (파티션 하나 = FAT 부트 섹터부터) */
+static int vhd_rdabs_patched;                          /* 8.0.168: Nextor 커널의 FAT16 _RDABS 허용 손질 수 (fe_vhd.inc, 진단 표시) */
 static int vhd_img;                                    /* 하드 디스크 이미지를 Nextor 2.1.3 가상 디스크 카트리지의 장치 8로 (fe_vhd.inc) */
 static int hd_rd_cb(void *c, uint32_t lba, uint8_t *b);
 static int hd_wr_cb(void *c, uint32_t lba, uint8_t *b);                            /* 3.7.1 fe_vhd.inc */
 static long ini_long(const char *v);
 static int vhd_build_rom(uint8_t *b, uint32_t *size);
+static void x86_mm_rom_ensure(uint8_t *t);                     /* 8.0.75 */
+static void x86_roms_boot(void);                               /* 8.0.77 */
+static void x86_vhd_rom_save(const uint8_t *b, uint32_t n);
 static int is_nextor_rom(const uint8_t *b, uint32_t n);
 static void vhd_mount_all(int quiet);
-static void vhd_sync_all(void);
+static void vhd_sync_all(uint32_t budget);
 static void vhd_unmount_all(void);
 static void vhd_make_dirs(void);
 /* 카세트 테이프 */
@@ -245,8 +260,9 @@ static int midi_synth = GM_SF2;                     /* 3.4.5 SND3-07: 소프트�
 #endif
 static void int_to_str(char *o, int max, int v);
 int shot_full = 1;                                       /* 5.3.28 1 = 스크린샷·녹화를 보이는 화면 그대로, 0 = MSX 화면만 */
-int power_save = 2;                                      /* 5.3.18: 1 = 프레임 사이에 CPU 를 쉬게 함 (UEFI, ini PowerSave). 0 = 전과 같음 */
+int power_save = 1;                                      /* 5.3.18: 1 = 프레임 사이에 CPU 를 쉬게 함 (UEFI, ini PowerSave). 0 = 전과 같음 */
 int snd_sync_mode = 1;                                   /* 5.3.17: 소리 속도 맞춤 루틴 (1 기본 = 5.3.14, 2 시험). ini SndSync 전용 */
+static int mt_real, mt_rev;                             /* 8.0.68: MT-32 실기 DAC 소리(0 깨끗하게/1 실기대로), 시작 리버브(0 롬 기본, 1 룸 2 홀 3 플레이트 4 탭딜레이) */
 static int fx_rev = 100, fx_cho = 100, fx_len = 100, fx_on = 1;   /* 공간 음향 (MIDI 탭): 리버브·코러스 세기·잔향 길이 (%, 곡이 정한 값 = 100), 켜기 */
 static void fx_apply(void);
 static int has_ci(const char *h, const char *n);
@@ -278,7 +294,6 @@ static FeSf fe_sf[GM_SF_MAX];
 static void sf_load_slot(int slot, int quiet);
 #define sf_load(q) sf_load_slot(0, (q))
 static int is_sf2(const char *nm);
-static int sf_presets(int slot);
 static int gs_slot(void) { return gs_name[0] && strcmp(gs_name, sf_name) ? 1 : 0; }   /* GS 기계가 쓰는 칸 */
 static void midi_synth_apply(void);
 static void midi_bus_from_ui(void);                   /* 설정(출력 방식·음원) → 단자에 꽂힌 기계 목록 */
@@ -450,8 +465,6 @@ static int dirty_filter(FeRect *tmp, int tmax)
  * 처음 한 번만 화면에 바로 그리고 그 모습을 임시 메모리(P.scratch 16 MiB 뒤)에 복사해 두고, 그 뒤 다시 그리기는 임시 메모리에 그린 다음
  * 내용이 바뀐 줄만 화면으로 복사한다 (줄 해시 비교). 창이 바뀌거나 강제로 다시 그릴 때는 처음부터. */
 static void draw_dialog(void);
-static void fe_trace(const char *what);                /* 5.2.24 멈춤 추적 (fe_sys.inc) */
-static void fe_trace_str(const char *what, const char *x);
 static uint64_t sh_hash[4320];
 static int sh_dlg;
 /* 화면 메모리에 바로 그리는 부팅(BIOS/CSM)은 메뉴·팝업·창을 지웠다 다시 그리는 과정이 화면에 그대로 보여 검은 줄이 올라갔다.
@@ -497,15 +510,15 @@ static void dbl_end(void) { if (!dbl_on) return; if (P.vsync_wait) P.vsync_wait(
 static void fe_flush_now(void) { if (P.flush) P.flush(); else dbl_sync(); }
 static void draw_dialog_direct(void)
 {
-    fe_trace("ddd begin");
+   
     uint32_t need = D.pitch * D.h;
     int ok = (dialog == 2 || dialog == 7) && !P.flush && !dbl_on && D.bpp == 4 && P.scratch && P.scratch_size >= (16u << 20) + need && need <= (16u << 20) && D.h <= 4320 && !(D.pitch & 7);
-    if (!ok) { fe_trace("ddd direct"); sh_dlg = 0; draw_dialog(); return; }
+    if (!ok) { sh_dlg = 0; draw_dialog(); return; }
     uint8_t *sh = P.scratch + (16u << 20), *lfb = D.fb;
     if (sh_dlg == dialog && !force_redraw) {
-        fe_trace("ddd shadow");
+       
         D.fb = sh; draw_dialog(); D.fb = lfb;
-        fe_trace("ddd copy");
+       
         for (uint32_t y = 0; y < D.h; y++) {
             uint64_t h = dh_hash(sh + (uintptr_t)y * D.pitch, D.w * 4 & ~7u);
             if (h == sh_hash[y]) continue;
@@ -514,7 +527,7 @@ static void draw_dialog_direct(void)
         }
         return;
     }
-    fe_trace("ddd first");
+   
     draw_dialog();                                      /* 처음·강제: 화면에 바로 */
     memcpy(sh, lfb, need);                              /* 그 모습을 복사 (화면 메모리는 읽기가 느려 한 번만) */
     for (uint32_t y = 0; y < D.h; y++) sh_hash[y] = dh_hash(sh + (uintptr_t)y * D.pitch, D.w * 4 & ~7u);
@@ -539,15 +552,6 @@ int fe_take_dirty_rects(FeRect *out, int max)
     }
     dirty_n = 0;
     return n;
-}
-void fe_take_dirty(uint32_t *y0, uint32_t *y1)
-{
-    FeRect r[DIRTY_MAX];
-    int n = fe_take_dirty_rects(r, DIRTY_MAX);
-    *y0 = 0; *y1 = 0;
-    if (!n) return;
-    *y0 = r[0].y0; *y1 = r[0].y1;
-    for (int i = 1; i < n; i++) { if (r[i].y0 < *y0) *y0 = r[i].y0; if (r[i].y1 > *y1) *y1 = r[i].y1; }
 }
 static void fill_any(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t c8, uint32_t c32)
 {
@@ -833,6 +837,13 @@ static void str_append(char *d, int max, const char *s)
     if (*s) { n = utf8_cut(d, n, s); if (n < n0) n = n0; }
     d[n] = 0;
 }
+static void hex_append(char *d, int max, uint32_t v, int digits)   /* 8.0.95: 16진수 (digits 자리, 대문자) */
+{
+    int n = (int)strlen(d);
+    if (n + digits + 1 >= max) return;
+    for (int i = digits - 1; i >= 0; i--) d[n++] = "0123456789ABCDEF"[(v >> (4 * i)) & 15];
+    d[n] = 0;
+}
 static void num_append(char *d, int max, uint32_t v, int width, char pad)
 {
     char t[12]; int n = 0;
@@ -884,12 +895,12 @@ static void toast(const char *a, const char *b)
 /*   왼쪽 위: 기종 세대 배지, CAPS KANA / 오른쪽 위: FDD1 FDD2 CAS HD SLOT1 SLOT2 */
 /*   왼쪽 아래: 파나소닉 스위치. 배경 상자 없이 테두리 색 위에 그린다.    */
 /* ------------------------------------------------------------------ */
-enum { LED_CAPS, LED_KANA, LED_FDD1, LED_FDD2, LED_CAS, LED_HD, LED_SLOT1, LED_SLOT2, LED_SLOT3, LED_SLOT4, LED_SLOT5,
+enum { LED_CAPS, LED_KANA, LED_FDD1, LED_FDD2, LED_CAS, LED_HD, LED_SLOT1, LED_SLOT2, LED_SLOT3, LED_SLOT4, LED_SLOT5, LED_SLOT6, LED_SLOT7, LED_SLOT8,
        LED_PFRONT, LED_PPAUSE, LED_PAUDIO, LED_COUNT };
-static const char *const led_name[LED_COUNT] = { "CAPS", "KANA", "FDD1", "FDD2", "CAS", "HD", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5",
+static const char *const led_name[LED_COUNT] = { "CAPS", "KANA", "FDD1", "FDD2", "CAS", "HD", "SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5", "SLOT6", "SLOT7", "SLOT8",
                                                   "FRONT", "PAUSE", "AUDIO" };
 static const uint8_t led_icon[LED_COUNT] = { ICON_CAPS, ICON_KANA, ICON_FDD, ICON_FDD, ICON_CAS, ICON_HD,
-                                              ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_SWITCH, ICON_SWITCH, ICON_SWITCH };
+                                              ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_CART, ICON_SWITCH, ICON_SWITCH, ICON_SWITCH };
 static uint8_t led_now[LED_COUNT], led_drawn[LED_COUNT];
 static int strstr_ci(const char *h, const char *n);
 static int pana_has(int i);
@@ -929,7 +940,7 @@ static void read_leds(void)
     }
     led_now[LED_CAS] = (uint8_t)(ms_st[MS_CAS] == SS_BUSY ? blink : ms_st[MS_CAS]);   /* 있음 노랑, 모터 깜박임, 단자 없음 회색 */
     led_now[LED_HD] = (uint8_t)(!hd_secs && !hd2_secs ? ms_st[MS_HD] : P.ms() - hd_last_ms < 200 ? blink : 2);   /* 이미지를 넣었으면 노랑, 읽고 쓰면 깜박임 */
-    for (int k = 0; k < 5; k++) led_now[LED_SLOT1 + k] = ms_st[MS_SLOT1 + k] == SS_NONE && k < 4 ? 0 : ms_st[MS_SLOT1 + k];   /* 1~4 는 예전처럼 0 */
+    for (int k = 0; k < MSX_CART_SLOTS; k++) led_now[LED_SLOT1 + k] = ms_st[MS_SLOT1 + k] == SS_NONE && k < 4 ? 0 : ms_st[MS_SLOT1 + k];   /* 1~4 는 예전처럼 0 */
     led_now[LED_PFRONT] = (uint8_t)(fw_switch && pana_has(LED_PFRONT) ? 2 : 0);
     led_now[LED_PPAUSE] = (uint8_t)(pana_pause && pana_has(LED_PPAUSE) ? 2 : 0);
     M->pause_sw = pana_pause;                                       /* turbo R 일시 정지 키 (포트 A7h) */
@@ -1140,7 +1151,7 @@ static int ms_icon(int k, int alt)                      /* 장치가 선언한 �
     int r = cache[k][alt && cache[k][1] >= 0];
     return r >= 0 ? r : ICON_OTHER;
 }
-static const uint8_t led_ms[LED_COUNT] = { MS_CAPS, MS_KANA, MS_FDD1, MS_FDD2, MS_CAS, MS_HD, MS_SLOT1, MS_SLOT2, MS_SLOT3, MS_SLOT4, MS_SLOT5, MS_N, MS_N, MS_N };
+static const uint8_t led_ms[LED_COUNT] = { MS_CAPS, MS_KANA, MS_FDD1, MS_FDD2, MS_CAS, MS_HD, MS_SLOT1, MS_SLOT2, MS_SLOT3, MS_SLOT4, MS_SLOT5, MS_SLOT6, MS_SLOT7, MS_SLOT8, MS_N, MS_N, MS_N };
 static int led_icon_of(int i) { return led_ms[i] < MS_N ? ms_icon(led_ms[i], i == LED_KANA && !machine_japanese()) : led_icon[i]; }
 
 static uint32_t status_item_w(int i) { return chip_w_text(led_label(i)); }
@@ -1190,6 +1201,7 @@ static int led_vis(int i)
 #define MIX_MM        MSX_CH_MM
 #define MIX_MA        MSX_CH_MA
 #define MIX_PCM       MSX_CH_PCM
+#define MIX_MMX       MSX_CH_MMX
 #define MIX_MS        MSX_CH_MS
 #define MIX_OPP       MSX_CH_SFG
 #define MIX_MIDI_SOFT MSX_CH_MIDI
@@ -1220,7 +1232,7 @@ static int mix_icon(int c)                              /* 아이콘 (모르는 
     switch (c) {
     case MIX_SCC2: return ICON_SCC;
     case MIX_PSG: return ICON_PSG; case MIX_PSG2: return ICON_PSG2; case MIX_SCC: return ICON_SCC; case MIX_MM: return ICON_MM;
-    case MIX_MA: return ICON_MA; case MIX_PCM: return ICON_PCM; case MIX_MS: return ICON_MS; case MIX_OPP: return ICON_OPP;
+    case MIX_MA: return ICON_MA; case MIX_PCM: case MIX_MMX: return ICON_PCM; case MIX_MS: return ICON_MS; case MIX_OPP: return ICON_OPP;
     case MIX_MIDI_SOFT: return midibus_soft() < 0 && midibus_find(MDK_USB) ? ICON_USBMIDI : ICON_SOFTMIDI;   /* USB 기계만 꽂혔으면 USB 그림 */
     case MIX_MIDI_INT: return ICON_MIDI;
     case MIX_KBD: return ICON_KEYBOARD; case MIX_IO: return ICON_FDD; case MIX_MASTER: return ICON_MIXER;
@@ -1469,6 +1481,9 @@ static void draw_mini(uint32_t x, uint32_t y, uint32_t sz, int icon, int st)
     ui_rframe(x, y, sz + 4 * S, sz + 4 * S, 3 * S, (st == 1 || st == 2) ? C_WARN : st == 3 ? C_OK : C_LINE, C_CARD);
     if (icon >= 0) draw_icon_hd(x + 2 * S, y + 2 * S, sz, icon, im, ia, C_CARD);
 }
+/* 8.0.181: 미디어 판·아래 장치 아이콘의 항목 번호 (카트리지 8칸 → 0~7, 그 뒤 디스크 A·B, 테이프, 하드 디스크, 프린터).
+ * 번호를 숫자로 쓰지 않고 이 이름으로만 쓴다 (fe.c, fe_media.inc 공용). */
+enum { MP_CART1 = 0, MP_CART_LAST = MSX_CART_SLOTS - 1, MP_DISKA, MP_DISKB, MP_TAPE, MP_HD, MP_PRINTER, MP_N };
 static uint16_t md_vis_now;                             /* 4.0.3: 아래 장치 아이콘 표시 설정 앞 선언 */
 static uint8_t net_vis_now;                              /* 왼쪽 아래 인터넷 아이콘 보임 (fe_net.inc) */
 static uint8_t v9_vis_now;                               /* V9990 칩 아이콘 보임 */
@@ -1498,10 +1513,11 @@ static void draw_panel_narrow(uint32_t rx, uint32_t rw)
     if (v9_vis_now) { draw_mini(lx, y, sz, ms_icon(MS_V9990, 0), 2); y -= row; }                          /* V9990 칩이 일하면 */
     if (cpu_vis_now) { draw_mini(lx, y, sz, ms_icon(MS_CPU, cpu_r800_now), 2); y -= row; }   /* 4.0.15: CAPS·한글 위에 CPU */
     uint32_t ix = rx + (rw > box ? (rw - box) / 2 : 0);
-    int last = M->cart_slot[4] >= 0 ? LED_SLOT5 : slot_expand || M->cart_slot[2] >= 0 || M->cart_slot[3] >= 0 ? LED_SLOT4 : LED_SLOT2;   /* 3.3.1: 기종의 C·D (3.6.7: E) */
+    int last = slot_expand || M->cart_slot[2] >= 0 || M->cart_slot[3] >= 0 ? LED_SLOT4 : LED_SLOT2;   /* 3.3.1: 기종의 C·D */
+    for (int n = 4; n < MSX_CART_SLOTS; n++) if (M->cart_slot[n] >= 0) last = LED_SLOT1 + n;           /* 3.6.7: E, 8.0.181: 6~8 */
     y = mtop;
-    for (int i = LED_FDD1; i <= last; i++) if (led_vis(i) && (i >= LED_SLOT1 && i <= LED_SLOT5 ? status_show_all() && led_now[i] != 0 : (md_vis_now >> (i == LED_FDD1 ? 5 : i == LED_FDD2 ? 6 : i == LED_CAS ? 7 : 8) & 1))) {   /* 4.0.3: 쓰는 순간만, 4.0.12: 메뉴를 열어도 넣은 것만 */ draw_mini(ix, y, sz, led_icon_of(i), led_now[i]); led_drawn[i] = led_now[i]; y += row; }
-    if (md_vis_now >> 9 & 1) { draw_mini(ix, y, sz, ICON_PRINTER, 3); y += row; }          /* 4.0.3: 인쇄 중인 프린터 */
+    for (int i = LED_FDD1; i <= last; i++) if (led_vis(i) && (i >= LED_SLOT1 && i <= LED_SLOT8 ? status_show_all() && led_now[i] != 0 : (md_vis_now >> (i == LED_FDD1 ? MP_DISKA : i == LED_FDD2 ? MP_DISKB : i == LED_CAS ? MP_TAPE : MP_HD) & 1))) {   /* 4.0.3: 쓰는 순간만, 4.0.12: 메뉴를 열어도 넣은 것만 */ draw_mini(ix, y, sz, led_icon_of(i), led_now[i]); led_drawn[i] = led_now[i]; y += row; }
+    if (md_vis_now >> MP_PRINTER & 1) { draw_mini(ix, y, sz, ICON_PRINTER, 3); y += row; }          /* 4.0.3: 인쇄 중인 프린터 */
     int sl[MIX_N], sn = snd_icon_list(sl);              /* 3.7.0: 음원 표 차례 (아래에서 위로) */
     y = mbot - box;
     for (int j = sn - 1; j >= 0; j--) {
@@ -1515,25 +1531,25 @@ static void draw_panel_narrow(uint32_t rx, uint32_t rw)
 /* 3.5.3 장치 아이콘은 쓸 때만: 넣었을 때, 디스크·하드 디스크를 읽고 쓸 때, 테이프 모터가 돌 때 보이고 3초 뒤 사라짐 */
 #define MD_SHOW_MEDIA_MS 5000                 /* 미디어 판 (디스크 A·B, 하드 디스크) 는 읽고 쓴 뒤 5초 보임 */
 #define MD_SHOW_MS 300                        /* 4.0.3: 쓰는 순간만 (깜박임 방지로 0.3초) */
-static uint32_t md_act[10], md_sig[10];                /* 3.6.7: 0~4 카트리지, 5·6 디스크 A·B, 7 테이프, 8 하드 디스크, 9 프린터 (4.0.3: 인쇄하는 동안만) */
+static uint32_t md_act[MP_N], md_sig[MP_N];            /* 8.0.181: MP_ 번호 (카트리지 0~7, 디스크 A·B, 테이프, 하드 디스크, 프린터 — 프린터는 4.0.3: 인쇄하는 동안만) */
 static int prn_printing(void);
 static uint16_t md_vis_now;
 static int md_busy_now(int k)
 {
-    if (k == 5 || k == 6) return disk_size[k - 5] && M->fdc.motor && M->cpu.cycles - M->fdc.last_access[k - 5] < 3579545u / 6;
-    if (k == 7) return M->tape && M->tape_motor;
-    if (k == 8) return (hd_secs || hd2_secs) && P.ms() - hd_last_ms < 200;
-    if (k == 9) return prn_printing();
+    if (k == MP_DISKA || k == MP_DISKB) return disk_size[k - MP_DISKA] && M->fdc.motor && M->cpu.cycles - M->fdc.last_access[k - MP_DISKA] < 3579545u / 6;
+    if (k == MP_TAPE) return M->tape && M->tape_motor;
+    if (k == MP_HD) return (hd_secs || hd2_secs) && P.ms() - hd_last_ms < 200;
+    if (k == MP_PRINTER) return prn_printing();
     return 0;
 }
 static uint32_t md_present_sig(int k)
 {
     uint32_t h = 2166136261u;
     const char *n = 0;
-    if (k <= 4) { if (!M->cart[k].present) return 0; n = cart_name[k]; h ^= (uint32_t)M->cart[k].mapper; }
-    else if (k <= 6) { if (!disk_size[k - 5]) return 0; n = disk_name[k - 5]; }
-    else if (k == 7) { if (!M->tape) return 0; n = tape_name; }
-    else if (k == 9) return prn_printing() ? 1 : 0;      /* 4.0.3: 프린터가 켜져 있고 받은 글이 쌓이는 동안 */
+    if (k <= MP_CART_LAST) { if (!M->cart[k].present) return 0; n = cart_name[k]; h ^= (uint32_t)M->cart[k].mapper; }
+    else if (k <= MP_DISKB) { if (!disk_size[k - MP_DISKA]) return 0; n = disk_name[k - MP_DISKA]; }
+    else if (k == MP_TAPE) { if (!M->tape) return 0; n = tape_name; }
+    else if (k == MP_PRINTER) return prn_printing() ? 1 : 0;      /* 4.0.3: 프린터가 켜져 있고 받은 글이 쌓이는 동안 */
     else { if (!hd_secs && !hd2_secs) return 0; n = hd_secs ? hd_name : hd2_name; }
     for (; n && *n; n++) h = (h ^ (uint8_t)*n) * 16777619u;
     return h | 1;
@@ -1542,12 +1558,12 @@ static uint32_t md_present_sig(int k)
 static void md_tick(uint32_t now)
 {
     uint16_t vis = 0;
-    for (int k = 0; k < 10; k++) {
+    for (int k = 0; k < MP_N; k++) {
         uint32_t sg = md_present_sig(k);
         if (sg != md_sig[k]) { md_sig[k] = sg; md_act[k] = 0; }   /* 4.0.3: 넣었다고 보이지 않음 */
         if (sg && md_busy_now(k)) md_act[k] = now;
-        if (sg && md_act[k] && now - md_act[k] < (k == 5 || k == 6 || k == 8 ? MD_SHOW_MEDIA_MS : MD_SHOW_MS)) vis |= (uint16_t)(1u << k);   /* 미디어 판의 디스크·하드는 쓴 뒤 5초 */
-        if (status_show_all() && !icons_off && (k == 9 ? prn_mode != 0 : sg != 0)) vis |= (uint16_t)(1u << k);   /* 4.0.12: 메뉴·창이 열렸거나 멈췄을 때도 넣은 장치·켠 프린터만 (빈 칸은 안 보임) */
+        if (sg && md_act[k] && now - md_act[k] < (k == MP_DISKA || k == MP_DISKB || k == MP_HD ? MD_SHOW_MEDIA_MS : MD_SHOW_MS)) vis |= (uint16_t)(1u << k);   /* 미디어 판의 디스크·하드는 쓴 뒤 5초 */
+        if (status_show_all() && !icons_off && (k == MP_PRINTER ? prn_mode != 0 : sg != 0)) vis |= (uint16_t)(1u << k);   /* 4.0.12: 메뉴·창이 열렸거나 멈췄을 때도 넣은 장치·켠 프린터만 (빈 칸은 안 보임) */
     }
     if (vis != md_vis_now) { md_vis_now = vis; margin_bd = -1; }
 }
@@ -1571,16 +1587,16 @@ static void draw_status_cluster(uint32_t rx, uint32_t rw, uint32_t mtop, uint32_
     if (rw < bs + 2 * pad) bs = rw > 2 * pad + 16 ? rw - 2 * pad : 16;
     uint32_t cw = (uint32_t)cols * bs + (uint32_t)(cols - 1) * g, x = D.w - pad - cw;
     if (x < rx + pad / 2) x = rx + pad / 2;
-    static const uint8_t md_led[10] = { LED_SLOT1, LED_SLOT2, LED_SLOT3, LED_SLOT4, LED_SLOT5, LED_FDD1, LED_FDD2, LED_CAS, LED_HD, LED_CAS };
-    static const char *const md_tag[10] = { "1", "2", "3", "4", "5", "A", "B", "CAS", "HD", "PRN" };
-    static const uint8_t md_order[5] = { 5, 6, 7, 9, 8 };   /* 4.0.3: 카세트 밑에 프린터 */
+    static const uint8_t md_led[MP_N] = { LED_SLOT1, LED_SLOT2, LED_SLOT3, LED_SLOT4, LED_SLOT5, LED_SLOT6, LED_SLOT7, LED_SLOT8, LED_FDD1, LED_FDD2, LED_CAS, LED_HD, LED_CAS };
+    static const char *const md_tag[MP_N] = { "1", "2", "3", "4", "5", "6", "7", "8", "A", "B", "CAS", "HD", "PRN" };
+    static const uint8_t md_order[5] = { MP_DISKA, MP_DISKB, MP_TAPE, MP_PRINTER, MP_HD };   /* 4.0.3: 카세트 밑에 프린터 */
     int list[24], n = 0;
     {   /* 3.6.5: 음원 아이콘 (소리 내는 동안 노랑, 그 뒤 1초 — MIDI는 3초). 장치 아이콘 위에. 3.7.0: 음원 표 차례 */
         int sl[MIX_N], sn = snd_icon_list(sl);
         for (int j = 0; j < sn; j++) list[n++] = 1000 + sl[j];
     }
     /* 카트리지 슬롯·디스크·하드는 맨 아래 미디어 판으로 (디자인 명세). 판 폭 = 오른쪽 여백보다 조금 작게 */
-    int mit[8], mn = mdp_items(mit);
+    int mit[MP_N], mn = mdp_items(mit);
     uint32_t mpad = rw / 14 > 4 * S ? rw / 14 : 4 * S, pw = rw > 2 * mpad ? rw - 2 * mpad : rw, ip = pw * 14 / 168, mh = 0;
     if (pw > MDP_CW_MAX / 2 + 2 * ip) pw = MDP_CW_MAX / 2 + 2 * ip;
     uint32_t mtm = msx_pic_top() > mtop ? msx_pic_top() - mtop : 0;   /* 위쪽은 MSX 그림 위 끝에 맞춤 (5.2.142 는 화면 높이 9 %) */
@@ -1592,9 +1608,9 @@ static void draw_status_cluster(uint32_t rx, uint32_t rw, uint32_t mtop, uint32_
     } else mn = 0;
     for (int oi = 0; oi < 5; oi++) {                    /* 3.6.8: 카트리지 1~5 아이콘은 안 보임 (음원 아이콘·미디어 판으로 충분) */
         int k = md_order[oi];
-        if (k == 5 || k == 6 || k == 8) continue;              /* 미디어 판에 */
-        if (k != 9 && led_now[md_led[k]] == 4) continue;     /* 이 기종에 없으면 안 보임 */
-        if (k != 9 && led_now[md_led[k]] == 0 && !status_show_all()) continue;
+        if (k == MP_DISKA || k == MP_DISKB || k == MP_HD) continue;   /* 미디어 판에 */
+        if (k != MP_PRINTER && led_now[md_led[k]] == 4) continue;     /* 이 기종에 없으면 안 보임 */
+        if (k != MP_PRINTER && led_now[md_led[k]] == 0 && !status_show_all()) continue;
         if (!(md_vis_now >> k & 1)) continue;                            /* 3.5.3: 쓸 때만 (넣음·읽고 쓰기·테이프 모터 뒤 3초) */
         list[n++] = k;
     }
@@ -1615,12 +1631,12 @@ static void draw_status_cluster(uint32_t rx, uint32_t rw, uint32_t mtop, uint32_
             snd_label_draw(bx + bs - 4 * S, by + bs - 3 * S, lb, on ? C_WARN : C_MUTED, C_CARD, bs - 8 * S);
             continue;
         }
-        int st = k == 9 ? (prn_printing() ? 3 : 2) : led_now[md_led[k]], busy = st == 3 || (k >= 5 && k <= 6 && st == 2 && M->fdc.motor && M->cpu.cycles - M->fdc.last_access[k - 5] < 3579545u / 6);
+        int st = k == MP_PRINTER ? (prn_printing() ? 3 : 2) : led_now[md_led[k]], busy = st == 3 || (k >= MP_DISKA && k <= MP_DISKB && st == 2 && M->fdc.motor && M->cpu.cycles - M->fdc.last_access[k - MP_DISKA] < 3579545u / 6);
         int has = st != 0;
         ui_rrect(bx + 2 * S, by + 3 * S, bs, bs, 9 * S, C_SHADOW);
         ui_rframe(bx, by, bs, bs, 9 * S, busy ? C_WARN : C_LINE, C_CARD);
         uint32_t isz = bs - 14 * S;
-        draw_icon_hd(bx + 7 * S, by + 5 * S, isz, k <= 4 ? ICON_CART : k <= 6 ? ICON_FDD : k == 7 ? ICON_CAS : k == 9 ? ICON_PRINTER : ICON_HD,
+        draw_icon_hd(bx + 7 * S, by + 5 * S, isz, k <= MP_CART_LAST ? ICON_CART : k <= MP_DISKB ? ICON_FDD : k == MP_TAPE ? ICON_CAS : k == MP_PRINTER ? ICON_PRINTER : ICON_HD,
                      busy ? C_WARN : has ? C_TEXT : C_FAINT, busy ? C_WARN : has ? C_WARN : C_FAINT, C_CARD);
         const char *t = md_tag[k];
         text_f(SF, 1, bx + bs - ui_sw(t) - 4 * S, by + bs - SLH - 2 * S, t, busy ? C_WARN : has ? C_TEXT : C_MUTED, 0xFF, 0, 1);
@@ -1777,7 +1793,7 @@ static void draw_toast_center(void)
 
 static void draw_margins(uint8_t bd)
 {
-    fe_trace("margins begin");
+   
     if (M) memcpy(shadow_bd, M->vdp.line_bd, sizeof shadow_bd);   /* 3.0: 지금 줄별 테두리 색으로 그리므로 기억 (2.x는 0xFF로 지워 매 프레임 여백을 다시 그렸음) */
     draw_panel(bd);
     uint8_t tb = (run_state == RUN_STOPPED || !M || v9_show) ? bd : M->vdp.line_bd[0];
@@ -1790,7 +1806,7 @@ static void draw_margins(uint8_t bd)
     }
     margin_bd = bd;
     if (ov_on) ov_dirty = 1;                            /* 3.5.0: 여백의 미디어 판도 다시 */
-    fe_trace("margins end");
+   
 }
 
 /* ------------------------------------------------------------------ */
@@ -1821,6 +1837,7 @@ static void layout(void)
     voff = (FRAME_LINES - disp_lines) / 2;
     uint32_t margin = D.mm_h ? 2u * D.h / D.mm_h : D.h / 100;
     if (margin * 2 + FRAME_LINES > D.h) margin = 0;
+    if (v9_show && vcomp == 0) margin = 0;               /* 8.0.133: V9990 만 보일 때는 위아래 2 mm 여백 없이 화면 높이 전부 (영상 위·아래 끝 줄까지) */
     out_h = D.h - 2 * margin;                          /* 세로 기준: 위아래 2 mm만 빼고 꽉 채움 */
     uint32_t pa = aspect_mode == 2 ? 1000 : 1104;      /* MSX 점 가로/세로 ×1000 (4:3 = 1.333/(256/212) = 1.104) */
     pix_aspect_mil = pa;
@@ -1872,14 +1889,22 @@ static void adj_shift(uint8_t *dst, const uint8_t *src, int sh, uint8_t fill)
 }
 
 #include "fe_v9990.inc"                              /* 5.2.85 Gfx9000 (V9990) 프런트엔드 부품: 화면 그리기·아이콘·꽂기/빼기 */
+#include "fe_v9968.inc"                              /* 8.0.94 V9968 카트리지 (두 번째 VDP) 프런트엔드 부품: 화면 그리기·꽂기/빼기 */
 
 static uint32_t pres_line32[4096];
 /* 8.0.23 다중CPU: 화면 한 줄 그리기 (메인 또는 일꾼 코어). 줄마다 쓰는 임시 버퍼는 덩어리(PresCtx)마다 따로.
  * 일꾼이 그리는 동안 메인도 자기 몫을 그리고 모두 끝날 때까지 기다리므로, MSX 화면 데이터(fb)는 그동안 바뀌지 않는다.
  * 공유 상태(그린 영역 목록·여백 판 다시 그리기)는 줄마다 표(pd_*)에 적어 두었다가 메인이 줄 순서대로 반영 → 혼자 그릴 때와 결과가 같음 */
 #define PRES_NCHUNK 6
-int log_diag = 1, log_stall = 1, log_sndlog = 1, log_key = 0, log_sndglitch = 0;   /* 8.0.30: 진단용 USB 저장 스위치 (진단 > 스위치 탭). 새 진단 저장을 만들면 여기와 스위치 탭에 같이 넣을 것 */
-int mp_present = 1; int mp_mwait_ini = 1; extern int msx_mp_midi;                                     /* 8.0.23: ini MpPresent (0 = 메인 혼자 그림) */
+extern int log_vram_top;                               /* 8.0.175 fe_log.inc — ini LogVramTop */
+extern int mmusb_log_read;                              /* 8.0.124 src/mmusb.c — ini LogUsbRead */
+extern int mp4p_skip_nonref;                          /* 8.0.139 src/mp4play.c — ini Mp4SkipNonRef */
+extern int mp4p_fast;                                  /* 8.0.123 src/mp4play.c — ini Mp4Fast */
+int mp_mwait_ini = 1;                                  /* 8.0.23: ini MpMwait — 노는 일꾼 코어를 MWAIT 로 재움 (0 = pause 로 돌기) */
+#include "fe_log.h"                                   /* 8.0.129 분야별 로그 스위치 (log_area[], 옛 이름 매크로) */
+int log_diag = 0, log_crumb = 0;                        /* log_diag: 8.0.220 사용자모드 기본 끔 (스위치 탭에서 켬). log_crumb: 8.0.87 기본 끔 (명령마다 USB 쓰기라 느림) */
+/* 순서 = fe_log.h 열거형: USB KBD SND MOUSE JOY TP VID WIFI LAN COLOR BOOT. 8.0.220 사용자모드: 키보드·화면만 켬, 소리(SND)를 포함해 나머지는 끔 */
+int log_area[LA_N] = { 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0 };
 static uint32_t pres_par_n;                             /* 일꾼과 나눠 그린 프레임 수 (DIAG) */
 typedef struct { uint32_t line32[4096]; uint8_t adj_e[VDP_W], adj_o[VDP_W], adj_b[VDP_W]; int emu_on, plany, adj_on, adj_v; uint8_t bd; uint32_t y0, y1; } PresCtx;
 static uint32_t pd_y[VDP_H][2], pd_h[VDP_H][2]; static uint8_t pd_ov[VDP_H];
@@ -1972,7 +1997,6 @@ static void pres_line(uint32_t y, PresCtx *c)
                 if (r0 > r1) r0 = r1;
             }
             if (ry + r1 > D.h || x0 + out_w > D.w || bytes > sizeof pres_line32) {   /* 화면 밖에 쓰지 않음 (멈춤 추적) */
-                static int bad_n; if (bad_n < 4) { bad_n++; char t[24] = "y"; char *q = t + 1; uint32_t v = y; char nb[12]; int nn = 0; do { nb[nn++] = (char)('0' + v % 10); v /= 10; } while (v); while (nn) *q++ = nb[--nn]; *q++ = ' '; v = ry + r1; nn = 0; do { nb[nn++] = (char)('0' + v % 10); v /= 10; } while (v); while (nn && q < t + 22) *q++ = nb[--nn]; *q = 0; fe_trace_str("pres: BAD rows", t); }
                 continue;
             }
             for (uint32_t r = r0; r < r1; r++) {
@@ -1993,9 +2017,9 @@ static void pres_chunk(void *arg) { PresCtx *c = (PresCtx *)arg; for (uint32_t y
 static void present_impl(void)
 {
     {   /* 5.2.19 화면 출력 층: 소스 표(src/vsrc.h)로 보일 장치를 고름 — 자동이면 V9990 이 화면을 내보낼 때 V9990, 아니면 MSX(VDP) */
-        static void (*const vsrc_draw[VSRC_N])(void) = { [VSRC_VDP] = 0, [VSRC_V9990] = present_v9990 };
+        static void (*const vsrc_draw[VSRC_N])(void) = { [VSRC_VDP] = 0, [VSRC_V9990] = present_v9990, [VSRC_V9968] = present_v9968 };
         int id = run_state == RUN_STOPPED ? VSRC_VDP : msx_vsrc_pick(M, vsrc_pref);
-        int comp = vsrc_pref >= VSRC_N && M->v9 && run_state != RUN_STOPPED ? vsrc_pref - VSRC_N + 1 : 0;   /* 겹치기 1 · 나란히 2 (V9990 이 꽂혀 있을 때만) */
+        int comp = vsrc_pref >= VSRC_N && (M->v9 || M->v2) && run_state != RUN_STOPPED ? vsrc_pref - VSRC_N + 1 : 0;   /* 겹치기 1 · 나란히 2 (V9990 이 꽂혀 있을 때만) */
         if (comp) id = VSRC_VDP;
         if (id != vsrc_cur || comp != vcomp) { vsrc_cur = id; vcomp = comp; layout(); force_redraw = 1; margin_bd = -1; }
         if (comp == 1) { force_redraw = 1; margin_bd = -1; }   /* 겹치기: 매 프레임 MSX 와 여백을 새로 그린 위에 섞음 (쌓여 진해지지 않게) */
@@ -2027,8 +2051,6 @@ static void present_impl(void)
     /* 3.2.10 VID-05: V9938 R#18 화면 위치 (openMSX와 같이 니블 ^ 7 − 7: 가로 −7~+8점, 세로 −7~+8줄, + = 오른쪽·아래) */
     int adj_on = M->vdp.v9938 && run_state != RUN_STOPPED, adj_v = 0;
     if (adj_on) adj_v = ((M->vdp.line_adj[0] >> 4) ^ 7) - 7;   /* 4.0.31: 가로는 줄마다 (Psycho World: 위쪽 필드는 R#18로 미세 스크롤, HUD 줄에서 0), 세로는 첫 줄 값 */
-    uint32_t *line32 = pres_line32;
-    uint8_t *line8 = (uint8_t *)line32;
     if (M->vdp.pal_dirty) {                          /* 프로그램이 팔레트를 바꿈 */
         M->vdp.pal_dirty = 0;
         recompute_palette();
@@ -2042,12 +2064,12 @@ static void present_impl(void)
         margin_bd = -1;
     }
     if (bd != margin_bd) draw_margins(bd);
-    fe_trace("pres: sndm");
+   
     if (!ui_active() || live_ui()) sndm_frame();     /* 3.7.1: 음원 아이콘 LED 계기 */
-    fe_trace("pres: lines");
+   
     {   /* 8.0.23: 줄 그리기를 일꾼 코어와 나눔 (P.par_run 없거나 MpPresent=0 이면 메인 혼자, 결과는 같음) */
         static PresCtx pc[PRES_NCHUNK];
-        int nch = (P.par_run && mp_present && !emu_on) ? PRES_NCHUNK : 1;
+        int nch = (P.par_run && !emu_on) ? PRES_NCHUNK : 1;
         uint32_t per = (disp_lines + (uint32_t)nch - 1) / (uint32_t)nch;
         for (int i = 0; i < nch; i++) {
             pc[i].emu_on = emu_on; pc[i].plany = plany; pc[i].adj_on = adj_on; pc[i].adj_v = adj_v; pc[i].bd = bd;
@@ -2062,9 +2084,9 @@ static void present_impl(void)
             if (pd_ov[y]) ov_dirty = 1;
         }
     }
-    fe_trace("pres: lines done");
-    if (vcomp && M->v9) {                              /* 겹치기·나란히 — MSX 를 그린 뒤 V9990 을 얹음 */
-        if (msx_vsrc[VSRC_V9990].active(M)) present_v9990_draw(vcomp);
+   
+    if (vcomp && (M->v9 || M->v2)) {                   /* 겹치기·나란히 — MSX 를 그린 뒤 V9990 (둘 다 꽂혀 있으면 V9990 우선) 또는 V9968 을 얹음 */
+        if (M->v9 ? msx_vsrc[VSRC_V9990].active(M) : msx_vsrc[VSRC_V9968].active(M)) { if (M->v9) present_v9990_draw(vcomp); else present_v9968_draw(vcomp); }
         else if (vcomp == 2 && force_redraw) { fill_msx(v9x, v9y, v9w, v9h, 1); mark_dirty_rect(v9x, v9y, v9w, v9h); }
     }
     if (emu_on) { emu_render(); if (ov_on) ov_dirty = 1; }
@@ -2072,21 +2094,11 @@ static void present_impl(void)
     draw_toast_center();
     draw_vol_osd();
     last_present = P.ms();
-    fe_trace("pres: end");
+   
 }
 
 static void present(void) { PF_BEGIN; present_impl(); PF_END(PF_VIDEO); }
 
-void fe_fatal(const char *msg, const char *detail)
-{
-    if (!D.fb) for (;;) __asm__ volatile("hlt");
-    fe_fill(0, 0, D.w, D.h, 4);
-    fe_text(32, 32, "X86MSX: fatal error", 15, 4);
-    fe_text(32, 32 + LH * 2, msg, 15, 4);
-    if (detail) fe_text(32, 32 + LH * 3, detail, 15, 4);
-    fe_flush_now();                                     /* 뒤 버퍼 방식: 멈추기 전에 화면으로 */
-    for (;;) __asm__ volatile("hlt");
-}
 
 /* ------------------------------------------------------------------ */
 /* 동작                                                                 */
@@ -2123,8 +2135,22 @@ enum {
     A_SPEED_2X, A_SPEED_4X, A_MON_COLOR, A_MON_BW, A_MON_GREEN, A_MON_AMBER, A_SCANLINE_TOGGLE,  /* 3.6.0: F11 메뉴 (도구 막대와 같은 일) */
     A_DISKA_DIR, A_DISKB_DIR,               /* 3.6.1: 디렉토리 삽입 (blueMSX Insert Directory) */
     A_CART5_INSERT, A_CART5_EJECT, A_INFO_CART5,   /* 3.6.7: 카트리지 슬롯 5 */
-    A_PROPS_OUTPUT                          /* 4.0.134: 옵션 > 출력 장치 (속성 창 출력 장치 탭) */
+    A_PROPS_OUTPUT,                         /* 4.0.134: 옵션 > 출력 장치 (속성 창 출력 장치 탭) */
+    A_CART6_INSERT, A_CART6_EJECT, A_INFO_CART6, A_CART7_INSERT, A_CART7_EJECT, A_INFO_CART7, A_CART8_INSERT, A_CART8_EJECT, A_INFO_CART8   /* 8.0.181: 카트리지 6~8 */
 };
+/* 8.0.181: 카트리지 8칸의 동작 번호 표 — 넣기·빼기·정보 동작이 몇 번째 카트인지 한 곳에서 찾음 (공용) */
+static const int cart_insert_action[MSX_CART_SLOTS] = { A_CART1_INSERT, A_CART2_INSERT, A_CART3_INSERT, A_CART4_INSERT, A_CART5_INSERT, A_CART6_INSERT, A_CART7_INSERT, A_CART8_INSERT };
+static const int cart_eject_action[MSX_CART_SLOTS] = { A_CART1_EJECT, A_CART2_EJECT, A_CART3_EJECT, A_CART4_EJECT, A_CART5_EJECT, A_CART6_EJECT, A_CART7_EJECT, A_CART8_EJECT };
+static const int cart_info_action[MSX_CART_SLOTS] = { A_INFO_CART1, A_INFO_CART2, A_INFO_CART3, A_INFO_CART4, A_INFO_CART5, A_INFO_CART6, A_INFO_CART7, A_INFO_CART8 };
+static int cart_index_of_action(const int *table, int action)       /* 표에서 동작 위치 (카트 번호), 없으면 -1 */
+{
+    for (int n = 0; n < MSX_CART_SLOTS; n++) if (table[n] == action) return n;
+    return -1;
+}
+static int cart_in_expander(int n)                                 /* 8.0.181: 이 카트 칸이 슬롯 확장기 안에 있나 (슬롯 1: 0~3, 슬롯 2: 1~4, 둘 다: 모두) */
+{
+    return slot_expand == 3 ? n >= 0 && n < MSX_CART_SLOTS : slot_expand == 2 ? n >= 1 && n <= 4 : slot_expand == 1 && n >= 0 && n < 4;
+}
 static int reset_after_insert = 1;
 static int hd_reset_insert = 1;             /* 3.9.8: 하드 디스크 삽입·가상 하드 연결 뒤 MSX 다시 시작 (기본 켜짐) */
 static int vhd_reset_insert = 1;            /* 3.9.9: 가상 하드 연결 뒤 MSX 다시 시작 (하드 디스크 이미지와 따로, 기본 켜짐) */
@@ -2148,12 +2174,53 @@ static int disk_reset_after_insert = 0;     /* 디스크: 삽입 후 리셋 (기
 #define A_TAPE_POS 700                      /* 3.2.1 MED-06: + 테이프 안 파일 번호 (TAPE_POS_N개까지) */
 #define TAPE_POS_N 16
 static void hd_eject(void);
+static void dos2_mapper_hint(void);                      /* 8.0.65: fe_vhd.inc */
 static void hd_eject_unit(int u);
 static void hd_auto_cart_remove(int only_other);
 static int hd2_insert(const char *path, const char *name, int quiet);
 static int insert_special(int n, int kind);
 static int special_apply(int n, int kind, int quiet);
 static void x86midi_check(int quiet);
+/* 8.0.226: X86MV·X86MP3 가 소리 포트 2Ch~2Fh 로 X86 Multimedia 를 찾는데 카트리지가 없으면, 빈 슬롯(마지막부터)에 자동으로 꽂아 준다.
+ * 빈 슬롯이 없으면 꽂아 달라고 알린다. 한 번 꽂은 뒤 사용자가 빼면 다음에 프로그램이 찾을 때 다시 꽂힘.
+ * 꽂는 일은 프로그램이 도는 한가운데(IN/OUT 명령)에서 일어나므로 디스크는 건드리지 않고(quiet 2), 안내 글은 프레임 끝에서 띄움 */
+static int free_cart_slot(void);
+enum { MM_NOTICE_NONE, MM_NOTICE_INSERTED, MM_NOTICE_NOSLOT };
+#define MM_AUTO_RETRY_MS 1500u                          /* 못 꽂았을 때(빈 슬롯·롬 없음) 다시 시도하기까지 (상태 포트를 반복해 읽어도 느려지지 않게) */
+#define MM_KIND_MULTIMEDIA 70                           /* spcat.c 의 X86 Multimedia */
+static int mm_notice, mm_notice_slot;
+static int mm_auto_slot = -1;                           /* 8.0.227: 프로그램이 찾아서 자동으로 꽂은 슬롯 (기종 환경에는 저장하지 않음). 없으면 -1 */
+
+static int mm_auto_insert_on_probe(MSX *m)
+{
+    static uint32_t last_failed_ms; static int failed_once;
+    if (m != M) return 0;
+    uint32_t now = P.ms();
+    if (failed_once && now - last_failed_ms < MM_AUTO_RETRY_MS) return 0;
+    int slot = free_cart_slot();
+    if (slot < 0 || special_apply(slot, MM_KIND_MULTIMEDIA, 2)) {
+        failed_once = 1; last_failed_ms = now;
+        if (slot < 0) mm_notice = MM_NOTICE_NOSLOT;
+        return 0;
+    }
+    failed_once = 0;
+    mm_auto_slot = slot;
+    mm_notice = MM_NOTICE_INSERTED; mm_notice_slot = slot;
+    settings_changed();
+    return 1;
+}
+static void mm_auto_show_notice(void)                   /* 프레임마다: 자동으로 꽂았거나 못 꽂았다는 안내 */
+{
+    if (mm_notice == MM_NOTICE_NONE) return;
+    if (mm_notice == MM_NOTICE_INSERTED) {
+        char slot_text[24] = "Slot "; char digit[2] = { (char)('1' + mm_notice_slot), 0 };
+        str_append(slot_text, sizeof slot_text, digit);
+        toast(nt("X86 Multimedia 카트리지를 자동으로 꽂았습니다", "X86 Multimedia cartridge inserted automatically", "X86 Multimediaカートリッジを自動で挿しました"), slot_text);
+    } else {
+        toast(nt("X86 Multimedia 카트리지가 필요합니다 - 빈 카트리지 슬롯이 없으니 슬롯을 비우고 꽂아 주세요", "X86 Multimedia cartridge needed - no free slot, free one and insert it", "X86 Multimediaカートリッジが必要です - 空きスロットがありません"), 0);
+    }
+    mm_notice = MM_NOTICE_NONE;
+}
 static int special_kind(int code);
 static void do_quick_save(void);
 static void do_quick_load(void);
@@ -2177,6 +2244,7 @@ static int switch_machine(const char *name, char *err, int errlen);
 static void resume_enter(void);
 static void ini_parse_lines(char *line);
 static void settings_flush(void);
+static void dg_sw_file_save(void);
 static void opts_save(void);
 static void opts_load(void);
 static void resume_save(void);
@@ -2186,8 +2254,17 @@ static void fw_toggle(void)       /* 4.0.1: 프런트(펌웨어) 스위치 — �
     fw_switch = !fw_switch; M->fw.mat_switch = (uint8_t)fw_switch; pana_front = fw_switch; settings_changed();
     if (machine_has_fw == 2) { char e[160]; msx_fw_turbor = fw_switch; if (!switch_machine(machine_name, e, sizeof e)) power_on(); }   /* turbo R: 롬을 붙이거나 떼고 다시 켬 */
 }
-static int global_save = 1;                         /* 4.0.34: 전체 상태 저장 (쓰던 기종 기억). 끄면 늘 MSX - C-BIOS로 시작 */
-static int resume_on = 1;                           /* 2.11: 끝낼 때 상태 저장, 켤 때 이어서 */
+static int resume_on = 1;                           /* 2.11: 끝낼 때 상태 저장, 켤 때 이어서 (기종 상태 저장 1: 실행 중인 상태까지) */
+static int resume2_on = 0;                          /* 8.0.117 기종 상태 저장 2: 기종·매체·옵션만 저장하고 켤 때는 새로 부팅 (1 과 같이 켜지지 않음) */
+/* 8.0.194: 기종 상태 저장 모드는 부팅할 때 정해져 그 세션 내내 고정 (0 = 둘 다 꺼짐: 저장도 읽기도 없음, 1 = 상태 저장 1, 2 = 상태 저장 2).
+ * 실행 중에 설정을 바꿔도 다음 부팅부터 적용 — 끈 채 부팅해서 켜기만 하고 끝내도 예전 기록을 덮어쓰지 않음. 1 과 2 의 기록(Env·옵션·기종)은 서로 완전히 따로 */
+static int resume_boot = -1;                        /* -1 = 아직 안 정함 (ini 를 읽기 전) */
+static char want_machine[128], want_machine2[128];  /* ini 에 적힌 마지막 기종 (1 / 2) */
+static int resume_mode(void) { return resume_boot >= 0 ? resume_boot : resume_on ? 1 : resume2_on ? 2 : 0; }
+static int resume_switch_on(void) { return resume_boot == 1 ? resume_on : resume_boot == 2 ? resume2_on : resume_boot < 0 ? (resume_on || resume2_on) : 0; }   /* 8.0.195: 이 세션이 켠 모드의 스위치가 지금도 켜져 있는가 */
+static int resume_any(void) { return resume_mode() != 0 && resume_switch_on(); }   /* 8.0.195: 설정에서 끄면 그 순간부터 저장·복원을 멈춤 (켜는 것은 다음 부팅부터) */
+static int resume_full(void) { return resume_mode() == 1; }                 /* 실행 중인 MSX 상태까지 저장하는 쪽 */
+
 /* 3.0 PC 마우스 설정 */
 static int mouse_port;                              /* MSX 마우스 포트: 0 없음, 1 포트 1, 2 포트 2 */
 static int mouse_sens = 100;                        /* 감도 % (25~400) */
@@ -2200,6 +2277,7 @@ static int mouse_is_ps2(const char *n) { return (n[0] == 'P' && n[1] == 'S' && n
 static int mouse_wanted_off(int k, const char *n, int nd) { return mouse_is_ps2(n) ? (touchpad_pref < 0 ? nd > 1 : !touchpad_pref) : (mouse_offmask >> k) & 1; }                 /* 3.8.2: 마우스별 사용 안 함 (비트 n), 지난번 연결 수 */
 static int mouse_count;                             /* 연결된 마우스 수 */
 static char mouse_name[40];
+static int env_changed;
 static void env_save_current(void);
 static void env_apply(void);
 
@@ -2212,9 +2290,10 @@ static void disk_eject(int d);
 static void disks_reinsert(void);
 static void open_machines(void);
 static void open_props(int tab);
+static int midi_cart_present(void);                     /* 8.0.75: MIDI 단자(GT 내장·MIDI 카트리지)가 있음 */
 static void open_net(int mode);
-static int net_any_adapter(void);
 static int net_cart_present(void);
+static int net_wired_cart_present(void), net_wifi_cart_present(void);   /* 8.0.45 */
 static int net_has_wifi(void);
 static int net_has_wired(void);
 static int net_wired_on, net_wifi_on;                          /* 5.0.57 fe_net.inc */
@@ -2228,7 +2307,6 @@ static void scan_name(int key, char *out, int max);
 static void open_dialog(int kind);
 static void draw_sysview(void); static void sysview_open(void); static void sysview_key(int key);   /* 5.3.19 fe_sysview.inc */
 static void bgw_finish(void);                         /* 5.2.69 fe_state.inc: 조금씩 저장을 마저 */
-static int bgw_busy(void);
 static void bgw_step(uint32_t budget_ms);
 static void open_image_dialog(void);                 /* 3.0.2 fe_sys.inc */
 static void open_help(void);
@@ -2299,7 +2377,7 @@ static void fx_apply_lang(void)                         /* 글꼴은 한 번 고
 }
 static void fx_startup(void)                            /* 설정을 읽은 뒤 한 번 */
 {
-    if (!fx_seen) copy_str(fx_pref, sizeof fx_pref, "NotoSansKR.x8f");   /* 처음: 있으면 부드러운 글꼴 */
+    if (!fx_seen) fx_pref[0] = 0;   /* 처음(설정에 Font 없음): 내장 점글꼴 (Galmuri). 8.0.97 — 예전엔 NotoSansKR.x8f. 고른 글꼴은 설정 파일에 남음 */
     fx_name[0] = 0; fx_use_builtin();
     fx_apply_lang();
 }
@@ -2313,6 +2391,27 @@ static void rtc_sync(int force)
     uint32_t cur = M->rtc_now + (uint32_t)((M->cpu.cycles >= M->rtc_ref ? M->cpu.cycles - M->rtc_ref : 0) / 3579545u);
     int32_t d = (int32_t)(pc - cur);
     if (force || !M->rtc_now || d > 1 || d < -1) msx_rtc_set(M, pc);
+}
+/* 8.0.43: MSX에서 시계를 고쳤으면(MSX-DOS SET TIME·X86NTP 등) 잠잠해진 뒤 PC 시계에도 반영.
+ * 실패하면 MSX가 시계를 또 고칠 때까지 다시 시도하지 않음 */
+static void rtc_push_pc(void)
+{
+    static uint64_t tried;
+    if (!P.set_time || !M->rtc_delta || !M->rtc_wlast) return;
+    if (M->cpu.cycles - M->rtc_wlast < 2u * 3579545u) return;     /* 쓰는 중이면 기다림 (날짜·시각을 여러 번에 나눠 씀) */
+    if (tried == M->rtc_wlast) return;
+    tried = M->rtc_wlast;
+    uint32_t t = msx_rtc_time(M), days = t / 86400u, r = t % 86400u;
+    int y = 1980;
+    for (;;) { uint32_t yl = ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 366u : 365u; if (days < yl) break; days -= yl; y++; }
+    static const uint8_t md[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    int mo = 0;
+    for (;;) { uint32_t ml = md[mo] + (mo == 1 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)); if (days < ml) break; days -= ml; mo++; }
+    int tm[6] = { y, mo + 1, (int)days + 1, (int)(r / 3600), (int)(r / 60 % 60), (int)(r % 60) };
+    if (P.set_time(tm)) { return; }
+    msx_rtc_set(M, t);                                  /* 이제 PC 시계가 같은 값: 어긋남 기억을 비움 */
+    M->rtc_delta = 0;
+   
 }
 /* 3.4.0: 펌웨어 스위치를 켠 파나소닉 기종은 CTRL을 누른 채 켬 (디스크 롬이 가상 B 드라이브 몫을 잡지 않아야 내장 소프트웨어 작업 자리가 남음) */
 static void fw_boot_ctrl(void) { if (boot_ctrl && ctrl_hold < CTRL_HOLD) ctrl_hold = CTRL_HOLD; if (fw_switch && msx_dev(M, MDEV_MATSU) && M->fw.kind == FW_PANASONIC && ctrl_hold < CTRL_HOLD) ctrl_hold = CTRL_HOLD; }
@@ -2333,6 +2432,7 @@ static void power_on(void)
  *  - 그 밖(슬롯 1, 확장기 안 칸): "삽입 후 리셋"이 켜져 있으면 리셋,
  *    꺼져 있으면 정지 상태로 두고 사용자가 실행·리셋할 때까지 돌리지 않음 */
 static void hd_eject(void);
+static void dos2_mapper_hint(void);                      /* 8.0.65: fe_vhd.inc */
 static void sram_save(int n);
 static void sram_load(int n);
 #include "fe_extdev.inc"                               /* 5.2.86 특수 카트리지(외부장치) 꽂기·빼기 표 */
@@ -2410,7 +2510,7 @@ static uint32_t help_render(uint32_t X, uint32_t W, uint32_t top, uint32_t botto
 static int pq_act, pq_sel;                              /* 4.0: 끝내기·재시작 확인 (dialog 15) */
 static void do_action(int a)
 {
-    if (a >= A_RECENT && a < A_RECENT + 8 * 8) { menu_close_all(); recent_open((a - A_RECENT) / 8, (a - A_RECENT) % 8); return; }
+    if (a >= A_RECENT && a < A_RECENT + RECENT_MENUS * 8) { menu_close_all(); recent_open((a - A_RECENT) / 8, (a - A_RECENT) % 8); return; }
     if (a >= A_TAPE_POS && a < A_TAPE_POS + TAPE_POS_N) { menu_close_all(); tape_scan(); if (M->tape && a - A_TAPE_POS < tape_nfile) M->tape_pos = tape_fpos[a - A_TAPE_POS]; return; }
     if (a >= A_SPECIAL && a < A_SPECIAL + 128 * MSX_CART_SLOTS) { insert_special((a - A_SPECIAL) / 128, (a - A_SPECIAL) % 128); return; }
     switch (a) {
@@ -2442,9 +2542,9 @@ static void do_action(int a)
     case A_CART2_INSERT: open_browser(1); break;
     case A_CART3_INSERT: open_browser(2); break;
     case A_CART4_INSERT: open_browser(3); break;
-    case A_CART5_INSERT: open_browser(4); break;      /* 3.6.7 */
-    case A_CART1_EJECT: case A_CART2_EJECT: case A_CART3_EJECT: case A_CART4_EJECT: case A_CART5_EJECT: {
-        int n = a == A_CART1_EJECT ? 0 : a == A_CART2_EJECT ? 1 : a == A_CART3_EJECT ? 2 : a == A_CART4_EJECT ? 3 : 4;
+    case A_CART5_INSERT: case A_CART6_INSERT: case A_CART7_INSERT: case A_CART8_INSERT: open_browser(cart_index_of_action(cart_insert_action, a)); break;   /* 3.6.7, 8.0.181 */
+    case A_CART1_EJECT: case A_CART2_EJECT: case A_CART3_EJECT: case A_CART4_EJECT: case A_CART5_EJECT: case A_CART6_EJECT: case A_CART7_EJECT: case A_CART8_EJECT: {
+        int n = cart_index_of_action(cart_eject_action, a);
         if (M->cart[n].present && CART_IS_IDE(M->cart[n].mapper)) hd_eject();   /* IDE 카트리지와 함께 */
         cart_remove(n);                                 /* 2.16: MSX-AUDIO·Joyrex도 끔, SRAM 저장 */
         cart_name[n][0] = 0;
@@ -2470,8 +2570,8 @@ static void do_action(int a)
         break;
     case A_EXIT: case A_REBOOT:                           /* 4.0: 먼저 물어봄 (확인 창 = dialog 15) */
         pq_act = a; pq_sel = 0; open_dialog(15); break;
-    case A_EXIT_NOW: bgw_finish(); silence_all(); vhd_sync_all(); prn_flush(0); midi_flush(); rec_stop(); vrec_stop(); sram_save_all(); resume_save(); disk_flush(0); disk_flush(1); tape_flush(); hd_flush(); settings_flush(); if (P.poweroff) P.poweroff(); else P.reboot(); break;
-    case A_REBOOT_NOW: bgw_finish(); silence_all(); vhd_sync_all(); prn_flush(0); midi_flush(); rec_stop(); vrec_stop(); sram_save_all(); resume_save(); disk_flush(0); disk_flush(1); tape_flush(); hd_flush(); settings_flush(); P.reboot(); break;
+    case A_EXIT_NOW: bgw_finish(); silence_all(); vhd_sync_all(0); prn_flush(0); midi_flush(); rec_stop(); vrec_stop(); sram_save_all(); resume_save(); disk_flush(0); disk_flush(1); tape_flush(); hd_flush(); settings_flush(); if (P.poweroff) P.poweroff(); else P.reboot(); break;
+    case A_REBOOT_NOW: bgw_finish(); silence_all(); vhd_sync_all(0); prn_flush(0); midi_flush(); rec_stop(); vrec_stop(); sram_save_all(); resume_save(); disk_flush(0); disk_flush(1); tape_flush(); hd_flush(); settings_flush(); P.reboot(); break;
     case A_DIAG: open_diag(9); break;               /* 요약 탭부터 */
     case A_SOUND_DIAG: open_diag(2); break;   /* 3.0.2: 진단의 소리 탭 */
     case A_MACHINE_EDIT: open_machines_edit(); break;
@@ -2543,10 +2643,10 @@ static void do_action(int a)
     case A_PROPS_VIDEO: open_props(1); break;
     case A_PROPS_EFFECTS: open_props(2); break;
     case A_PROPS_SOUND: open_props(3); break;
-    case A_PROPS_MIDI: open_props(5); break;
+    case A_PROPS_MIDI: if (!midi_cart_present()) { toast(nt("MIDI 카트리지를 먼저 꽂으세요 (Insert Special > X86MSX > X86 MIDI)", "Insert a MIDI cartridge first (Insert Special > X86MSX > X86 MIDI)", "MIDI カートリッジを先に挿入してください"), 0); break; } open_props(5); break;
     case A_PROPS_OUTPUT: open_props(4); break;      /* 4.0.134 */
     case A_PROPS_MIX: open_props(6); break;
-    case A_MIDI_MIX: open_midimix(); break;              /* 5.2.53 */
+    case A_MIDI_MIX: if (!midi_cart_present()) { toast(nt("MIDI 카트리지를 먼저 꽂으세요 (Insert Special > X86MSX > X86 MIDI)", "Insert a MIDI cartridge first (Insert Special > X86MSX > X86 MIDI)", "MIDI カートリッジを先に挿入してください"), 0); break; } open_midimix(); break;              /* 5.2.53 */
     case A_PROPS_KB: open_props(7); break;
     case A_NET: open_net(-1); break;
     case A_NET_WIFI: open_net(1); break;                 /* 무선·유선 네트워크 메뉴를 따로 */
@@ -2576,9 +2676,20 @@ static void do_action(int a)
 
 /* 메뉴 항목 상태: -1 숨김, 0 흐림(고를 수 없음), 1 보통, 2 체크 */
 static int sp_has_rom(int kind);
+static int sp_code(int kind);
+/* 8.0.187: X86MSX 묶음 카트리지는 한 종류가 한 슬롯에만 꽂힘 — 이미 다른 슬롯에 꽂혀 있으면 그 종류의 특수 카트리지 삽입은 고를 수 없게 (흐린 글씨) */
+static int x86_cart_in_other_slot(int slot, int kind)
+{
+    const SpCart *sd = spcat_kind(kind);
+    if (!sd || sd->group != SPG_X86) return 0;
+    for (int n = 0; n < MSX_CART_SLOTS; n++)
+        if (n != slot && M->cart[n].present && cart_special[n] == sp_code(kind)) return 1;
+    return 0;
+}
 static int action_state(int a)
 {
     if (a >= A_SPECIAL && a < A_SPECIAL + 128 * MSX_CART_SLOTS && !sp_has_rom((a - A_SPECIAL) % 128)) return 0;   /* 3.2.14 MED-10: 롬이 없으면 흐리게 */
+    if (a >= A_SPECIAL && a < A_SPECIAL + 128 * MSX_CART_SLOTS && x86_cart_in_other_slot((a - A_SPECIAL) / 128, (a - A_SPECIAL) % 128)) return 0;
     switch (a) {
     case A_NOT_YET: return 0;
     case A_MUTE: return muted ? 2 : 1;
@@ -2610,7 +2721,7 @@ static int action_state(int a)
     case A_DISK_RESET_AFTER: return disk_reset_after_insert ? 2 : 1;
     case A_INFO_CART1: case A_INFO_CART2: case A_INFO_VOLUME: case A_INFO_MACHINE: case A_INFO_DISKA: case A_INFO_DISKB: case A_INFO_TAPE: return 3;
     case A_TAPE_EJECT: case A_TAPE_REWIND: return M->tape ? 1 : 0;
-    case A_EJECT_ALL: { int any = M->tape ? 1 : 0; for (int n = 0; n < 5; n++) if (M->cart[n].present) any = 1; if (M->fdc_kind && (disk_size[0] || disk_size[1])) any = 1; if (!vhd_any() && (hd_secs || hd2_secs)) any = 1; return any; }   /* 5.3.31 */
+    case A_EJECT_ALL: { int any = M->tape ? 1 : 0; for (int n = 0; n < MSX_CART_SLOTS; n++) if (M->cart[n].present) any = 1; if (M->fdc_kind && (disk_size[0] || disk_size[1])) any = 1; if (!vhd_any() && (hd_secs || hd2_secs)) any = 1; return any; }   /* 5.3.31 */
     case A_TAPE_INSERT: case A_TAPE_NEW: return tape_slot() ? 1 : 0;   /* 5.2.36 */
     case A_HD_INSERT: return P.hd_open && !vhd_any() ? 1 : 0;      /* 3.8.2: 가상 하드가 잡혀 있으면 이미지 삽입 불가 */
     case A_HD_EJECT: return hd_secs && !vhd_any() ? 1 : 0;
@@ -2628,8 +2739,8 @@ static int action_state(int a)
     case A_CART2_EJECT: return M->cart[1].present ? 1 : 0;
     case A_CART3_EJECT: return M->cart[2].present ? 1 : 0;
     case A_CART4_EJECT: return M->cart[3].present ? 1 : 0;
-    case A_CART5_EJECT: return M->cart[4].present ? 1 : 0;
-    case A_INFO_CART3: case A_INFO_CART4: case A_INFO_CART5: return 3;
+    case A_CART5_EJECT: case A_CART6_EJECT: case A_CART7_EJECT: case A_CART8_EJECT: return M->cart[cart_index_of_action(cart_eject_action, a)].present ? 1 : 0;
+    case A_INFO_CART3: case A_INFO_CART4: case A_INFO_CART5: case A_INFO_CART6: case A_INFO_CART7: case A_INFO_CART8: return 3;
     default: return 1;
     }
 }
@@ -2659,6 +2770,9 @@ static Menu sp_menu[MSX_CART_SLOTS][SPG_N];
 #define m_special3 sp_menu[2][SPG_ROOT]
 #define m_special4 sp_menu[3][SPG_ROOT]
 #define m_special5 sp_menu[4][SPG_ROOT]
+#define m_special6 sp_menu[5][SPG_ROOT]
+#define m_special7 sp_menu[6][SPG_ROOT]
+#define m_special8 sp_menu[7][SPG_ROOT]
 static void sp_menu_build(void)
 {
     for (int n = 0; n < MSX_CART_SLOTS; n++)
@@ -2699,7 +2813,7 @@ static int sp_strid(int kind)
     case 40: return S_SP_BEER; case 41: return S_SP_GIDE; case 42: return S_RAM_128K; case 43: return S_RAM_256K; case 44: return S_RAM_512K; case 45: return S_SP_GOUDA;
     case 46: return S_SP_AUDIO_CA1; case 47: return S_SP_SFG01; case 48: return S_SP_SFG05; case 49: return S_SP_VHD;
     case 50: case 54: return S_RAM_128K; case 51: case 55: return S_RAM_256K; case 52: case 56: return S_RAM_512K; case 53: case 57: return S_RAM_1M;
-    case 58: return S_SP_V9990; case 59: return S_SP_X86NET; case 60: return S_SP_A16X; case 61: return S_SP_YAM; case 62: return S_SP_HBI55; case 63: return S_SP_MFRP; case 64: return S_SP_FRSCC; case 65: return S_SP_NMS1210; case 66: return S_SP_MSXMIDI; case 67: return S_SP_X86MIDI;
+    case 58: return S_SP_V9990; case 59: return S_SP_X86NET; case 60: return S_SP_A16X; case 61: return S_SP_YAM; case 62: return S_SP_HBI55; case 63: return S_SP_MFRP; case 64: return S_SP_FRSCC; case 65: return S_SP_NMS1210; case 66: return S_SP_MSXMIDI; case 67: return S_SP_X86MIDI; case 68: return S_SP_X86WIFI;
     default: return -1;
     }
 }
@@ -2731,30 +2845,35 @@ static const char *sp_label(int label)
      { S_RECENT, A_RECENT + (k) * 8 + 5, 0, 0 }, { S_RECENT, A_RECENT + (k) * 8 + 6, 0, 0 }, { S_RECENT, A_RECENT + (k) * 8 + 7, 0, 0 })
 RECENT_MENU(m_rc0, 0); RECENT_MENU(m_rc1, 1); RECENT_MENU(m_rc2, 2); RECENT_MENU(m_rc3, 3);
 RECENT_MENU(m_rc4, 4); RECENT_MENU(m_rc5, 5); RECENT_MENU(m_rc6, 6); RECENT_MENU(m_rc7, 7);
-MENU(m_cart1, { S_INSERT, A_CART1_INSERT, 0, "LCtrl+F7" }, { S_RECENT, 0, &m_rc0, 0 }, { S_INSERT_SPECIAL, 0, &m_special1, "LCtrl+LAlt+F7" }, { S_EJECT, A_CART1_EJECT, 0, "RCtrl+F7" },
-     { S_RESET_AFTER_INSERT, A_RESET_AFTER_INSERT, 0, "LCtrl+LShift+F8" }, SEP, { S_CUR_ROM, A_INFO_CART1, 0, 0 });
-MENU(m_cart2, { S_INSERT, A_CART2_INSERT, 0, "LCtrl+F8" }, { S_RECENT, 0, &m_rc1, 0 }, { S_INSERT_SPECIAL, 0, &m_special2, "LCtrl+LAlt+F8" }, { S_EJECT, A_CART2_EJECT, 0, "RCtrl+F8" },
-     { S_RESET_AFTER_INSERT, A_RESET_AFTER_INSERT, 0, "LCtrl+LShift+F8" }, SEP, { S_CUR_ROM, A_INFO_CART2, 0, 0 });
+RECENT_MENU(m_rc8, 8); RECENT_MENU(m_rc9, 9); RECENT_MENU(m_rc10, 10);   /* 8.0.181: 카트리지 6~8 */
+MENU(m_cart1, { S_INSERT, A_CART1_INSERT, 0, 0 }, { S_RECENT, 0, &m_rc0, 0 }, { S_INSERT_SPECIAL, 0, &m_special1, 0 }, { S_EJECT, A_CART1_EJECT, 0, 0 },
+     { S_RESET_AFTER_INSERT, A_RESET_AFTER_INSERT, 0, 0 }, SEP, { S_CUR_ROM, A_INFO_CART1, 0, 0 });
+MENU(m_cart2, { S_INSERT, A_CART2_INSERT, 0, 0 }, { S_RECENT, 0, &m_rc1, 0 }, { S_INSERT_SPECIAL, 0, &m_special2, 0 }, { S_EJECT, A_CART2_EJECT, 0, 0 },
+     { S_RESET_AFTER_INSERT, A_RESET_AFTER_INSERT, 0, 0 }, SEP, { S_CUR_ROM, A_INFO_CART2, 0, 0 });
 MENU(m_cart3, { S_INSERT, A_CART3_INSERT, 0, 0 }, { S_RECENT, 0, &m_rc2, 0 }, { S_INSERT_SPECIAL, 0, &m_special3, 0 }, { S_EJECT, A_CART3_EJECT, 0, 0 },
      SEP, { S_CUR_ROM, A_INFO_CART3, 0, 0 });
 MENU(m_cart4, { S_INSERT, A_CART4_INSERT, 0, 0 }, { S_RECENT, 0, &m_rc3, 0 }, { S_INSERT_SPECIAL, 0, &m_special4, 0 }, { S_EJECT, A_CART4_EJECT, 0, 0 },
      SEP, { S_CUR_ROM, A_INFO_CART4, 0, 0 });
 MENU(m_cart5, { S_INSERT, A_CART5_INSERT, 0, 0 }, { S_RECENT, 0, &m_rc7, 0 }, { S_INSERT_SPECIAL, 0, &m_special5, 0 }, { S_EJECT, A_CART5_EJECT, 0, 0 },
      SEP, { S_CUR_ROM, A_INFO_CART5, 0, 0 });   /* 3.6.7 */
-MENU(m_diska, { S_INSERT, A_DISKA_INSERT, 0, "LCtrl+F9" }, { S_INSERT_DIR, A_DISKA_DIR, 0, 0 }, { S_RECENT, 0, &m_rc4, 0 }, { S_DISK_NEXT, A_DISKA_NEXT, 0, "LAlt+F9" }, { S_EJECT, A_DISKA_EJECT, 0, "RCtrl+F9" }, { S_WRITE_PROTECT, A_DISKA_WP, 0, 0 },
-     { S_RESET_AFTER_INSERT, A_DISK_RESET_AFTER, 0, "LCtrl+LAlt+F9" },
+#define CART_EXTRA_MENU(name, insert, rc, special, eject, info) MENU(name, { S_INSERT, insert, 0, 0 }, { S_RECENT, 0, &rc, 0 }, { S_INSERT_SPECIAL, 0, &special, 0 }, { S_EJECT, eject, 0, 0 }, SEP, { S_CUR_ROM, info, 0, 0 })
+CART_EXTRA_MENU(m_cart6, A_CART6_INSERT, m_rc8, m_special6, A_CART6_EJECT, A_INFO_CART6);   /* 8.0.181: 카트리지 6~8 (8칸 확장) */
+CART_EXTRA_MENU(m_cart7, A_CART7_INSERT, m_rc9, m_special7, A_CART7_EJECT, A_INFO_CART7);
+CART_EXTRA_MENU(m_cart8, A_CART8_INSERT, m_rc10, m_special8, A_CART8_EJECT, A_INFO_CART8);
+MENU(m_diska, { S_INSERT, A_DISKA_INSERT, 0, 0 }, { S_INSERT_DIR, A_DISKA_DIR, 0, 0 }, { S_RECENT, 0, &m_rc4, 0 }, { S_DISK_NEXT, A_DISKA_NEXT, 0, 0 }, { S_EJECT, A_DISKA_EJECT, 0, 0 }, { S_WRITE_PROTECT, A_DISKA_WP, 0, 0 },
+     { S_RESET_AFTER_INSERT, A_DISK_RESET_AFTER, 0, 0 },
      SEP, { S_CUR_DISK, A_INFO_DISKA, 0, 0 });
-MENU(m_diskb, { S_INSERT, A_DISKB_INSERT, 0, "LCtrl+F10" }, { S_INSERT_DIR, A_DISKB_DIR, 0, 0 }, { S_RECENT, 0, &m_rc5, 0 }, { S_DISK_NEXT, A_DISKB_NEXT, 0, 0 }, { S_EJECT, A_DISKB_EJECT, 0, "RCtrl+F10" }, { S_WRITE_PROTECT, A_DISKB_WP, 0, 0 },
-     { S_RESET_AFTER_INSERT, A_DISK_RESET_AFTER, 0, "LCtrl+LAlt+F9" },
+MENU(m_diskb, { S_INSERT, A_DISKB_INSERT, 0, 0 }, { S_INSERT_DIR, A_DISKB_DIR, 0, 0 }, { S_RECENT, 0, &m_rc5, 0 }, { S_DISK_NEXT, A_DISKB_NEXT, 0, 0 }, { S_EJECT, A_DISKB_EJECT, 0, 0 }, { S_WRITE_PROTECT, A_DISKB_WP, 0, 0 },
+     { S_RESET_AFTER_INSERT, A_DISK_RESET_AFTER, 0, 0 },
      SEP, { S_CUR_DISK, A_INFO_DISKB, 0, 0 });
 MENU(m_tpos, { S_TAPE_POS, A_TAPE_POS + 0, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 1, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 2, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 3, 0, 0 },
      { S_TAPE_POS, A_TAPE_POS + 4, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 5, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 6, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 7, 0, 0 },
      { S_TAPE_POS, A_TAPE_POS + 8, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 9, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 10, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 11, 0, 0 },
      { S_TAPE_POS, A_TAPE_POS + 12, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 13, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 14, 0, 0 }, { S_TAPE_POS, A_TAPE_POS + 15, 0, 0 });
-MENU(m_tape, { S_INSERT, A_TAPE_INSERT, 0, "LCtrl+F11" }, { S_RECENT, 0, &m_rc6, 0 }, { S_TAPE_NEW, A_TAPE_NEW, 0, "LCtrl+LShift+F11" }, { S_EJECT, A_TAPE_EJECT, 0, "RCtrl+F11" },
-     { S_REWIND, A_TAPE_REWIND, 0, "LCtrl+LAlt+F11" }, { S_TAPE_POSG, 0, &m_tpos, "LCtrl+LAlt+F10" },
+MENU(m_tape, { S_INSERT, A_TAPE_INSERT, 0, 0 }, { S_RECENT, 0, &m_rc6, 0 }, { S_TAPE_NEW, A_TAPE_NEW, 0, 0 }, { S_EJECT, A_TAPE_EJECT, 0, 0 },
+     { S_REWIND, A_TAPE_REWIND, 0, 0 }, { S_TAPE_POSG, 0, &m_tpos, 0 },
      SEP, { S_CUR_TAPE, A_INFO_TAPE, 0, 0 });
-MENU(m_prn, { S_PRN_OFF, A_PRN_OFF, 0, 0 }, { S_PRN_TEXT, A_PRN_TEXT, 0, 0 }, { S_PRN_RAW, A_PRN_RAW, 0, 0 }, SEP, { S_PRN_END, A_PRN_END, 0, "LCtrl+LShift+P" }, SEP, { S_PRN_POP_OFF, A_PRN_POP0, 0, 0 }, { S_PRN_POP_PAGE, A_PRN_POP1, 0, 0 }, { S_PRN_POP_IDLE, A_PRN_POP2, 0, 0 }, SEP, { S_PRN_VIEW, A_PRN_VIEW, 0, 0 }, { S_PRN_TEAR, A_PRN_TEAR, 0, 0 });   /* 3.3.0 MENU3-01 */
+MENU(m_prn, { S_PRN_OFF, A_PRN_OFF, 0, 0 }, { S_PRN_TEXT, A_PRN_TEXT, 0, 0 }, { S_PRN_RAW, A_PRN_RAW, 0, 0 }, SEP, { S_PRN_END, A_PRN_END, 0, 0 }, SEP, { S_PRN_POP_OFF, A_PRN_POP0, 0, 0 }, { S_PRN_POP_PAGE, A_PRN_POP1, 0, 0 }, { S_PRN_POP_IDLE, A_PRN_POP2, 0, 0 }, SEP, { S_PRN_VIEW, A_PRN_VIEW, 0, 0 }, { S_PRN_TEAR, A_PRN_TEAR, 0, 0 });   /* 3.3.0 MENU3-01 */
 MENU(m_hd_ins, { S_CUR_HD, A_HD_INSERT, 0, 0 }, { S_CUR_HD2, A_HD2_INSERT, 0, 0 }, SEP, { S_HD_RESET_INS, A_HD_RESET_INS, 0, 0 });   /* 3.8.2: 삽입 ▶ 마스터 / 슬레이브 */
 MENU(m_hd_ej, { S_CUR_HD, A_HD_EJECT, 0, 0 }, { S_CUR_HD2, A_HD2_EJECT, 0, 0 }, SEP, { S_HD_RESET_EJECT, A_HD_RESET_EJECT, 0, 0 });
 MENU(m_vhd, { S_VHD_TITLE, A_VHD_C, 0, 0 }, { S_VHD_TITLE, A_VHD_D, 0, 0 }, { S_VHD_TITLE, A_VHD_E, 0, 0 },
@@ -2763,60 +2882,45 @@ MENU(m_hd, { S_INSERT, 0, &m_hd_ins, 0 }, { S_EJECT, 0, &m_hd_ej, 0 }, SEP,
      { S_CUR_HD, A_INFO_HD, 0, 0 }, { S_CUR_HD2, A_INFO_HD2, 0, 0 }, SEP,
      { S_VHD_MENU, 0, &m_vhd, 0 });   /* 3.7.2 가상 하드 C~H (3.9.9: 하위 메뉴) */
 /* 3.5.0: 미디어 = 미디어 판과 같은 장치 메뉴 (키보드로는 RCtrl+RShift+D 또는 파일 → 미디어) */
-MENU(m_media, { S_CART1, 0, &m_cart1, 0 }, { S_CART2, 0, &m_cart2, 0 }, { S_CART3, 0, &m_cart3, 0 }, { S_CART4, 0, &m_cart4, 0 }, { S_CART5, 0, &m_cart5, 0 }, SEP,
+MENU(m_media, { S_CART1, 0, &m_cart1, 0 }, { S_CART2, 0, &m_cart2, 0 }, { S_CART3, 0, &m_cart3, 0 }, { S_CART4, 0, &m_cart4, 0 }, { S_CART5, 0, &m_cart5, 0 }, { S_CART6, 0, &m_cart6, 0 }, { S_CART7, 0, &m_cart7, 0 }, { S_CART8, 0, &m_cart8, 0 }, SEP,
      { S_DISK_A, 0, &m_diska, 0 }, { S_DISK_B, 0, &m_diskb, 0 }, { S_HARDDISK, 0, &m_hd, 0 }, SEP, { S_CASSETTE, 0, &m_tape, 0 },
      SEP, { S_EJECT_ALL, A_EJECT_ALL, 0, 0 });   /* 3.7.3: 하드 → 줄 → 카세트, 5.3.31: 카세트 밑 전체해제 */
-MENU(m_save, { S_QUICK_SAVE, A_QUICK_SAVE, 0, "F8" }, { S_CPU_SAVE, A_STATE_SAVE, 0, "LAlt+F8" });       /* 도구 막대 저장 단추 */
-MENU(m_load, { S_QUICK_LOAD, A_QUICK_LOAD, 0, "F7" }, { S_CPU_LOAD, A_STATE_LOAD, 0, "LAlt+F7" });       /* 도구 막대 불러오기 단추 */
-MENU(m_power, { S_FULL_RESET, A_FULL_RESET, 0, 0 }, { S_SOFT_RESET, A_SOFT_RESET, 0, 0 }, SEP, { S_REBOOT_PC, A_REBOOT, 0, "RCtrl+Pause" }, { S_EXIT, A_EXIT, 0, "LCtrl+Pause" });   /* 전원 단추 */
+MENU(m_save, { S_QUICK_SAVE, A_QUICK_SAVE, 0, 0 }, { S_CPU_SAVE, A_STATE_SAVE, 0, 0 });       /* 도구 막대 저장 단추 */
+MENU(m_load, { S_QUICK_LOAD, A_QUICK_LOAD, 0, 0 }, { S_CPU_LOAD, A_STATE_LOAD, 0, 0 });       /* 도구 막대 불러오기 단추 */
+MENU(m_power, { S_FULL_RESET, A_FULL_RESET, 0, 0 }, { S_SOFT_RESET, A_SOFT_RESET, 0, 0 }, SEP, { S_REBOOT_PC, A_REBOOT, 0, 0 }, { S_EXIT, A_EXIT, 0, 0 });   /* 전원 단추 */
 /* 3.5.0: 도구 막대·미디어 판에 있는 것(카트리지·디스크·카세트·하드 디스크 ▶, 빠른 저장·불러오기, 화면 저장)은 미디어 ▶과 막대로 */
 /* 3.6.0: 도구 막대에 있는 것을 F11 메뉴에도 (마우스 없이 키보드로 모두) */
 MENU(m_file,
-     { S_OV_MEDIA, 0, &m_media, "RCtrl+RShift+D" }, SEP,
-     { S_QUICK_SAVE, A_QUICK_SAVE, 0, "F8" }, { S_QUICK_LOAD, A_QUICK_LOAD, 0, "F7" },
-     { S_CPU_SAVE, A_STATE_SAVE, 0, "LAlt+F8" }, { S_CPU_LOAD, A_STATE_LOAD, 0, "LAlt+F7" }, SEP,
-     { S_SCREENSHOT, A_SCREENSHOT, 0, "PrtSc" }, { S_AUDIO_CAPTURE, A_AUDIO_REC, 0, "LShift+F7" }, { S_VID_REC, A_VID_REC, 0, "LShift+PrtSc" },
+     { S_OV_MEDIA, 0, &m_media, 0 }, SEP,
+     { S_QUICK_SAVE, A_QUICK_SAVE, 0, 0 }, { S_QUICK_LOAD, A_QUICK_LOAD, 0, 0 },
+     { S_CPU_SAVE, A_STATE_SAVE, 0, 0 }, { S_CPU_LOAD, A_STATE_LOAD, 0, 0 }, SEP,
+     { S_SCREENSHOT, A_SCREENSHOT, 0, 0 }, { S_AUDIO_CAPTURE, A_AUDIO_REC, 0, 0 }, { S_VID_REC, A_VID_REC, 0, 0 },
      { S_PRINTER, 0, &m_prn, 0 }, SEP,                  /* 3.7.0: 프린터는 영상 녹화 아래 */
      { S_BAS_MENU, A_BAS_CONV, 0, 0 }, SEP,
-     { S_REBOOT_PC, A_REBOOT, 0, "RCtrl+Pause" },       /* 3.7.0: 실행에서 옮김 (끝내기 위) */
-     { S_EXIT, A_EXIT, 0, "LCtrl+Pause" });
+     { S_REBOOT_PC, A_REBOOT, 0, 0 },       /* 3.7.0: 실행에서 옮김 (끝내기 위) */
+     { S_EXIT, A_EXIT, 0, 0 });
 MENU(m_speed, { S_SPEED_NORMAL, A_SPEED_NORMAL, 0, 0 }, { S_OV_X2, A_SPEED_2X, 0, 0 }, { S_OV_X4, A_SPEED_4X, 0, 0 },
-     { S_SPEED_MAX_ON, A_SPEED_MAX, 0, "LCtrl+LShift+M" }, SEP,
-     { S_SPEED_UP, A_SPEED_UP, 0, "LShift+F12" }, { S_SPEED_DOWN, A_SPEED_DOWN, 0, "LShift+F11" });
+     { S_SPEED_MAX_ON, A_SPEED_MAX, 0, 0 }, SEP,
+     { S_SPEED_UP, A_SPEED_UP, 0, 0 }, { S_SPEED_DOWN, A_SPEED_DOWN, 0, 0 });
 MENU(m_run,
      { S_OV_MACHSEL, A_MACHINE, 0, 0 }, SEP,
-     { S_RUN_PAUSE, A_RUN_PAUSE, 0, "F9" }, SEP,
-     { S_HARD_RESET, A_HARD_RESET, 0, "F12" }, { S_SOFT_RESET, A_SOFT_RESET, 0, "LCtrl+F12" }, { S_FULL_RESET, A_FULL_RESET, 0, "LCtrl+LAlt+F12" }, { S_RESET_CTRL, A_RESET_CTRL, 0, "RCtrl+F12" });
-MENU(m_sound, { S_SOUND_SET, A_PROPS_SOUND, 0, "RShift+F8" }, SEP,
-     { S_VOL_UP, A_VOL_UP, 0, "LAlt+↑" }, { S_VOL_DOWN, A_VOL_DOWN, 0, "LAlt+↓" }, { S_MUTE, A_MUTE, 0, "LAlt+↑↓" }, SEP, { S_VOLUME, A_INFO_VOLUME, 0, 0 });
-MENU(m_lang, { S_LANG_KO, A_LANG_KO, 0, 0 }, { S_LANG_EN, A_LANG_EN, 0, 0 }, { S_LANG_JA, A_LANG_JA, 0, 0 }, SEP,
-     { S_LANG_DE, A_LANG_DE, 0, 0 }, { S_LANG_FR, A_LANG_FR, 0, 0 }, { S_LANG_ES, A_LANG_ES, 0, 0 }, { S_LANG_SV, A_LANG_SV, 0, 0 },
-     { S_LANG_RU, A_LANG_RU, 0, 0 }, { S_LANG_PT, A_LANG_PT, 0, 0 }, { S_LANG_ET, A_LANG_ET, 0, 0 }, SEP, { S_LANG_AR, A_LANG_AR, 0, 0 });
-MENU(m_netnone, { S_NET_NONE, 0, 0, 0 });   /* 랜카드가 없을 때 네트워크를 누르면 나오는 작은 메뉴 */
+     { S_RUN_PAUSE, A_RUN_PAUSE, 0, 0 }, SEP,
+     { S_HARD_RESET, A_HARD_RESET, 0, 0 }, { S_SOFT_RESET, A_SOFT_RESET, 0, 0 }, { S_FULL_RESET, A_FULL_RESET, 0, 0 }, { S_RESET_CTRL, A_RESET_CTRL, 0, 0 });
+MENU(m_sound, { S_SOUND_SET, A_PROPS_SOUND, 0, 0 }, SEP,
+     { S_VOL_UP, A_VOL_UP, 0, 0 }, { S_VOL_DOWN, A_VOL_DOWN, 0, 0 }, { S_MUTE, A_MUTE, 0, 0 }, SEP, { S_VOLUME, A_INFO_VOLUME, 0, 0 });
 MENU(m_net, { S_NET_WIFI, A_NET_WIFI, 0, 0 }, { S_NET_WIRED, A_NET_WIRED, 0, 0 });   /* 옵션 > 네트워크 ▶ 무선 네트워크 / 유선 네트워크 */
-MENU(m_options, { S_EMULATION, A_PROPS_EMU, 0, "RShift+F6" }, { S_M_NETWORK, 0, &m_net, 0 },   /* 에뮬레이션 바로 밑. 랜카드가 있으면 창, 없으면 "네트워크 없음" 작은 메뉴 */ { S_VIDEO, A_PROPS_VIDEO, 0, "RShift+F7" },
-     { S_EFFECTS, A_PROPS_EFFECTS, 0, "RShift+F10" },   /* 3.6.1: 모니터 유형·스캔라인은 효과 창 안 항목으로 (메뉴로는 넣지 않음) */ { S_SOUND, 0, &m_sound, 0 }, { S_OUTPUT, A_PROPS_OUTPUT, 0, 0 }, { S_MIDI, A_PROPS_MIDI, 0, "RShift+F11" },
-     SEP, { S_LANGUAGE, A_LANG_WIN, 0, "RCtrl+RShift+L" });   /* 탭 없이 항목마다 자기 창 */
-MENU(m_tools, { S_MACHINE_EDITOR, A_MACHINE_EDIT, 0, "RCtrl+RShift+M" }, { S_SHORTCUT_EDITOR, A_SC_EDIT, 0, "RCtrl+RShift+S" }, { S_KEYMAP_EDITOR, A_KEYMAP_EDIT, 0, 0 }, SEP, { S_MIXER_MENU, A_PROPS_MIX, 0, "LCtrl+LAlt+M" }, { S_MIDI_MIXER_MENU, A_MIDI_MIX, 0, "LCtrl+F12" }, { S_INPUT_DEV, A_PROPS_KB, 0, "RCtrl+RShift+K" });   /* 4.0: 키보드·마우스·조이스틱을 입력장치 한 창(탭 3개)으로 */
-MENU(m_system, { S_SYSVIEW, A_SYSVIEW, 0, "RCtrl+RShift+V" }, { S_DISK_COPY, A_DISK_COPY, 0, 0 }, SEP, { S_IMAGE_MAKE, A_IMAGE_MAKE, 0, 0 }, { S_USB_GROW, A_USB_GROW, 0, 0 }, { S_DIAG, A_DIAG, 0, 0 });   /* 8.0.36: 시스템 보기·파일 관리자 | 이미지 만들기·USB 전체 용량·진단정보 */
-MENU(m_help, { S_HELP_MENU, A_HELP, 0, 0 }, { S_M_SYSTEM, 0, &m_system, 0 }, SEP, { S_ABOUT, A_ABOUT, 0, "RCtrl+F6" });   /* 3.0.2: 도움말, 시스템 ▶ */
+MENU(m_options, { S_EMULATION, A_PROPS_EMU, 0, 0 }, { S_M_NETWORK, 0, &m_net, 0 },   /* 에뮬레이션 바로 밑. 랜카드가 있으면 창, 없으면 "네트워크 없음" 작은 메뉴 */ { S_VIDEO, A_PROPS_VIDEO, 0, 0 },
+     { S_EFFECTS, A_PROPS_EFFECTS, 0, 0 },   /* 3.6.1: 모니터 유형·스캔라인은 효과 창 안 항목으로 (메뉴로는 넣지 않음) */ { S_SOUND, 0, &m_sound, 0 }, { S_OUTPUT, A_PROPS_OUTPUT, 0, 0 }, { S_MIDI, A_PROPS_MIDI, 0, 0 },
+     SEP, { S_LANGUAGE, A_LANG_WIN, 0, 0 });   /* 탭 없이 항목마다 자기 창 */
+MENU(m_tools, { S_MACHINE_EDITOR, A_MACHINE_EDIT, 0, 0 }, { S_SHORTCUT_EDITOR, A_SC_EDIT, 0, 0 }, { S_KEYMAP_EDITOR, A_KEYMAP_EDIT, 0, 0 }, SEP, { S_MIXER_MENU, A_PROPS_MIX, 0, 0 }, { S_MIDI_MIXER_MENU, A_MIDI_MIX, 0, 0 }, { S_INPUT_DEV, A_PROPS_KB, 0, 0 });   /* 4.0: 키보드·마우스·조이스틱을 입력장치 한 창(탭 3개)으로 */
+MENU(m_system, { S_SYSVIEW, A_SYSVIEW, 0, 0 }, { S_DISK_COPY, A_DISK_COPY, 0, 0 }, SEP, { S_IMAGE_MAKE, A_IMAGE_MAKE, 0, 0 }, { S_USB_GROW, A_USB_GROW, 0, 0 }, { S_DIAG, A_DIAG, 0, 0 });   /* 8.0.36: 시스템 보기·파일 관리자 | 이미지 만들기·USB 전체 용량·진단정보 */
+MENU(m_help, { S_HELP_MENU, A_HELP, 0, 0 }, { S_M_SYSTEM, 0, &m_system, 0 }, SEP, { S_ABOUT, A_ABOUT, 0, 0 });   /* 3.0.2: 도움말, 시스템 ▶ */
 
-/* 네트워크 메뉴는 네트워크 카드(Insert Special > Network(UNAPI) > X86Network)를 꽂았을 때만 막대에 나타난다 */
+/* 네트워크 메뉴는 네트워크 카드(Insert Special > X86MSX > X86Ethernet 또는 x86wifi)를 꽂았을 때만 막대에 나타난다 */
 #define BAR_MAX 6
 static int bar_n = 5;
 static const Menu *bar_menus[BAR_MAX] = { &m_file, &m_run, &m_options, &m_tools, &m_help };
 static StrId bar_label[BAR_MAX] = { S_M_FILE, S_M_RUN, S_M_OPTIONS, S_M_TOOLS, S_M_HELP };
-static void bar_rebuild(int net)
-{
-    int n = 0;
-    bar_menus[n] = &m_file; bar_label[n++] = S_M_FILE;
-    bar_menus[n] = &m_run; bar_label[n++] = S_M_RUN;
-    bar_menus[n] = &m_options; bar_label[n++] = S_M_OPTIONS;
-    (void)net;                                          /* 네트워크 대메뉴는 두지 않는다 (옵션 > 네트워크, 카드를 꽂았을 때만 보임) */
-    bar_menus[n] = &m_tools; bar_label[n++] = S_M_TOOLS;
-    bar_menus[n] = &m_help; bar_label[n++] = S_M_HELP;
-    bar_n = n;
-}
 
 /* 메뉴 상태 */
 static int bar_sel;
@@ -2850,6 +2954,17 @@ static int browse_imgdir(void);
 static const char *item_text(const MenuItem *it, char *buf, int max)
 {
     if (it->label >= SPL_KIND) return sp_label(it->label);   /* 5.2.44 특수 카트리지 표 */
+    for (int k = 0; k < MSX_CART_SLOTS; k++) {   /* 8.0.173: 파일 → 미디어의 카트리지 줄 = 실제 슬롯 번호 ("SLOT1-0", "SLOT2") */
+        const Menu *cart_menus[MSX_CART_SLOTS] = { &m_cart1, &m_cart2, &m_cart3, &m_cart4, &m_cart5, &m_cart6, &m_cart7, &m_cart8 };
+        const StrId cart_labels[MSX_CART_SLOTS] = { S_CART1, S_CART2, S_CART3, S_CART4, S_CART5, S_CART6, S_CART7, S_CART8 };
+        if (it->sub != cart_menus[k] || it->label != (int)cart_labels[k]) continue;
+        char slot_number[8];
+        mdp_slot_name(k, slot_number, sizeof slot_number);
+        copy_str(buf, max, T(S_OV_GRP_CART));   /* "카트리지" */
+        str_append(buf, max, " SLOT");
+        str_append(buf, max, slot_number);
+        return buf;
+    }
     if (it->action >= A_TAPE_POS && it->action < A_TAPE_POS + TAPE_POS_N) {   /* 3.2.1: 테이프 안 파일 */
         int i = it->action - A_TAPE_POS;
         buf[0] = 0;
@@ -2875,12 +2990,12 @@ static const char *item_text(const MenuItem *it, char *buf, int max)
         str_append(buf, max, vhd_dir[i][0] ? vhd_dir[i] : T(S_VHD_NONE));
         return buf;
     }
-    if (it->action >= A_RECENT && it->action < A_RECENT + 8 * 8) {   /* 최근 파일: 이름 */
+    if (it->action >= A_RECENT && it->action < A_RECENT + RECENT_MENUS * 8) {   /* 최근 파일: 이름 */
         int k = (it->action - A_RECENT) / 8, i = (it->action - A_RECENT) % 8;
         copy_str(buf, max, rc_name[recent_kind_of(k)][i]);
         return buf;
     }
-    if (it->action != A_INFO_CART1 && it->action != A_INFO_CART2 && it->action != A_INFO_CART3 && it->action != A_INFO_CART4 && it->action != A_INFO_CART5 &&
+    if (cart_index_of_action(cart_info_action, it->action) < 0 &&
         it->action != A_INFO_VOLUME && it->action != A_INFO_MACHINE &&
         it->action != A_INFO_DISKA && it->action != A_INFO_DISKB && it->action != A_INFO_TAPE && it->action != A_INFO_HD && it->action != A_INFO_HD2) return T(it->label);
     buf[0] = 0;
@@ -2906,7 +3021,7 @@ static const char *item_text(const MenuItem *it, char *buf, int max)
         if (muted) str_append(buf, max, T(S_MUTED));
         else { num_append(buf, max, (uint32_t)volume, 0, ' '); str_append(buf, max, "%"); }
     } else {
-        const char *n = cart_name[it->action == A_INFO_CART1 ? 0 : it->action == A_INFO_CART2 ? 1 : it->action == A_INFO_CART3 ? 2 : it->action == A_INFO_CART4 ? 3 : 4];
+        const char *n = cart_name[cart_index_of_action(cart_info_action, it->action)];
         str_append(buf, max, n[0] ? n : T(S_NONE));
     }
     return buf;
@@ -2935,24 +3050,26 @@ static int item_state(const MenuItem *it)
         int k = (it->sub->items[0].action - A_RECENT) / 8;
         return rc_path[recent_kind_of(k)][0][0] ? 1 : 0;
     }
-    if (it->action >= A_RECENT && it->action < A_RECENT + 8 * 8) {
+    if (it->action >= A_RECENT && it->action < A_RECENT + RECENT_MENUS * 8) {
         int k = (it->action - A_RECENT) / 8, i = (it->action - A_RECENT) % 8;
         if (!rc_path[recent_kind_of(k)][i][0] || i >= recent_max) return -1;   /* 빈 줄·정한 수 넘는 줄은 숨김 */
         if (k >= 4 && k < 6 && disk_drives() < k - 3) return 0;
         return 1;
     }
-    if (it->label == S_NET_WIFI && it->action == A_NET_WIFI) return net_has_wifi() && net_cart_present() ? 1 : -1;     /* 무선 장치가 있고 네트워크 카트리지가 꽂혀 있을 때만 보임 (뺐으면 메뉴도 사라짐) */
-    if (it->label == S_NET_WIRED && it->action == A_NET_WIRED) return net_has_wired() && net_cart_present() ? 1 : -1;   /* 유선 장치(PCI·USB 랜)가 있고 카트리지가 꽂혀 있을 때만 */
-    if (it->label == S_SP_NET && it->action == A_NET) return net_cart_present() ? 1 : -1;   /* 네트워크 카드(Insert Special > Network(UNAPI) > X86Network)를 꽂았을 때만 보임 */
+    if (it->label == S_NET_WIFI && it->action == A_NET_WIFI) return net_has_wifi() && net_wifi_cart_present() ? 1 : -1;     /* 무선 장치가 있고 네트워크 카트리지가 꽂혀 있을 때만 보임 (뺐으면 메뉴도 사라짐) */
+    if (it->label == S_NET_WIRED && it->action == A_NET_WIRED) return net_has_wired() && net_wired_cart_present() ? 1 : -1;   /* 유선 장치(PCI·USB 랜)가 있고 카트리지가 꽂혀 있을 때만 */
+    if (it->label == S_SP_NET && it->action == A_NET) return net_cart_present() ? 1 : -1;   /* 네트워크 카드(Insert Special > X86MSX > X86Ethernet 또는 x86wifi)를 꽂았을 때만 보임 */
+    if (it->action == A_PROPS_MIDI || it->action == A_MIDI_MIX) return midi_cart_present() ? 1 : -1;   /* 8.0.75: MIDI 카트리지를 꽂지 않았으면 MIDI 메뉴·MIDI 믹서는 안 보임 (GT 처럼 내장 단자가 있으면 보임) */
     if (it->label == S_NET_NONE) return 0;               /* 흐리게 (안내만) */
-    if (it->label == S_CART5) return M->cart_slot[4] >= 0 ? 1 : -1;   /* 3.6.7 */
+    if (it->label == S_CART5 || it->label == S_CART6 || it->label == S_CART7 || it->label == S_CART8)   /* 3.6.7, 8.0.181: 이 기종·확장에 그 칸이 있을 때만 */
+        return M->cart_slot[it->label == S_CART5 ? 4 : it->label == S_CART6 ? 5 : it->label == S_CART7 ? 6 : 7] >= 0 ? 1 : -1;
     if (it->label == S_CART3 || it->label == S_CART4) return slot_expand || M->cart_slot[it->label == S_CART3 ? 2 : 3] >= 0 ? 1 : -1;   /* 3.3.1: 기종의 C·D */
     if (it->label == S_CASSETTE) return tape_slot() ? 1 : 0;   /* 없는 자리는 흐리게 */
     if (it->label == S_DISK_A) return disk_drives() >= 1 ? 1 : 0;
     if (it->label == S_DISK_B) return disk_drives() >= 2 ? 1 : 0;
     if (it->sub == &m_hd_ins) return action_state(A_HD_INSERT) || action_state(A_HD2_INSERT) ? 1 : 0;   /* 3.8.5: 가상 하드가 잡혀 있으면 삽입 ▶ 전체가 흐려지고 ▶ 도 안 열림 */
     if (it->sub == &m_hd_ej) return vhd_any() ? 0 : 1;   /* 3.9.0: 꺼낸 뒤 다시 시작 단추가 안에 있어 평소엔 늘 열림. 3.9.5: 가상 하드가 잡혀 있으면 삽입처럼 흐리게 */
-    if (it->sub == &m_net) return (net_has_wifi() || net_has_wired()) && net_cart_present() ? 1 : -1;   /* 무선·유선 둘 다 없으면, 5.2.108: 카트리지가 없어도 네트워크 메뉴 자체가 안 나온다 */
+    if (it->sub == &m_net) return ((net_has_wifi() && net_wifi_cart_present()) || (net_has_wired() && net_wired_cart_present())) ? 1 : -1;   /* 무선·유선 둘 다 없으면, 5.2.108: 카트리지가 없어도 네트워크 메뉴 자체가 안 나온다 */
     if (it->sub) return 1;
     return action_state(it->action);
 }
@@ -3294,7 +3411,7 @@ static void dc_remember(void);
 static void dg_color_restore(void);
 static void dialog_back(void)
 {
-    fe_trace("dialog back");
+   
     if (dialog == 2) dg_color_restore();                 /* 색 시험이 올린 DAC 되돌림 */
     if (dialog == 13) dc_remember();                    /* 4.0.31: 어떻게 나가도 위치 기억 */
     input_init(&in);
@@ -3330,7 +3447,7 @@ static void menu_close_all(void)
 {
     if (dialog == 13) dc_remember();
     input_init(&in);                                    /* 창이 열린 동안 뗀 키(Shift 등)가 눌린 채로 남지 않게 */
-    fe_trace("menu close all");
+   
     bar_visible = 0;
     depth = 0;
     dialog = 0;
@@ -3476,7 +3593,7 @@ static int file_type_sz(const char *n, uint32_t size)
     if (ext_is(n, "rom", "mx1", "mx2") || ext_is(n, "ri", 0, 0)) return FT_ROM;
     if (ext_is(n, "dsk", "di1", "di2") || ext_is(n, "360", "720", 0)) return size > DISK_MAX ? FT_DISKIMG : (size && size <= 368640u) ? FT_DISK360 : size > 737280u ? FT_DISK144 : FT_DISK720;   /* 1.44 MB 넘는 디스크 = 하드, 360 KB 이하 = 5.25인치, 720 KB 넘으면 1.44 MB(2HD) */
     if (ext_is(n, "hdd", "ide", 0)) return FT_HD;
-    if (ext_is(n, "zip", 0, 0)) return FT_ZIP;
+    if (ext_is(n, "zip", "arj", "pma") || ext_is(n, "lzh", "lha", "lzs")) return FT_ZIP;   /* 8.0.44: .ARJ·.PMA 도 zip 처럼 안을 들여다봄 (zipx.c → arcx.c) */
     if (ext_is(n, "cas", 0, 0)) return FT_TAPE;
     if (ext_is(n, "sta", 0, 0)) return FT_STATE;
     if (ext_is(n, "sf2", 0, 0)) return FT_SOUND;
@@ -3484,7 +3601,6 @@ static int file_type_sz(const char *n, uint32_t size)
     if (ext_is(n, "avi", 0, 0)) return FT_MOVIE;
     return FT_OTHER;
 }
-static int file_type(const char *n) { return file_type_sz(n, 0); }
 static void file_look(int ft, int *icon, uint8_t *col)
 {
     switch (ft) {
@@ -3515,7 +3631,7 @@ static int vb_ask, vb_form;
 static int vb_key(int key);
 static void vb_scan(void);
 static void vb_row_info(int it, uint32_t xt, uint32_t xs, uint32_t xe, uint32_t y, uint32_t rh, int sel);
-static void vb_draw_pop(uint32_t X, uint32_t W, uint32_t py0);
+static void vb_draw_pop(uint32_t X, uint32_t W, uint32_t py0, uint32_t top, uint32_t bottom);
 static int browse_tape(void) { return browse_slot == 12; }
 static int browse_hd(void) { return browse_slot == 13 || browse_slot == 17; }   /* 17 = 슬레이브 (3.4.3) */
 static int browse_bas(void) { return browse_slot == 14 || browse_slot == 15; }   /* 3.2.7 BASIC 텍스트 (14 넣기, 15 저장) */
@@ -3545,6 +3661,7 @@ static const char *browse_root(void)
 {
     if (browse_vhd()) return VHD_DEF;                   /* 4.0.13: VMFolder는 자기 자신, 나머지(DISK·CAS·HARDDISK·BASIC·ROMS)는 Storage Device가 뿌리 */
     if (browse_dir() || browse_imgdir()) return 0;      /* 이미지 파일 관리는 예전 그대로 (제한 없음) */
+    if (cur_path[0] && cur_path[0] != '0') return 0;    /* 8.0.79: 시스템 USB가 아닌 다른 USB(1:\ …)는 USB 전체가 뿌리 — 그 위는 드라이브 목록 */
     return FE_STORE;
 }
 /* 4.0.13: 기준 폴더 = 각 창이 처음 열리는 곳 (뿌리와 다름). 기억한 폴더가 뿌리 밖이거나 없어졌을 때도 여기로 */
@@ -3562,6 +3679,14 @@ static void browse_home(char *path, int pm, char *disp, int dm)
     }
 }
 static int at_root(void) { const char *r = browse_root(); return r && !name_cmp(cur_path, r); }
+/* 8.0.79: 드라이브 목록 ("" 경로) — USB가 둘 이상이면 시스템 USB의 맨 위(Storage Device)에서도 ".."로 올라가 다른 USB를 고름. 가상 하드(VMFolder)는 제외 */
+static int drv_multi;
+static void drv_check(void)
+{
+    static FeDirEntry t[2];
+    drv_multi = !browse_vhd() && (P.list_dir_all ? P.list_dir_all("", t, 2) : P.list_dir ? P.list_dir("", t, 2) : -1) >= 2;
+}
+static int can_up(void) { return cur_path[0] && (!at_root() || drv_multi); }
 static int path_under(const char *p, const char *r)
 {
     int n = (int)strlen(r);
@@ -3701,7 +3826,8 @@ static void load_dir_win(const char *sel_key)
     nent = k;
     if (browse_vhd()) vb_scan();
     nlist = 0;
-    if (cur_path[0] && !at_root()) list[nlist++] = ITEM_UP;
+    if (cur_path[0] && at_root()) drv_check(); else drv_multi = 0;
+    if (can_up()) list[nlist++] = ITEM_UP;
     int start = nlist;
     for (int i = 0; i < nent; i++) list[nlist++] = i;
     for (int gap = (nlist - start) / 2; gap > 0; gap /= 2)      /* 4.0.124: 셸 정렬 (항목이 많아도 빠르게) */
@@ -3758,7 +3884,7 @@ static int brw_move(int dir)
         if (nent > 0) break;
     }
     if (nent <= 0 || brw_base == sb) { int ms = menu_sel, mt = menu_top, moved = brw_base != sb || nent <= 0; klog_note(moved ? "목록 끝: 다음 쪽이 비어 되돌림" : "목록 끝: 다음 쪽 없음 (선택 유지)");   /* 끝에서 처음으로 가는 현상 추적 */ brw_base = sb; brw_depth = sd; if (moved) load_dir_win(0); menu_sel = ms; menu_top = mt; if (menu_sel > nlist - 1) menu_sel = nlist > 0 ? nlist - 1 : 0; return 0; }   /* 끝에서 더 내려도 처음으로 돌아가지 않음 (선택 유지) */
-    int first = (cur_path[0] && !at_root()) ? 1 : 0;
+    int first = can_up() ? 1 : 0;
     menu_sel = dir > 0 ? (first < nlist ? first : 0) : (nlist ? nlist - 1 : 0);
     menu_top = 0;
     klog_note("목록: 다음/이전 쪽으로 넘어감");   /* 5.2.139 */
@@ -3771,10 +3897,15 @@ static int brw_move(int dir)
 static void enter_dir(int e)
 {
     char np[PATH_MAX_FE];
+    int from_drives = !cur_path[0];                     /* 8.0.79: 드라이브 목록에서 들어가는 중 */
     entry_path(e, np, sizeof np);
     copy_str(cur_path, sizeof cur_path, np);
     if (cur_disp[0]) str_append(cur_disp, sizeof cur_disp, " > ");
-    str_append(cur_disp, sizeof cur_disp, entries[e].key[0] ? entries[e].key : entries[e].name);   /* 3.4.7: 긴 이름 그대로 */
+    str_append(cur_disp, sizeof cur_disp, (from_drives || !entries[e].key[0]) ? entries[e].name : entries[e].key);   /* 3.4.7: 긴 이름 그대로 (드라이브는 "Drive 2 라벨 용량") */
+    if (from_drives) {
+        const char *rt = browse_root();                 /* 시스템 USB를 고르면 이 창의 기준 폴더로 (ROMS·CAS 등 뿌리 밖으로 안 나감) */
+        if (rt && !path_under(cur_path, rt)) browse_home(cur_path, sizeof cur_path, cur_disp, sizeof cur_disp);
+    }
     load_dir(0);
 }
 
@@ -3783,7 +3914,13 @@ static void go_up(void)
 {
     if (zin) { zin_leave(); return; }
     if (!cur_path[0]) return;
-    if (at_root()) return;                              /* 3.7.2: VMFolder 위로는 안 감. 3.9.5: 롬 ROMS·카세트 CAS·하드 HARDDISK·BASIC도 */
+    if (at_root() && !drv_multi) return;                /* 3.7.2: VMFolder 위로는 안 감. 3.9.5: 롬 ROMS·카세트 CAS·하드 HARDDISK·BASIC도 */
+    if (at_root()) {                                    /* 8.0.79: USB가 여럿이면 드라이브 목록으로 (지금 있던 드라이브에 커서) */
+        char dk[4] = { cur_path[0], ':', 0, 0 };
+        cur_path[0] = 0; cur_disp[0] = 0;
+        load_dir(dk);
+        return;
+    }
     int n = 0, last = 0;
     while (cur_path[n]) { if (cur_path[n] == '\\') last = n + 1; n++; }
     char from[FE_KEY_MAX];
@@ -3796,7 +3933,7 @@ static void go_up(void)
 }
 
 /* 3.2.0 MED-05: 롬 파일 읽기 — .zip이면 작업 메모리(앞 10 MiB, 상태 저장 자리)에 읽고 안의 첫 롬을 꺼냄 */
-static int is_zip(const char *p) { int n = (int)strlen(p); return n > 4 && p[n - 4] == '.' && (p[n - 3] | 32) == 'z' && (p[n - 2] | 32) == 'i' && (p[n - 1] | 32) == 'p'; }
+static int is_zip(const char *p) { int n = (int)strlen(p); if (n <= 4 || p[n - 4] != '.') return 0; int a = p[n - 3] | 32, b = p[n - 2] | 32, c = p[n - 1] | 32; return (a == 'z' && b == 'i' && c == 'p') || (a == 'a' && b == 'r' && c == 'j') || (a == 'p' && b == 'm' && c == 'a') || (a == 'l' && b == 'z' && (c == 'h' || c == 's')) || (a == 'l' && b == 'h' && c == 'a'); }   /* 8.0.44: .arj·.pma·.lzh·.lha·.lzs 도 같은 길 */
 static int rom_nth = -1;                                /* 4.0.34: zip 안 몇 번째 롬인지 (-1 = 첫 롬) */
 static int read_rom_file(const char *path, uint8_t *buf, uint32_t max, uint32_t *size)
 {
@@ -3983,6 +4120,16 @@ static void open_browser(int slot)
     else if (browse_disk()) { copy_str(cur_path, sizeof cur_path, disk_dir); copy_str(cur_disp, sizeof cur_disp, disk_dir_disp); }
     else if (browse_vhd()) { copy_str(cur_path, sizeof cur_path, vbr_dir); copy_str(cur_disp, sizeof cur_disp, vbr_dir_disp); }
     else { copy_str(cur_path, sizeof cur_path, rom_path); copy_str(cur_disp, sizeof cur_disp, rom_disp); }
+    if (!browse_vhd() && cur_path[0] && cur_path[0] != '0') {   /* 8.0.79: 기억한 폴더가 다른 USB(N:\…)면 그 번호의 드라이브가 같은 USB(이름·용량)인지 확인 — 다르면 기준 폴더로 */
+        static FeDirEntry dv[32];
+        int nd = P.list_dir_all ? P.list_dir_all("", dv, 32) : P.list_dir ? P.list_dir("", dv, 32) : -1, ok = 0;
+        for (int i = 0; i < nd; i++) {
+            if (dv[i].key[0] != cur_path[0] || dv[i].key[1] != ':') continue;
+            int n = (int)strlen(dv[i].name);
+            ok = !strncmp(cur_disp, dv[i].name, (size_t)n) && (!cur_disp[n] || cur_disp[n] == ' ');
+        }
+        if (!ok) { browse_home(cur_path, sizeof cur_path, cur_disp, sizeof cur_disp); toast("USB가 바뀌어 기준 폴더로 돌아갑니다", 0); }
+    }
     {   const char *rt = browse_root();                 /* 3.9.5: 기억한 폴더가 뿌리 밖이면 뿌리로 */
         if (rt && !path_under(cur_path, rt)) browse_home(cur_path, sizeof cur_path, cur_disp, sizeof cur_disp);
     }
@@ -4023,7 +4170,7 @@ static int romdb_tried;
 static void romdb_load(void);
 static void pf_text(char *t, int n, int worst)
 {
-    static const char *const nm[PF_N + 1] = { "core", "audio", "midi", "video", "io", "poll", "blit", "usbw", "idle", "file", "mouse", "synth", "other" };
+    const char *const *nm = pf_names;
     t[0] = 0;
     for (int k = 0; k < PF_N + (worst ? 0 : 1); k++) {
         str_append(t, n, nm[k]); str_append(t, n, " ");
@@ -4303,6 +4450,7 @@ hd_cart_ok:
         settings_changed();
         menu_close_all();
         if (hd_reset_insert) power_on(); else full_redraw();   /* 3.9.8: 삽입 후 다시 시작 설정 (꺼두면 그대로 계속) */
+        dos2_mapper_hint();                             /* 8.0.65 */
     }
     return 0;
 }
@@ -4484,6 +4632,7 @@ static void cart_insert_file(int n, const char *path, const FeDirEntry *xe)
             else if (!strcmp(t, "NettouYakyuu")) mt = MAPPER_NETTOU;            /* 3.0.10 */
             else if (!strcmp(t, "MatraInk")) mt = MAPPER_MATRAINK;                  /* 3.9.14: 플래시 512 KiB */
             else if (!strcmp(t, "SuperPierrot")) mt = MAPPER_ASCII16;              /* 판(MR6401)은 ASCII16 */
+            else if (!strcmp(t, "HolyQuran")) mt = MAPPER_QURAN;                     /* 8.0.234: blueMSX DB 이름 (이전엔 빠져 KonamiSCC 로 꽂혔음) */
         } else if (!x->user_type) {                     /* 3.2.15: blueMSX DB에 없으면 openMSX DB(최신)에서 */
             int bt, bp;
             if (romdb_bin_find(bindb_buf, bindb_len, hex, &bt, &bp)) {
@@ -4523,7 +4672,7 @@ static void cart_insert_file(int n, const char *path, const FeDirEntry *xe)
     settings_changed();
     menu_close_all();
     after_cart_insert(n);
-    if (slot_expand && n < 4 && noexp_rom(buf, size)) { toast_ms = 6000; toast(T(S_NOEXP_ROM), 0); }   /* 5.3.41: 확장 슬롯 비지원 롬 안내 (롬은 그대로 꽂음) */
+    if (cart_in_expander(n) && noexp_rom(buf, size)) { toast_ms = 6000; toast(T(S_NOEXP_ROM), 0); }   /* 5.3.41: 확장 슬롯 비지원 롬 안내 (롬은 그대로 꽂음) */
 }
 void fe_test_hd(const char *path) { hd_insert(path, path, 1); }
 int fe_test_cart_special(int n) { return n >= 0 && n < MSX_CART_SLOTS ? cart_special[n] : -1; }   /* 3.9.4: 시험 틀 (카트리지 특수 번호) */   /* 3.7.1: 시험 틀 */
@@ -4566,7 +4715,7 @@ static int sv_demo_req;
 static int sv_tab, sv_perf_sel;                     /* 8.0.34: 시스템 보기 탭 (0 성능 / 1 배치, 8.0.36), 성능 탭에서 고른 항목 (fe_sysperf.inc) */
 static void scr_clobber_test(void) { if (P.scratch) memset(P.scratch, 0x5A, 4u << 20); }                                 /* fe_sysview.inc: 시험용 "모든 주변기기" 그림 */
 static void settings_flush(void); static int settings_dirty;
-void fe_test_action(const char *n) { if (!strcmp(n, "inisave")) { settings_dirty = 1; settings_flush(); return; } if (!strcmp(n, "mixall")) { mix_test_all = 1; do_action(A_PROPS_MIX); return; } if (!strcmp(n, "net")) { do_action(A_NET); return; } if (!strncmp(n, "dzip:", 5)) { insert_disk_file(0, n + 5, n + 5, 0); return; } if (!strcmp(n, "disknext")) { disk_next(0); return; } if (!strncmp(n, "tape:", 5)) { uint32_t ts = 0; char tn[64] = ""; if (!tape_load_file(n + 5, &ts, tn, sizeof tn, 1)) { copy_str(tape_path, sizeof tape_path, n + 5); copy_str(tape_name, sizeof tape_name, n + 5); msx_tape_insert(M, tape_buf, ts, TAPE_MAX); } return; } if (!strncmp(n, "mach:", 5)) { char e[96]; switch_machine(n + 5, e, sizeof e); return; } if (!strcmp(n, "sced")) { do_action(A_SC_EDIT); return; } if (!strcmp(n, "soft")) { do_action(A_SOFT_RESET); return; } if (!strcmp(n, "hard")) { do_action(A_HARD_RESET); return; } if (!strcmp(n, "prnview")) do_action(A_PRN_VIEW); if (!strcmp(n, "vhd")) do_action(A_VHD_C); if (!strcmp(n, "diskcopy")) do_action(A_DISK_COPY); else if (!strcmp(n, "redraw")) { full_redraw(); } else if (!strcmp(n, "mixer")) do_action(A_PROPS_MIX); else if (!strcmp(n, "midimix")) do_action(A_MIDI_MIX); else if (!strcmp(n, "media")) do_action(A_MEDIA); else if (!strcmp(n, "exit")) do_action(A_EXIT); else if (!strcmp(n, "reboot")) do_action(A_REBOOT); else if (!strcmp(n, "keymap")) do_action(A_KEYMAP_EDIT); else if (!strcmp(n, "about")) do_action(A_ABOUT); else if (!strcmp(n, "hdeject")) do_action(A_HD_EJECT); else if (!strcmp(n, "ejectall")) do_action(A_EJECT_ALL); else if (!strcmp(n, "rombrowse")) open_browser(0); else if (!strcmp(n, "tapebrowse")) open_browser(12); else if (!strcmp(n, "diskbrowse")) open_browser(10); else if (!strcmp(n, "hdbrowse")) open_browser(13); else if (!strcmp(n, "basbrowse")) open_browser(14); else if (!strcmp(n, "diagjoy")) open_diag(4); else if (!strcmp(n, "diag")) open_diag(0); else if (!strcmp(n, "diagsum")) open_diag(9); else if (!strcmp(n, "diagsw")) open_diag(10); else if (!strcmp(n, "diagcolor")) open_diag(8); else if (!strcmp(n, "image")) do_action(A_IMAGE_MAKE); else if (!strcmp(n, "usbgrow")) do_action(A_USB_GROW); else if (!strcmp(n, "sysview")) do_action(A_SYSVIEW); else if (!strcmp(n, "vrec")) do_action(A_VID_REC); else if (!strcmp(n, "shotfull0")) shot_full = 0; else if (!strcmp(n, "vrecn")) { shot_full = 0; do_action(A_VID_REC); } else if (!strncmp(n, "svperf", 6)) { do_action(A_SYSVIEW); sv_tab = 0; sv_perf_sel = n[6] ? n[6] - '0' : 0; } else if (!strcmp(n, "svshot")) { sv_demo_req = 1; do_action(A_SYSVIEW); scr_clobber_test(); do_action(A_SCREENSHOT); }   /* 5.3.25 시험: 창을 연 채 스크린샷이 작업 메모리 앞쪽을 덮어쓴 것처럼 */ else if (!strcmp(n, "svdemo")) { sv_demo_req = 1; do_action(A_SYSVIEW); } else if (!strcmp(n, "lang")) open_langwin(); else if (!strcmp(n, "langopen")) langwin_test_open(); else if (!strncmp(n, "props:", 6)) open_props(n[6] - '0');   /* 속성 창 탭 번호로 열기 (선택형 설정 시험) */ else if (!strcmp(n, "mouseprops")) open_props(9); else if (!strcmp(n, "kbprops")) open_props(7); else if (!strcmp(n, "joyprops")) open_props(8); else if (!strcmp(n, "emuprops")) open_props(0); else if (!strcmp(n, "vidprops")) open_props(1); else if (!strcmp(n, "sndprops")) open_props(3); else if (!strcmp(n, "gfx9000")) special_apply(0, special_kind(158), 1); else if (!strncmp(n, "v9show:", 7)) { if (M->v9) { M->v9->shown = 1; M->v9->regs[15] = 1; M->v9->pal15[1] = (uint16_t)(31 << 10); } vsrc_pref = n[7] - '0' - 1; }   /* 시험 — V9990 이 초록 화면을 내보내게 하고 화면 소스를 고름 */ else if (!strncmp(n, "vsrc:", 5)) { vsrc_pref = n[5] - '0' - 1; } else if (!strncmp(n, "aspect:", 7)) { aspect_mode = n[7] - '0'; layout(); full_redraw(); }   /* 5.2.42 */ else if (!strncmp(n, "special:", 8)) { int k = 0; for (const char *q = n + 8; *q >= '0' && *q <= '9'; q++) k = k * 10 + (*q - '0'); special_apply(0, k, 1); }   /* 5.2.43 */ }   /* 3.7.0: 시험 틀 (5.2.19 vidprops·gfx9000·vsrc:0~2) */
+void fe_test_action(const char *n) { if (!strcmp(n, "exitnow")) { do_action(A_EXIT_NOW); return; } if (!strcmp(n, "resumeoff")) { resume_on = 0; resume2_on = 0; settings_dirty = 1; return; }   /* 8.0.195 시험: 켜진 채로 둘 다 끔 */ if (!strcmp(n, "medit")) { open_machines_edit(); return; }   /* 8.0.191 시험: 확인 없이 바로 끝내기 (끝낼 때 저장 시험) */ if (!strcmp(n, "inisave")) { settings_dirty = 1; settings_flush(); return; } if (!strcmp(n, "mixall")) { mix_test_all = 1; do_action(A_PROPS_MIX); return; } if (!strcmp(n, "net")) { do_action(A_NET); return; } if (!strcmp(n, "bootsetup")) { netcard_bootsetup_cb(); return; } if (!strncmp(n, "dzip:", 5)) { insert_disk_file(0, n + 5, n + 5, 0); return; } if (!strcmp(n, "disknext")) { disk_next(0); return; } if (!strncmp(n, "tape:", 5)) { uint32_t ts = 0; char tn[64] = ""; if (!tape_load_file(n + 5, &ts, tn, sizeof tn, 1)) { copy_str(tape_path, sizeof tape_path, n + 5); copy_str(tape_name, sizeof tape_name, n + 5); msx_tape_insert(M, tape_buf, ts, TAPE_MAX); } return; } if (!strncmp(n, "mach:", 5)) { char e[96]; switch_machine(n + 5, e, sizeof e); return; } if (!strcmp(n, "sced")) { do_action(A_SC_EDIT); return; } if (!strcmp(n, "soft")) { do_action(A_SOFT_RESET); return; } if (!strcmp(n, "hard")) { do_action(A_HARD_RESET); return; } if (!strcmp(n, "prnview")) do_action(A_PRN_VIEW); if (!strcmp(n, "vhd")) do_action(A_VHD_C); if (!strcmp(n, "diskcopy")) do_action(A_DISK_COPY); else if (!strcmp(n, "redraw")) { full_redraw(); } else if (!strcmp(n, "mixer")) do_action(A_PROPS_MIX); else if (!strcmp(n, "midimix")) do_action(A_MIDI_MIX); else if (!strcmp(n, "media")) do_action(A_MEDIA); else if (!strcmp(n, "exit")) do_action(A_EXIT); else if (!strcmp(n, "reboot")) do_action(A_REBOOT); else if (!strcmp(n, "keymap")) do_action(A_KEYMAP_EDIT); else if (!strcmp(n, "about")) do_action(A_ABOUT); else if (!strcmp(n, "hdeject")) do_action(A_HD_EJECT); else if (!strcmp(n, "ejectall")) do_action(A_EJECT_ALL); else if (!strcmp(n, "rombrowse")) open_browser(0); else if (!strcmp(n, "tapebrowse")) open_browser(12); else if (!strcmp(n, "diskbrowse")) open_browser(10); else if (!strcmp(n, "hdbrowse")) open_browser(13); else if (!strcmp(n, "basbrowse")) open_browser(14); else if (!strcmp(n, "diagjoy")) open_diag(4); else if (!strcmp(n, "diag")) open_diag(0); else if (!strcmp(n, "diagsum")) open_diag(9); else if (!strcmp(n, "diagsw")) open_diag(10); else if (!strcmp(n, "diagcolor")) open_diag(8); else if (!strcmp(n, "image")) do_action(A_IMAGE_MAKE); else if (!strcmp(n, "usbgrow")) do_action(A_USB_GROW); else if (!strcmp(n, "sysview")) do_action(A_SYSVIEW); else if (!strcmp(n, "arec")) do_action(A_AUDIO_REC); else if (!strcmp(n, "vrec")) do_action(A_VID_REC); else if (!strcmp(n, "shotfull0")) shot_full = 0; else if (!strcmp(n, "vrecn")) { shot_full = 0; do_action(A_VID_REC); } else if (!strncmp(n, "svperf", 6)) { do_action(A_SYSVIEW); sv_tab = 0; sv_perf_sel = n[6] ? n[6] - '0' : 0; } else if (!strcmp(n, "svshot")) { sv_demo_req = 1; do_action(A_SYSVIEW); scr_clobber_test(); do_action(A_SCREENSHOT); }   /* 5.3.25 시험: 창을 연 채 스크린샷이 작업 메모리 앞쪽을 덮어쓴 것처럼 */ else if (!strcmp(n, "svdemo")) { sv_demo_req = 1; do_action(A_SYSVIEW); } else if (!strcmp(n, "lang")) open_langwin(); else if (!strcmp(n, "langopen")) langwin_test_open(); else if (!strncmp(n, "props:", 6)) open_props(n[6] - '0');   /* 속성 창 탭 번호로 열기 (선택형 설정 시험) */ else if (!strcmp(n, "mouseprops")) open_props(9); else if (!strcmp(n, "kbprops")) open_props(7); else if (!strcmp(n, "joyprops")) open_props(8); else if (!strcmp(n, "emuprops")) open_props(0); else if (!strcmp(n, "vidprops")) open_props(1); else if (!strcmp(n, "sndprops")) open_props(3); else if (!strcmp(n, "gfx9000")) special_apply(0, special_kind(158), 1); else if (!strncmp(n, "v9show:", 7)) { if (M->v9) { M->v9->shown = 1; M->v9->regs[15] = 1; M->v9->pal15[1] = (uint16_t)(31 << 10); } vsrc_pref = n[7] - '0' - 1; }   /* 시험 — V9990 이 초록 화면을 내보내게 하고 화면 소스를 고름 */ else if (!strncmp(n, "vsrc:", 5)) { vsrc_pref = n[5] - '0' - 1; } else if (!strncmp(n, "aspect:", 7)) { aspect_mode = n[7] - '0'; layout(); full_redraw(); }   /* 5.2.42 */ else if (!strncmp(n, "special:", 8)) { int k = 0; for (const char *q = n + 8; *q >= '0' && *q <= '9'; q++) k = k * 10 + (*q - '0'); special_apply(0, k, 1); }   /* 5.2.43 */ }   /* 3.7.0: 시험 틀 (5.2.19 vidprops·gfx9000·vsrc:0~2) */
 void fe_insert_special(int n, int kind) { if (n >= 0 && n < MSX_CART_SLOTS) do_action(SPX(n, kind)); }   /* 3.6.7: 시험 틀용 */
 void fe_insert_rom(int n, const char *path)           /* 3.6.1: 시험 틀용 */
 {
@@ -4963,7 +5112,7 @@ static void draw_browser(void)
     if (cur_path[0]) text_f(SF, 1, X + W - cnt_w - 12 * S, ui_sty(fy, fh), cb, C_MUTED, C_FIELD, 0, 1);
     fe_fill(o.x + S, cy, o.w - 2 * S, ui_cmdbar_h(), C_CARD);
     ui_cmdbar(o.x + S, cy, o.w - 2 * S, T(browse_vhd() ? S_VHD_BKEYS : browse_imgdir() ? S_IMGDIR_KEYS : browse_dir() ? S_DIR_KEYS : browse_bsave() ? S_BAS_SAVE_KEYS : browse_bas() ? S_BAS_LOAD_KEYS : zin ? (browse_slot < MSX_CART_SLOTS ? S_BROWSE_KEYS_ZIPROM : S_BROWSE_KEYS_ZIP) : browse_slot < MSX_CART_SLOTS ? S_BROWSE_KEYS_ROM : S_BROWSE_KEYS_NM));
-    if (browse_vhd()) vb_draw_pop(X, W, ly + (uint32_t)rows * rh / 6);   /* 3.7.2 */
+    if (browse_vhd()) vb_draw_pop(X, W, ly + (uint32_t)rows * rh / 6, o.y + 6 * S, o.y + o.h - 6 * S);   /* 3.7.2 */
     if (dd_on && dd_id == 3000) {                       /* ROMtype 풀다운 — 고른 줄 아래, ROMtype 칸에 맞춤 */
         uint32_t dw = 380 * S; if (dw > W) dw = W;
         uint32_t dx = show_map ? c_map : X + W / 2; if (dx + dw > X + W) dx = X + W - dw;
@@ -5461,7 +5610,7 @@ static void grow_start(void)
     /* 확장하는 동안과 확장 뒤에는 USB 쓰기를 모두 막는다. 펌웨어(UEFI)·FAT 캐시는 옛 FAT·FSInfo·폴더를 기억하고 있어서,
      * 확장 뒤에 설정·상태 저장 같은 쓰기가 한 번이라도 나가면 옛 내용이 새 파일 시스템 위에 덮여 Windows 가 "손상"으로 본다 (실기에서 발견).
      * 먼저 밀린 저장을 모두 끝낸 뒤 막는다 */
-    bgw_finish(); vhd_sync_all(); prn_flush(0); midi_flush(); rec_stop(); vrec_stop(); sram_save_all(); resume_save(); disk_flush(0); disk_flush(1); tape_flush(); hd_flush(); settings_flush();
+    bgw_finish(); vhd_sync_all(0); prn_flush(0); midi_flush(); rec_stop(); vrec_stop(); sram_save_all(); resume_save(); disk_flush(0); disk_flush(1); tape_flush(); hd_flush(); settings_flush();
     FePlatform sv = P;
     P.write_file = grow_w_stub; P.write_at = grow_wat_stub; P.append = grow_w_stub; P.create = grow_cr_stub; P.delete_file = grow_del_stub; P.make_file = grow_mk_stub; P.hd_write = grow_hdw_stub; P.hd_flush = 0;
     char err[96] = "";
@@ -5623,6 +5772,7 @@ static int switch_machine(const char *name, char *err, int errlen)
     uint32_t tape_keep = M->tape_size;                  /* 4.0.34: 기종을 바꾸면 M을 새로 만들어 테이프 길이가 0이 되던 것 (RUN"CAS:" 장치 오류) */
     if (machine_load(M, P.read_file, name, &prof, err, errlen)) return -1;
     for (int q = MSX_INT_CART; q < MSX_CART_ALL; q++) sram_load(q);
+    env_changed = strcmp(name, machine_name) != 0;
     copy_str(machine_name, sizeof machine_name, name);
     fw_sram_load();
     update_has_fw();
@@ -5651,6 +5801,7 @@ static int switch_machine(const char *name, char *err, int errlen)
     (void)t;                                            /* 기종 이름·빠진 장치 알림은 띄우지 않음 (기종 선택 창에 표시) */
     settings_changed();
     full_redraw();                                      /* 2.9: 배지·기종 이름 바로 다시 그림 */
+    dos2_mapper_hint();                                 /* 8.0.65 */
     return 0;
 }
 
@@ -5811,6 +5962,7 @@ static void vo_pretty(char (*ln)[64], int n)
     }
 }
 static uint32_t outg_fit_px(int tab);                   /* 5.3.35 출력장치 창 높이 = 내용만큼 */
+static uint32_t net_card_h(void);                      /* fe_net.inc */
 static void card_caps(uint32_t *w, uint32_t *h)
 {
     uint32_t cw = 0, ch = 0;
@@ -5836,10 +5988,11 @@ static void card_caps(uint32_t *w, uint32_t *h)
     case 12: cw = 1080; break;                          /* 도움말 */
     case 15: cw = 640; ch = 300; break;
     case 20: cw = 640; ch = 300; break;                 /* 5.2.192 언어 · 글꼴 */                 /* 끝내기·재시작 확인 */
-    case 18: cw = 760; ch = 600; break;                 /* 네트워크 — 가운데 팝업 (MSX 화면이 뒤에 계속 보임) */
+    case 18: cw = 760; ch = 600; break;                 /* 네트워크 — 가운데 팝업 (MSX 화면이 뒤에 계속 보임). 8.0.53: 설정 줄 화면은 아래에서 내용만큼으로 줄임 */
     default: break;
     }
     *w = cw * S; *h = ch * S;
+    if (dialog == 18) { uint32_t hp = net_card_h(); if (hp) { *w = 440 * S; *h = hp; } }   /* 8.0.53: 무선·유선 설정 줄 화면만 작은 창 (공유기·저장 목록 화면은 그대로) */
     if (dialog == 6 && outg_is(props_tab)) { uint32_t hp = outg_fit_px(props_tab); if (hp) *h = hp; }   /* 5.3.35: 아래 빈 공간 없이 내용만큼 (넘치면 줄 간격을 좁혀 화면 안에) */
 }
 /* 탭 0~5 = 옵션 속성 창(blueMSX 순서 + 4.0.89 출력 장치 탭), 6~9 = 도구 팝업(믹서, 키보드, 조이스틱, 마우스) */
@@ -5940,8 +6093,8 @@ static int props_items(int tab, PropItem *it)
         ADDSEL(57, 1);                                  /* 3.2.15 */
         {   /* 화면 소스 (V9990 이 꽂혀 있을 때만 고를 수 있음) */
             char v[64]; copy_str(v, sizeof v, vsrc_pref < 0 ? T(S_VSRC_AUTO) : sel_lab_vsrc(vsrc_pref >= VSRC_N + 2 ? 0 : vsrc_pref + 1));
-            if (vsrc_pref < 0 && M->v9) { str_append(v, sizeof v, " ("); str_append(v, sizeof v, msx_vsrc[vsrc_cur].key); str_append(v, sizeof v, ")"); }
-            ADD(1, 160, T(S_VSRC), v, 0, M->v9 != 0);
+            if (vsrc_pref < 0 && (M->v9 || M->v2)) { str_append(v, sizeof v, " ("); str_append(v, sizeof v, msx_vsrc[vsrc_cur].key); str_append(v, sizeof v, ")"); }
+            ADD(1, 160, T(S_VSRC), v, 0, M->v9 != 0 || M->v2 != 0);
         }
         {                                               /* 2.14: 주사 주파수 (자동 = 기종대로) */
             char v[32];
@@ -5975,7 +6128,7 @@ static int props_items(int tab, PropItem *it)
             }
         }
         if (msx_dev(M, MDEV_MIDI_HW)) { ADD(0, 0, T(S_MIDI_INT), "", 0, 1); ADD(2, 116, T(S_MIDI_INT_PORT), "", midi_int, 1); ADD(4, 0, T(S_MIDI_INT_NOTE), "", 0, 1); }   /* GT 내장 MIDI 켜기는 사운드 탭 (마스터님 결정) */
-        ADDO(110, P.audio2 != 0);                       /* 3.3.3 SND3-01 (RAlt+F6) */
+        ADDO(110, P.audio2 != 0);                       /* 3.3.3 SND3-01 (RAlt+F12) */
         ADD(1, 0, "48 kHz", snd_stereo && P.audio2 ? T(S_STEREO_ON) : T(S_MONO), 0, 0);
         break;
     case 4:                                             /* 4.0.89: 출력 장치 탭 (MIDI 앞) */
@@ -6007,8 +6160,10 @@ static int props_items(int tab, PropItem *it)
         ADD(2, 4, T(S_SPEED_MAX), "", speed_max, 1);
         ADDSLIDE(117, 1);                               /* 3.6.6: 속도 배수 게이지 1배·2배·4배·최대 */
         prop_grp = 3;
-        ADDO(172, 1);
         ADDO(15, 1);                                    /* 2.11 */
+        ADD(4, 0, T(S_RESUME1_INFO), "", 0, 1);         /* 8.0.118 안내 */
+        ADDO(267, 1);                                   /* 8.0.117 기종 상태 저장 2 */
+        ADD(4, 0, T(S_RESUME2_INFO), "", 0, 1);
         prop_grp = 4;
         ADDO(171, 1);                                   /* 4.0.31 */
         ADDO(170, 1);
@@ -6141,10 +6296,36 @@ static uint32_t outg_fit_px(int tab)
 static void set_expand(int want);
 static void hc_slide(const UiHit *h, int ev);
 static void hc_fx(const UiHit *h, int ev);
-static void hc_segexp(const UiHit *h, int ev)           /* 슬롯 확장 세 칸 버튼을 누르면 바로 그 값으로 */
+static int exp_focus;                                   /* 키보드가 가리키는 확장 버튼 (0 = SLOT1, 1 = SLOT2) */
+static void hc_segexp(const UiHit *h, int ev)           /* 8.0.181: 슬롯 1·슬롯 2 버튼은 각각 따로 켜고 끈다 (b = 1 또는 2, 값은 비트) */
 {
-    props_sel[0] = (int)h->a;
-    if (ev == 1 && h->b != slot_expand) set_expand(h->b);
+    props_sel[0] = (int)h->a; exp_focus = h->b == 2;
+    if (ev == 1) set_expand(slot_expand ^ h->b);
+}
+/* 8.0.181: 슬롯 확장 버튼 — 이름 "SLOT1" + 범위 "1-0 ~ 1-3" (범위의 앞 숫자 = 이 기종에서 그 카트리지 커넥터가 있는 실제 슬롯 번호) */
+static void emu_expand_range(int k, char *out, int max)
+{
+    int ps = M->prof.ext_slot[k];
+    out[0] = 0;
+    if (ps < 0 || ps > 3) return;
+    char d[12] = { (char)('0' + ps), '-', '0', ' ', '~', ' ', (char)('0' + ps), '-', '3', 0 };
+    str_append(out, max, d);
+}
+/* 튀어나온 버튼(꺼짐) / 들어간 버튼 + 파란 램프(켜짐) / 키 포커스는 노란 테두리 */
+static void emu_expand_button(int k, uint32_t bx, uint32_t by, uint32_t bw, uint32_t bh, uint32_t y2, uint32_t h2, int on, int focus)
+{
+    char name[8] = { 'S', 'L', 'O', 'T', (char)('1' + k), 0 }, rng[16];
+    emu_expand_range(k, rng, sizeof rng);
+    uint32_t r = bh / 2, lip = 3 * S;
+    if (focus) ui_rrect(bx - 2 * S, by - 2 * S, bw + 4 * S, bh + 4 * S, r + 2 * S, C_WARN);
+    if (on) ui_rframe(bx, by, bw, bh, r, C_SHADOW, C_FIELD);                     /* 들어간 모양: 어두운 바닥 */
+    else { ui_rrect(bx, by + lip, bw, bh - lip, r, C_SHADOW); ui_rframe(bx, by, bw, bh - lip, r, C_LINE, C_CHIP); }   /* 튀어나온 모양: 아래쪽 두께 */
+    uint32_t d = bh / 3 > 6 * S ? bh / 3 : 6 * S, lx = bx + 12 * S, ly = by + (on ? (bh - d) / 2 : (bh - lip - d) / 2);
+    if (on) { ui_rrect(lx - 3 * S, ly - 3 * S, d + 6 * S, d + 6 * S, d / 2 + 3 * S, C_ACC2); ui_rrect(lx, ly, d, d, d / 2, C_ACC); }   /* 파란 램프 점등 */
+    else ui_rrect(lx, ly, d, d, d / 2, C_FAINT);
+    uint32_t tx = lx + d + 12 * S, ty = ui_ty(y2, h2) - (on ? 0 : lip / 2), room = bx + bw > tx + 6 * S ? bx + bw - tx - 6 * S : 0;
+    uint32_t nw = text_clip(tx, ty, name, on ? C_TEXT : C_MUTED, 0xFF, room);
+    if (rng[0] && room > nw + 10 * S) text_f(SF, 1, tx + nw + 10 * S, ui_sty(y2, h2) - (on ? 0 : lip / 2), rng, on ? C_ACC : C_FAINT, 0xFF, room - nw - 10 * S, 1);
 }
 typedef struct { uint32_t x, y, w, h; int col, ord; } EmuR;
 static EmuR emu_r[32];
@@ -6220,13 +6401,11 @@ static void draw_emu_tab(PropItem *it, int n, int selidx, uint32_t X, uint32_t W
                 hit_add(hc_val, (intptr_t)&props_sel[0], i, 0, 0x1C, r->x, r->y, r->w, r->h);
             } else {
                 uint32_t sx = r->x + 12 * S, sw = r->w > 24 * S ? r->w - 24 * S : 0, gp = 6 * S;
-                uint32_t bw = sw > 2 * gp ? (sw - 2 * gp) / 3 : 0; if (bw > 150 * S) bw = 150 * S;
-                const char *sn[3] = { T(S_NONE), T(S_EXP_S1), T(S_EXP_S2) };
-                for (int k = 0; k < 3; k++) {
-                    uint32_t bx = sx + (uint32_t)k * (bw + gp), by = y2 + 2 * S, bh = h2 > 4 * S ? h2 - 4 * S : h2, on = k == slot_expand, tw = text_w(sn[k]);
-                    if (on) ui_rrect(bx, by, bw, bh, bh / 2, C_ACC); else ui_rframe(bx, by, bw, bh, bh / 2, C_LINE, C_CHIP);
-                    text_clip(bx + (bw > tw ? (bw - tw) / 2 : 0), ui_ty(y2, h2), sn[k], on ? 15 : C_MUTED, 0xFF, bw);
-                    hit_add(hc_segexp, (intptr_t)i, k, 0, 0, bx, by, bw, bh);
+                uint32_t bw = sw > gp ? (sw - gp) / 2 : 0; if (bw > 250 * S) bw = 250 * S;   /* 8.0.181: 슬롯 1 / 슬롯 2 — 각각 켜고 끔 (둘 다 켜면 1 + 2) */
+                for (int k = 0; k < 2; k++) {
+                    uint32_t bx = sx + (uint32_t)k * (bw + gp), by = y2 + 2 * S, bh = h2 > 4 * S ? h2 - 4 * S : h2;
+                    emu_expand_button(k, bx, by, bw, bh, y2, h2, (slot_expand >> k & 1) != 0, sl && exp_focus == k);
+                    hit_add(hc_segexp, (intptr_t)i, 1 << k, 0, 0, bx, by, bw, bh);
                 }
                 hit_add(hc_val, (intptr_t)&props_sel[0], i, 0, 0x1C, r->x, r->y, r->w, h2);
             }
@@ -6259,7 +6438,12 @@ static int emu_key(PropItem *it, int n, int *sel, int key)
         int d = key == 0xCB ? -1 : 1, cur = *sel;
         if (cur < 0 || cur >= n) return 1;
         if (it[cur].grp == 0) { if (d > 0 && cur + 1 < n && it[cur + 1].grp == 6) *sel = cur + 1; return 1; }   /* 기종 → 오른쪽 슬롯 확장 */
-        if (it[cur].grp == 6 && d < 0 && slot_expand == 0 && cur > 0 && it[cur - 1].grp == 0) { *sel = cur - 1; return 1; }   /* 확장 '없음'에서 ← = 기종 */
+        if (it[cur].grp == 6) {                         /* 8.0.181: ←/→ = SLOT1 ↔ SLOT2 단추 사이 이동, 맨 왼쪽에서 ← = 기종 */
+            if (d > 0 && exp_focus < 1) exp_focus++;
+            else if (d < 0 && exp_focus > 0) exp_focus--;
+            else if (d < 0 && cur > 0 && it[cur - 1].grp == 0) *sel = cur - 1;
+            return 1;
+        }
         if (it[cur].kind != 2) { props_change(it[cur].id, d); return 1; }
         if (it[cur].grp == 2) { if (d > 0 && cur + 1 < n && it[cur + 1].grp == 2 && item_selectable(&it[cur + 1])) *sel = cur + 1; return 1; }   /* 최대 속도 → 오른쪽 속도 배수 */
         int best = -1, bg = it[cur].grp, ord = emu_r[cur].ord;
@@ -6584,34 +6768,71 @@ static uint32_t slot_map_sig(void)
     return h;
 }
 
-static void draw_slot_map(uint32_t x, uint32_t y, uint32_t w)
+/* 슬롯 구성 그림 (8.0.186, 메인보드 커넥터 모양): 기본 슬롯 0~3 이 위에서 아래로 한 줄씩.
+ * 줄 = 왼쪽 번호 칸 + 오른쪽 칸들 (나뉜 슬롯은 서브슬롯 4칸, 아니면 1칸).
+ * 칸 하나는 한 줄: "칸 이름  내용". 칸 바탕/테두리 색 = 파랑 카트리지 꽂힘, 노랑 테두리 빈 카트리지 자리, 보통 내장 장치.
+ * 에뮬레이션 창과 머신 구성 편집기가 같이 씀. 높이는 slot_map_height() 하나로 정함 (자리 모자라 숨기지 않음) */
+enum { SLOT_ROWS = 4, SLOT_ROW_GAP = 6, SLOT_LABEL_W = 64 };
+
+/* 8.0.192: 그림이 어디서 값을 읽는지 (그리는 코드는 하나, 값 출처만 다름).
+ * 에뮬레이션 창 = 지금 켜진 기종(M), 머신 구성 편집기 = 편집 중인 값(me) */
+typedef struct {
+    int (*isSubslotted)(int ps);                                         /* 기본 슬롯 ps 가 4칸으로 나뉘었나 */
+    int (*cellInfo)(int ps, int ss, char *out, int max, int *cart_n);    /* 칸 내용: slot_label 과 같은 규칙 */
+} SlotMapSource;
+
+static uint32_t slot_map_row_height(void) { return SLH + 16 * S; }
+static uint32_t slot_map_height(void) { return SLOT_ROWS * slot_map_row_height() + (SLOT_ROWS - 1) * SLOT_ROW_GAP * S; }
+
+/* 칸 한 개: 한 줄에 "칸 이름 내용" */
+static void draw_slot_chip(const SlotMapSource *src, uint32_t x, uint32_t y, uint32_t w, uint32_t h, int ps, int ss, int sub)
 {
-    uint32_t rh = SLH + 10 * S;
-    /* 칸 너비: 나뉜 슬롯은 서브슬롯마다 1, 안 나뉜 슬롯은 2 (확장기 칸에 "SLOTn"이 잘리지 않게) */
-    uint32_t units = 0;
-    for (int ps = 0; ps < 4; ps++) units += M->prof.subslotted[ps] ? 4 : 2;
-    uint32_t unit = w / units, px = x;
-    for (int ps = 0; ps < 4; ps++) {
-        int sub = M->prof.subslotted[ps];
-        int nc = sub ? 4 : 1;
-        uint32_t sw = sub ? unit : 2 * unit;
-        for (int ss = 0; ss < nc; ss++) {
-            uint32_t cx = px + (uint32_t)ss * sw;
-            char head[16], lab[160];
-            head[0] = (char)('0' + ps); head[1] = 0;
-            if (sub) { head[1] = '-'; head[2] = (char)('0' + ss); head[3] = 0; }
-            int cn;
-            int k = slot_label(ps, ss, lab, sizeof lab, &cn);
-            if (cn >= 0) { head[sub ? 3 : 1] = 0; str_append(head, sizeof head, " SLOT"); char d[2] = { (char)('1' + cn), 0 }; str_append(head, sizeof head, d); }
-            uint8_t bg = k == 3 ? C_ACC2 : k == 2 ? C_FIELD : k == 1 ? C_ROWSEL : C_HEAD;
-            uint8_t fg = k == 3 ? 15 : k == 2 ? C_WARN : k == 4 ? C_BAD : k == 1 ? C_TEXT : C_FAINT;
-            ui_rrect(cx + 2 * S, y, sw - 4 * S, 2 * rh, 5 * S, bg);
-            if (k == 2) ui_rframe(cx + 2 * S, y, sw - 4 * S, 2 * rh, 5 * S, C_WARN, C_FIELD);
-            small_ell(cx + 8 * S, ui_sty(y, rh) + 2 * S, head, k == 3 ? 15 : C_MUTED, 0xFF, sw - 14 * S);
-            small_ell(cx + 8 * S, ui_sty(y + rh, rh) - 2 * S, lab, fg, 0xFF, sw - 14 * S);
-        }
-        px += (uint32_t)nc * sw;
-    }
+    char head[16], lab[160];
+    head[0] = (char)('0' + ps); head[1] = 0;
+    if (sub) { head[1] = '-'; head[2] = (char)('0' + ss); head[3] = 0; }
+    int cartIndex;
+    int kind = src->cellInfo(ps, ss, lab, sizeof lab, &cartIndex);
+    if (cartIndex >= 0) { copy_str(head, sizeof head, "SLOT"); head[4] = (char)('0' + ps); head[5] = 0; if (sub) { head[5] = '-'; head[6] = (char)('0' + ss); head[7] = 0; } }   /* 8.0.185: 카트리지 칸 이름 = 실제 슬롯 번호 (SLOT1, SLOT1-0 ...) */
+    uint8_t bg = kind == 3 ? C_ACC2 : kind == 2 ? C_FIELD : kind == 1 ? C_ROWSEL : C_HEAD;
+    uint8_t fg = kind == 3 ? 15 : kind == 2 ? C_WARN : kind == 4 ? C_BAD : kind == 1 ? C_TEXT : C_FAINT;
+    ui_rrect(x, y, w, h, 5 * S, bg);
+    if (kind == 2) ui_rframe(x, y, w, h, 5 * S, C_WARN, C_FIELD);
+    uint32_t headW = ui_sw(head), pad = 8 * S, ty = ui_sty(y, h);
+    if (w <= 2 * pad) return;
+    small_ell(x + pad, ty, head, kind == 3 ? 15 : C_MUTED, 0xFF, w - 2 * pad);
+    if (w > headW + 3 * pad) small_ell(x + pad + headW + pad, ty, lab, fg, 0xFF, w - headW - 3 * pad);
+}
+
+/* 번호 칸: 기본 슬롯 번호를 크게 (나뉜 슬롯은 파랑 + 작은 글 x4) */
+static void draw_slot_label(uint32_t x, uint32_t y, uint32_t h, int ps, int sub)
+{
+    char number[2] = { (char)('0' + ps), 0 };
+    uint32_t numberW = text_w(number);
+    text_clip(x + 12 * S, y + (h > LH ? (h - LH) / 2 : 0), number, sub ? C_ACC2 : 15, 0xFF, 24 * S);
+    if (sub) small_ell(x + 12 * S + numberW + 6 * S, ui_sty(y, h), "x4", C_ACC2, 0xFF, x + SLOT_LABEL_W * S - (x + 12 * S + numberW + 6 * S));
+}
+
+/* 지금 켜진 기종(M)에서 읽는 출처 */
+static int live_slot_subslotted(int ps) { return M->prof.subslotted[ps]; }
+static const SlotMapSource live_slot_source = { live_slot_subslotted, slot_label };
+
+/* 기본 슬롯 ps 한 줄 (커넥터) */
+static void draw_slot_connector(const SlotMapSource *src, uint32_t x, uint32_t y, uint32_t w, int ps)
+{
+    uint32_t rowH = slot_map_row_height(), labelW = SLOT_LABEL_W * S, inset = 3 * S;
+    int sub = src->isSubslotted(ps), chips = sub ? 4 : 1;
+    ui_rframe(x, y, w, rowH, 6 * S, C_LINE, C_CARD);
+    draw_slot_label(x, y, rowH, ps, sub);
+    ui_rrect(x + labelW, y + 6 * S, S, rowH - 12 * S, 0, C_LINE);
+    uint32_t chipsX = x + labelW + inset + S, chipsW = w - labelW - 2 * inset - S, chipW = (chipsW - (uint32_t)(chips - 1) * 4 * S) / (uint32_t)chips;
+    for (int ss = 0; ss < chips; ss++)
+        draw_slot_chip(src, chipsX + (uint32_t)ss * (chipW + 4 * S), y + inset, chipW, rowH - 2 * inset, ps, ss, sub);
+}
+
+static void draw_slot_map(const SlotMapSource *src, uint32_t x, uint32_t y, uint32_t w)
+{
+    for (int ps = 0; ps < SLOT_ROWS; ps++)
+        draw_slot_connector(src, x, y + (uint32_t)ps * (slot_map_row_height() + SLOT_ROW_GAP * S), w, ps);
 }
 
 /* 3.7.0: 믹서 = 화면 아래 절반의 팝업 (MSX는 계속 돌고 위쪽에 보임) */
@@ -6832,7 +7053,7 @@ static void draw_props(void)
         top = b.y + 4 * S + ui_tabs_h() + 10 * S;
     }
     uint32_t cy = dlg_cmd_y(), bottom = cy - 10 * S;
-    if (props_tab == 0) bottom -= 2 * (SLH + 10 * S) + 30 * S;
+    if (props_tab == 0) bottom -= slot_map_height() + 30 * S;
     if (props_tab == 6) { draw_mixer(b.x + pad, top, b.w - 2 * pad, bottom - top - SLH - 6 * S); mix_desc(b.x + pad, bottom - SLH, b.w - 2 * pad); }
     else if (props_tab == 5) draw_miditab(b.x + pad, b.w - 2 * pad, top, bottom);   /* 5.2.54 */
     else {
@@ -6852,7 +7073,7 @@ static void draw_props(void)
     }
     if (props_tab == 0) {
         ui_section(b.x + pad + 6 * S, bottom + 6 * S, b.w - 2 * pad - 12 * S, T(S_SLOT_MAP));
-        draw_slot_map(b.x + pad, bottom + 8 * S + SLH + 12 * S, b.w - 2 * pad);
+        draw_slot_map(&live_slot_source, b.x + pad, bottom + 8 * S + SLH + 12 * S, b.w - 2 * pad);
     }
     ui_cmdbar(o.x + S, cy, o.w - 2 * S, props_tab == 6 ? T(S_MIXER_KEYS) : props_tab > 6 ? T(S_POPUP_KEYS) : props_tab == 5 ? (mt_fx >= 0 ? nt("1/2/Tab 탭 이동   ↑/↓ 항목 이동   +/- 값   Enter 켜기·기본값·시험음   T 시험음   Esc 닫기", "1/2/Tab switch tab   Up/Down move   +/- value   Enter toggle/default/test   T test   Esc close", "1/2/Tab タブ移動   ↑/↓ 移動   +/- 値   Enter 切替   T テスト   Esc 閉じる") : nt("1/2/Tab 탭 이동   ↑/↓ 기계   ←/→ 칸   Enter 열기·조절   Esc 나오기   T 시험음   M 믹서   Ins 꽂기   Del 빼기   F5 다시 찾기", "1/2/Tab switch tab   Up/Down device   Left/Right field   Enter open/adjust   Esc leave   T test   M mixer   Ins plug   Del remove   F5 rescan", "1/2/Tab タブ移動   ↑/↓ 機器   ←/→ 欄   Enter 開く·調整   Esc 戻る   T テスト   M ミキサー   Ins 接続   Del 外す   F5 再検索")) : T(S_PROPS_KEYS));
 }
@@ -7021,7 +7242,8 @@ static void props_key(int key)
         if (*sel < n && !(it[*sel].kind == 1 && it[*sel].id != 8)) props_change(it[*sel].id, d);   /* 풀다운 항목은 ←/→로 바꾸지 않음 (Enter·클릭 = 풀다운) */
         break;
     }
-    case 0x1C: case 0x9C: case 0x39: if (*sel < n && item_selectable(&it[*sel])) { if (it[*sel].kind == 1 && dd_gen(it[*sel].id)) break; props_change(it[*sel].id, 0); } break;
+    case 0x1C: case 0x9C: case 0x39: if (*sel < n && item_selectable(&it[*sel])) { if (it[*sel].grp == 6) { set_expand(slot_expand ^ (1 << exp_focus)); break; }   /* 8.0.181: Enter·Space = 가리킨 확장 단추 켜고 끄기 */
+        if (it[*sel].kind == 1 && dd_gen(it[*sel].id)) break; props_change(it[*sel].id, 0); } break;
     default: break;
     }
 }
@@ -7039,6 +7261,9 @@ static void draw_medit(void);
 static void draw_keyed(void);
 static void keyed_key(int key);
 static void draw_power_ask(void);
+static void draw_vhd_notice(void);                     /* 8.0.169 가상 하드 용량 부족 안내 (창 22, fe_vhd.inc) */
+static void vn_key(int key);
+static void vhd_notice_tick(void);
 static void draw_pv(void);                              /* 4.0.5 인쇄 미리보기 (창 16) */
 static void draw_edit(void);
 static void draw_net(void);                            /* 4.0.29 텍스트 편집기 (창 17) */
@@ -7048,9 +7273,9 @@ static void draw_state_list(void);
 static void state_list_key(int key);
 static void draw_dialog(void)
 {
-    fe_trace("dd hit_clear");
+   
     hit_clear();
-    fe_trace("dd go");                                        /* 3.0 마우스: 창마다 그리면서 자리를 다시 남김 */
+                                           /* 3.0 마우스: 창마다 그리면서 자리를 다시 남김 */
     if (dialog == 6) { draw_props(); return; }
     if (dialog == 5) { draw_machines(); return; }
     if (dialog == 4) { draw_grow(); return; }
@@ -7072,6 +7297,7 @@ static void draw_dialog(void)
     else if (dialog == 18) draw_net();
     else if (dialog == 19) draw_midimix();              /* 5.2.53 */
     else if (dialog == 20) draw_langwin();              /* 5.2.192 */
+    else if (dialog == 22) draw_vhd_notice();           /* 8.0.169 */
 }
 
 /* ------------------------------------------------------------------ */
@@ -7163,25 +7389,25 @@ static const Shortcut sc_def[] = {
     { 0x77, 0x04, A_DISKA_EJECT }, { 0x78, 0x04, A_DISKB_EJECT }, { 0x78, 0x20, A_TAPE_EJECT },
     { 0, 0, A_NONE }, { 0, 0, A_NONE }, { 0x7B, 0x00, A_PROPS_MIX },   /* 4.0.34: 특수 카트리지 키(#107·#108) 없앰, 믹서 = F12 */ /* 3.2.14 MED-11 옛 자리:   /* 3.2.14 MED-11: LCtrl+LAlt+F7/F8 특수 카트리지 */
     { 0, 0, A_PROPS_EMU }, { 0, 0, A_PROPS_VIDEO }, { 0, 0, A_PROPS_SOUND }, { 0, 0, A_PROPS_KB },   /* 입력장치 옛 F5 없앰 */
-    { 0x78, 0x14, A_TAPE_REWIND },                     /* 3.2.1: LCtrl+LAlt+F11 테이프 되감기 */
-    { 0x7A, 0x04, A_ICONS_TOGGLE },                    /* 3.2.2: F6 아이콘 숨기기/보이기 */
-    { 0x71, 0x08, A_RESET_CTRL },                      /* 3.2.2: RCtrl+F12 CTRL 누른 채 리셋 */
+    { 0x78, 0x14, A_TAPE_REWIND },                     /* 3.2.1: LCtrl+LAlt+F9 테이프 되감기 (8.0.229 바로잡음) */
+    { 0x7A, 0x04, A_ICONS_TOGGLE },                    /* 3.2.2: LCtrl+F11 상태 아이콘 숨기기/보이기 (8.0.229 바로잡음) */
+    { 0x71, 0x08, A_RESET_CTRL },                      /* 3.2.2: RCtrl+F2 CTRL 누른 채 리셋 (8.0.229 바로잡음) */
     { 0, 0, A_NONE }, { 0, 0, A_NONE },                /* 3.2.10에 있던 자리(작은·큰 화면 저장, 3.2.12에서 없앰). 저장된 단축키 순서를 지키려고 빈 자리만 둠 */
     { 0, 0, A_RESET_AFTER_INSERT },                   /* 옛 LCtrl+LShift+F8 없앰 */
     { 0, 0, A_DISK_RESET_AFTER },                     /* 옛 LCtrl+LAlt+F9 없앰 */
-    { 0, 0, A_TAPE_POSMENU }, { 0x78, 0x0A, A_TAPE_NEW },   /* 옛 LCtrl+LAlt+F10 없앰 */   /* 3.2.14 MED-09: LCtrl+LAlt+F10 테이프 위치, LCtrl+LShift+F11 새 테이프 */
-    { 0x76, 0x20, A_PRN_END },                          /* 3.3.0 MENU3-01: LCtrl+LShift+P 인쇄 끝내기 */
+    { 0, 0, A_TAPE_POSMENU }, { 0x78, 0x0A, A_TAPE_NEW },   /* 옛 LCtrl+LAlt+F10 없앰 */   /* 3.2.14 MED-09: 테이프 위치는 키 없음, 새 테이프 RCtrl+RShift+F9 (8.0.229 바로잡음) */
+    { 0x76, 0x20, A_PRN_END },                          /* 3.3.0 MENU3-01: RAlt+F7 인쇄 끝내기 (8.0.229 바로잡음) */
     { 0, 0, A_PROPS_EFFECTS }, { 0, 0, A_PROPS_MIDI }, { 0, 0, A_NONE },   /* 4.0.34: 조이스틱 = F12 */   /* 3.3.1 MENU3-05: RShift+F10/F11/F12 */
     { 0, 0, A_LANG_MENU }, { 0, 0, A_MACHINE_EDIT }, { 0, 0, A_SC_EDIT }, { 0, 0, A_NONE },   /* RCtrl+RShift+L/M/S (4.0.30: 포트 메뉴 P 없앰, 저장된 단축키 순서를 지키려고 빈 자리) */
-    { 0x76, 0x08, A_SPR_TOGGLE },                       /* 3.3.1 VID-03: LCtrl+LShift+S 스프라이트 보이기/숨기기 */
+    { 0x76, 0x08, A_SPR_TOGGLE },                       /* 3.3.1 VID-03: RCtrl+F7 스프라이트 보이기/숨기기 (8.0.229 바로잡음) */
     { 0, 0, A_NONE },                                  /* 3.6.6: 디스크 시간 흉내 없앰 (저장된 단축키 순서를 지키려고 빈 자리) */
-    { 0x7B, 0x20, A_STEREO },                          /* 3.3.3 SND3-01: RAlt+F6 모노/스테레오 */                      /* 3.3.1 MENU3-06: LCtrl+LShift+F 디스크 시간 흉내 */
+    { 0x7B, 0x20, A_STEREO },                          /* 3.3.3 SND3-01: RAlt+F12 모노/스테레오 (8.0.229 바로잡음) */                      /* 3.3.1 MENU3-06: LCtrl+LShift+F 디스크 시간 흉내 */
     { 0, 0, A_NONE },                                  /* 3.6.6: 되감기 없앰 (빈 자리) */
     { 0, 0, A_MEDIA },                                         /* 3.5.0: RCtrl+RShift+D 미디어 팝업 */
     { 0, 0, A_REBOOT },                                          /* PC 다시 시작 옛 LCtrl+F9 없앰 */
     { 0x2C, 0x01, A_VID_REC },                                    /* 4.0.31: LShift+PrtSc 영상 녹화 */
-    { 0x7A, 0x00, A_DISK_COPY },                                  /* 4.0.34: F9 파일 관리자 */
-    { 0x75, 0x20, A_PRN_RAW },                                    /* 4.0.34: LShift+F6 프린터 원본 파일로 (.prn) */
+    { 0x7A, 0x00, A_DISK_COPY },                                  /* 4.0.34: F11 파일 관리자 (8.0.229 바로잡음) */
+    { 0x75, 0x20, A_PRN_RAW },                                    /* 4.0.34: RAlt+F6 프린터 원본 파일로 (.prn) (8.0.229 바로잡음) */
     { 0x7B, 0x04, A_MIDI_MIX },                                   /* LCtrl+F12 MIDI 믹서 (팝업) */
     { 0x78, 0x10, A_DISKB_NEXT },                                 /* 새 단축키 배치 (B 드라이브 다음 디스크 칸 추가) */
     { 0x56, 0x0A, A_SYSVIEW },                                    /* 8.0.37: RCtrl+RShift+V 시스템 보기 (도움말 → 시스템) */
@@ -7209,6 +7435,15 @@ static void key_resync(void)
     input_init(&in);
     memset(M->kbd, 0xFF, sizeof M->kbd);
 }
+/* 8.0.189: MSX가 조이스틱 포트를 읽는 순간 USB 패드의 최신 값을 포트에 넣음 (openMSX처럼 저장해 둔 최신 상태를 바로 씀).
+ * 키보드 조이스틱 모드·메뉴 열림 중에는 건드리지 않고, 메뉴·일시정지 단추 처리는 update_joystick()이 프레임마다 그대로 함 */
+static void joystick_live_read(MSX *m, int port)
+{
+    if (joy_mode[port] < 2 || !P.pad_read || ui_active()) return;
+    int b = P.pad_read(joy_mode[port] - 2, 0, 0);
+    if (b > 0) m->joy[port] = (uint8_t)(b & 0x3F);
+}
+
 static void update_joystick(void)
 {
     static uint8_t pad_prev[2];
@@ -7388,11 +7623,22 @@ static void snd_glitch_check(void)
     static uint32_t pu, po, last_ms, prev_frame; static int pend;
     uint32_t now = P.ms(), gap = prev_frame ? now - prev_frame : 0;
     prev_frame = now;
+    /* 8.0.201: 이 프레임(앞 검사 ~ 지금) 동안 구간별로 쓴 시간. 1초 창(share/worst)은 멈춘 순간이 아직 안 들어간 지난 1초라 원인을 못 가렸음 */
+    static uint64_t prev_acc[PF_N], prev_tsc; uint32_t fr_ms[PF_N + 1]; uint32_t fr_sum = 0;
+    {
+        uint64_t ts = pf_now(), dt = prev_tsc ? ts - prev_tsc : 0; prev_tsc = ts;
+        for (int k = 0; k < PF_N; k++) {
+            uint64_t dk = pf_acc[k] >= prev_acc[k] ? pf_acc[k] - prev_acc[k] : pf_acc[k];   /* 1초 창이 넘어가며 0 으로 돌아간 경우 */
+            prev_acc[k] = pf_acc[k];
+            fr_ms[k] = dt ? (uint32_t)(dk * gap / dt) : 0; if (fr_ms[k] > gap) fr_ms[k] = gap; fr_sum += fr_ms[k];
+        }
+        fr_ms[PF_N] = gap > fr_sum ? gap - fr_sum : 0;
+    }
     if (!P.snd_stat) return;
     uint32_t u, o; int d, tg;
     if (!P.snd_stat(&u, &o, &d, &tg)) return;
     if (u != pu || o != po) {
-        char l[420], w[160]; l[0] = 0;
+        char l[640], w[160]; l[0] = 0;
         str_append(l, sizeof l, "t="); num_append(l, sizeof l, now, 0, ' ');
         str_append(l, sizeof l, u != pu ? " UNDER" : " OVER");
         str_append(l, sizeof l, " total u="); num_append(l, sizeof l, u, 0, ' ');
@@ -7401,16 +7647,19 @@ static void snd_glitch_check(void)
         str_append(l, sizeof l, " frame gap="); num_append(l, sizeof l, gap, 0, ' ');
         str_append(l, sizeof l, "ms\r\n  share "); pf_text(w, sizeof w, 0); str_append(l, sizeof l, w);
         str_append(l, sizeof l, "\r\n  worst "); pf_text(w, sizeof w, 1); str_append(l, sizeof l, w);
+        str_append(l, sizeof l, "\r\n  this-frame ms ");   /* 8.0.201: 멈춘 그 프레임의 구간별 ms (0 이 아닌 것만, other = 측정 밖 구간·펌웨어/SMI) */
+        for (int k = 0; k <= PF_N; k++) if (fr_ms[k]) { str_append(l, sizeof l, pf_names[k]); str_append(l, sizeof l, " "); num_append(l, sizeof l, fr_ms[k], 0, ' '); str_append(l, sizeof l, "  "); }
         str_append(l, sizeof l, "\r\n");
         uint32_t k = (uint32_t)strlen(l);
         if (sg_len + k >= sizeof sg_buf) { uint32_t h = sizeof sg_buf / 2; memmove(sg_buf, sg_buf + h, sg_len - h); sg_len -= h; }
         memcpy(sg_buf + sg_len, l, k); sg_len += k;
         pu = u; po = o; pend = 1;
     }
-    if (log_sndglitch && pend && now - last_ms >= 10000 && ui_active() && !live_ui() && P.write_file && P.create) {   /* 5.3.54: 연주 중에 쓰면 그 쓰기(약 80 ms)가 스스로 소리 끊김을 만들었음 → 메뉴를 열었을 때만 씀 */
+    if (log_sndglitch && pend && now - last_ms >= 10000 && log_write_go && ui_active() && !live_ui() && P.write_file && P.create) {   /* 5.3.54: 연주 중에 쓰면 그 쓰기(약 80 ms)가 스스로 소리 끊김을 만들었음 → 메뉴를 열었을 때만 씀 */
         pend = 0; last_ms = now;
         P.create("0:\\LOG", 1); P.create("0:\\LOG\\SNDGLITCH.TXT", 0);
-        P.write_file("0:\\LOG\\SNDGLITCH.TXT", (const uint8_t *)sg_buf, sg_len);
+        { PF_BEGIN; P.write_file("0:\\LOG\\SNDGLITCH.TXT", (const uint8_t *)sg_buf, sg_len); PF_END(PF_FILE); }
+        log_wrote_ms = P.ms();
     }
 }
 
@@ -7423,7 +7672,6 @@ static uint8_t tm_rep;                                   /* 그 키의 자동 �
 static void key_event(int key, int press)
 {
     int was = key_down[key & 0xFF];
-    if (press) { char kx[4] = { "0123456789ABCDEF"[(key >> 4) & 15], "0123456789ABCDEF"[key & 15], 0, 0 }; fe_trace_str("key", kx); }   /* 5.2.24 멈춤 추적 */
     {   /* 뗌 신호를 잃어 '눌린 채'로 남은 키는 다음에 누를 때 반복 신호로 오해해 무시되어 두 번 눌러야 했음 — 마지막 신호가 1.1초(자동 반복 첫 지연 최대 1초) 넘게 지났으면 새로 누른 것으로 본다 */
         static uint32_t key_t[256];
         uint32_t tn = P.ms();
@@ -7473,6 +7721,7 @@ static void key_event(int key, int press)
         }
         return;
     }
+    if (dialog == 22) { if (press) vn_key(key); return; }   /* 8.0.169 가상 하드 용량 부족 안내 */
     if (dialog == 16) { if (press) pv_key(key); return; }   /* 4.0.5 인쇄 미리보기 */
     if (dialog == 14 && press) { keyed_key(key); return; }   /* 3.2.12 키 편집기: 모든 키를 먼저 (오른쪽 Alt 포함) */
 
@@ -7836,6 +8085,7 @@ static int sp_has_rom(int kind)
     const SpCart *sd = spcat_kind(kind);
     if (!sd || !sd->files || kind >= 128) return 1;
     if (sp_avail[kind]) return sp_avail[kind] > 0;
+    if (sd->how == SPK_MMEDIA) return 1;               /* 8.0.66: X86 롬 파일은 꽂을 때 없으면 만들어 두므로 흐리게 하지 않음 */
     int ok = 0;
     static FeDirEntry e1[1];
     for (const char *f = sd->files; *f && !ok; ) {
@@ -7857,6 +8107,7 @@ static uint8_t sp_ff[16384];                            /* PAC: 롬 자리 (0xFF
 static int special_apply(int n, int kind, int quiet)
 {
     const SpCart *d = spcat_kind(kind);
+    if (quiet != 2 && n == mm_auto_slot) mm_auto_slot = -1;   /* 8.0.227: 사용자가(또는 다른 기능이) 그 자리를 직접 정하면 자동 표시를 지움 → 평소처럼 저장 */
     if (n < 0 || n >= MSX_CART_SLOTS || M->cart_slot[n] < 0 || !d || d->how == SPK_NOT_YET) return -1;
     if (!quiet && cart_special[n] && cart_special[n] == sp_code(kind)) {
         menu_close_all();                               /* 2.14: 같은 특수 카트리지면 그대로 (리셋 안 함) */
@@ -7865,7 +8116,9 @@ static int special_apply(int n, int kind, int quiet)
     }
     uint32_t size = 0;
     char path[160] = "";
-    if (d->files) {                                     /* 후보 롬을 앞에서부터 찾음 */
+    int running_insert = quiet == 2;                    /* 8.0.227: 프로그램이 도는 중 자동으로 꽂음 → USB 읽기·쓰기를 하지 않음 (X86 Multimedia 는 롬 코드가 없어 파일 내용이 필요 없음) */
+    if (d->how == SPK_MMEDIA && !running_insert) x86_mm_rom_ensure(cart_buf[n]);      /* 8.0.75 */      /* 8.0.66: X86MV 소리 롬 파일이 없으면 만들어 둠 */
+    if (d->files && !running_insert) {                                     /* 후보 롬을 앞에서부터 찾음 */
         int ok = 0;
         const char *f = d->files;
         while (*f && !ok) {
@@ -7905,6 +8158,7 @@ static int special_apply(int n, int kind, int quiet)
     case SPK_IDE: r = msx_insert_cart(M, n, cart_buf[n], size, MAPPER_SUNRISE); break;
     case SPK_VHD:                                       /* 3.7.1: Nextor 커널 + X86MSX 드라이버 */
         if (vhd_build_rom(cart_buf[n], &size)) { if (!quiet) toast(T(S_VHD_NOROM), path); return -1; }
+        x86_vhd_rom_save(cart_buf[n], size);            /* 8.0.66: 실제 롬 파일 X86MSX-VHD.rom 로도 둠 */
         for (int k = 0; k < MSX_CART_SLOTS; k++) if (k != n && M->cart[k].present && M->cart[k].mapper == MAPPER_VHD) cart_remove(k);   /* 하나만 */
         r = msx_insert_cart(M, n, cart_buf[n], size, MAPPER_VHD);
         if (!r) vhd_mount_all(quiet);
@@ -7968,6 +8222,10 @@ static int special_apply(int n, int kind, int quiet)
         size = 16384; memset(cart_buf[n], 0xFF, size);
         r = msx_insert_cart(M, n, cart_buf[n], size, MAPPER_RS232);
         break;
+    case SPK_MMEDIA:                                    /* 8.0.75 X86 Multimedia — 메모리 창 없음, 소리 2Ch~2Fh + 영상 24h~27h (src/mvsnd.c, mmvid.c) */
+        if (size != 16384) { size = 16384; memset(cart_buf[n], 0xFF, size); }
+        r = msx_insert_cart(M, n, cart_buf[n], size, MAPPER_MMEDIA);
+        break;
     case SPK_HBI55:                                     /* Sony HBI-55 — 메모리 창 없음, I/O B0h~B3h + SRAM 4 KiB (SRAM\HBI-55.sram) */
         size = 16384; memset(cart_buf[n], 0xFF, size);
         r = msx_insert_cart(M, n, cart_buf[n], size, MAPPER_HBI55);
@@ -7985,7 +8243,7 @@ static int special_apply(int n, int kind, int quiet)
     cart_mapper[n] = -1;
     copy_str(cart_path[n], sizeof cart_path[n], d->files ? path : "");
     copy_str(cart_name[n], sizeof cart_name[n], d->name);
-    disks_reinsert();
+    if (quiet != 2) disks_reinsert();                   /* 8.0.226: quiet 2 = 프로그램이 도는 중에 자동으로 꽂음 (디스크는 건드리지 않음) */
     if (!quiet) {
         menu_close_all();
         after_cart_insert(n);
@@ -7994,7 +8252,7 @@ static int special_apply(int n, int kind, int quiet)
     return 0;
 }
 
-static int insert_special(int n, int kind) { return special_apply(n, kind, 0); }
+static int insert_special(int n, int kind) { return x86_cart_in_other_slot(n, kind) ? -1 : special_apply(n, kind, 0); }   /* 8.0.187: 이미 다른 슬롯에 꽂힌 X86 카트리지는 또 꽂지 않음 */
 /* GT 처럼 MIDI 단자가 든 기종이 아니면, MIDI 기계를 꽂을 때 X86MSX MIDI 카트리지(MSX-MIDI 호환)를 자동으로 꽂음.
  * 자리 = 기종의 마지막 슬롯, 거기 뭐가 있으면 그 앞의 빈 슬롯 (free_cart_slot). 이미 MIDI 단자(SFG·Music Module·외장 MSX-MIDI)가 있으면 안 꽂음.
  * 기계를 모두 빼면 자동으로 꽂았던 카트리지는 뺌 */
@@ -8019,6 +8277,7 @@ static int special_kind(int code) { return code == 64 ? 0 : code == 65 ? 1 : cod
 #include "fe_state.inc"
 #include "fe_video.inc"
 #include "fe_sys.inc"
+#include "fe_log.inc"                                    /* 8.0.129 분야별 상태 기록 */
 #include "fe_vhd.inc"                                  /* 3.7.1 가상 하드 */
 #include "fe_basic.inc"
 #include "fe_prnview.inc"
@@ -8040,9 +8299,15 @@ typedef struct {
     char hd2[FE_PATH_MAX];                                     /* 3.4.3: 슬레이브 */
     int mport;                                          /* 3.4.3 MOUSE-05: MSX 마우스 포트 + 1 (0 = 정하지 않음). ini에는 expand + 10 × mport */
     int mflags;                                         /* 3.4.4: MSX 마우스 X 반전(1)·Y 반전(2)·수동 잠금(4), 8 = 저장됨. ini에는 + 100 × mflags */
+    int has_v; char vhd[VHD_N][64]; int vmb[VHD_N], vkind[VHD_N];   /* 8.0.105: 가상 하드(폴더) C~H 도 기종별. ini 에는 EnvV1~8 */
 } Env;
-static Env envs[8];
-static int nenv;
+static Env envs_all[3][8];                              /* 8.0.194: [0] = 상태 저장 1 기록, [1] = 상태 저장 2 기록, [2] = 둘 다 끈 세션의 메모리뿐인 기록 (ini 에 안 씀) */
+static int nenv_all[3];
+static int env_parse_set = -1;                          /* ini 를 읽고 쓰는 동안만: 어느 기록 묶음인지 */
+static int env_set_index(void) { return env_parse_set >= 0 ? env_parse_set : resume_mode() == 1 ? 0 : resume_mode() == 2 ? 1 : 2; }
+#define envs (envs_all[env_set_index()])
+#define nenv (nenv_all[env_set_index()])
+static int env_changed;                                 /* 8.0.104: 이번 env_apply 가 다른 기종으로 바꾼 것인지 (같은 기종 다시 켜기는 0) */
 
 static Env *env_find(const char *name, int create)
 {
@@ -8055,15 +8320,39 @@ static Env *env_find(const char *name, int create)
     return &envs[7];
 }
 
+static void env_key(char *out, int max, int set, const char *base, int index)   /* "Env3" (1) / "Rs2Env3" (2) */
+{
+    copy_str(out, max, set ? "Rs2" : "");
+    str_append(out, max, base);
+    char d[2] = { (char)('1' + index), 0 };
+    str_append(out, max, d);
+}
+
+/* 8.0.227: 기종 환경에 특수 카트리지를 적을 때, 프로그램이 찾아서 자동으로 꽂은 X86 Multimedia 는 적지 않음 (다음에 켰을 때 슬롯을 차지하고 있지 않게).
+ * 사용자가 빼거나 다른 카트리지로 바꿨으면 자동 표시는 이미 무효 */
+static int mm_auto_slot_valid(void)
+{
+    if (mm_auto_slot >= 0 && (!M->cart[mm_auto_slot].present || cart_special[mm_auto_slot] != sp_code(MM_KIND_MULTIMEDIA))) mm_auto_slot = -1;
+    return mm_auto_slot;
+}
+static void env_copy_specials(Env *e)
+{
+    for (int n = 0; n < MSX_CART_SLOTS; n++) e->special[n] = cart_special[n];
+    int auto_slot = mm_auto_slot_valid();
+    if (auto_slot >= 0) e->special[auto_slot] = 0;
+}
 static void env_save_current(void)
 {
     Env *e = env_find(machine_name, 1);
     e->expand = slot_expand;
     e->mport = mouse_port + 1;
     e->mflags = 8 | (mouse_invx ? 1 : 0) | (mouse_invy ? 2 : 0) | (mouse_lock ? 4 : 0);   /* 3.4.4 */
-    for (int n = 0; n < MSX_CART_SLOTS; n++) e->special[n] = cart_special[n];
+    if (!resume_any()) return;                             /* 8.0.104: 기종 상태 저장이 꺼져 있으면 특수 카트리지·하드 디스크는 기종별로 저장하지 않음 (켜 둔 때 값 그대로 보관) */
+    env_copy_specials(e);
     copy_str(e->hd, sizeof e->hd, hd_secs ? hd_path : "");
     copy_str(e->hd2, sizeof e->hd2, hd2_secs ? hd2_path : "");
+    e->has_v = vhd_any();                               /* 8.0.105: 가상 하드도 기종별 (하나도 없으면 기록 없음) */
+    for (int i = 0; i < VHD_N; i++) { copy_str(e->vhd[i], sizeof e->vhd[i], vhd_dir[i]); e->vmb[i] = vhd_mb[i]; e->vkind[i] = vhd_kind[i]; }
 }
 
 /* 지금 기종의 환경을 적용 (특수 카트리지 다시 꽂기). 일반 롬팩은 모두 빠진 상태가 된다 */
@@ -8079,18 +8368,44 @@ static void env_apply(void)
     else if (!e && msx_dev(M, MDEV_TRPAUSE)) mouse_port = 1;    /* 4.0: turbo R은 MSX-View가 마우스를 쓰므로 처음엔 포트 1 (바꾼 적 있으면 저장한 값) */
     if (e && (e->mflags & 8)) { mouse_invx = e->mflags & 1; mouse_invy = (e->mflags >> 1) & 1; mouse_lock = (e->mflags >> 2) & 1; }   /* 3.4.4 */
     if (msx_set_expand(M, slot_expand)) { slot_expand = 0; msx_set_expand(M, 0); }
+    {   /* 8.0.105: 가상 하드(폴더) 도 기종별. 기록이 있으면 그것, 다른 기종으로 바꿨는데 기록이 없으면 비움 (처음 켤 때·같은 기종 다시 켜기는 지금 값 유지) */
+        int vch = 0;
+        if (resume_any() && e && e->has_v) {
+            for (int i = 0; i < VHD_N; i++) { copy_str(vhd_dir[i], sizeof vhd_dir[i], e->vhd[i]); vhd_mb[i] = e->vmb[i]; vhd_kind[i] = e->vkind[i]; }
+            vch = 1;
+        } else if (env_changed) {
+            for (int i = 0; i < VHD_N; i++) vhd_dir[i][0] = 0;
+            vch = 1;
+        }
+        if (vch) { vhd_unmount_all(); settings_changed(); }
+    }
     for (int n = 0; n < MSX_CART_SLOTS; n++) {
         if (M->cart[n].present) cart_remove(n);
         cart_special[n] = 0; cart_path[n][0] = 0; cart_name[n][0] = 0; cart_mapper[n] = -1; cart_size[n] = 0;
-        int k = e ? special_kind(e->special[n]) : -1;
+        int k = e && resume_any() ? special_kind(e->special[n]) : -1;   /* 8.0.104: 끄면 기종별 특수 카트리지 복원 안 함 */
         if (k >= 0) special_apply(n, k, 1);
     }
+    /* 8.0.63: 가상 하드(폴더)를 연결해 둔 채 기종을 바꾸면, 새 기종 환경에 가상 하드 카트리지(Nextor)가 없어도 꽂아 둠.
+       가상 하드 연결은 기종과 무관한 설정이라 카트리지만 기종마다 빠져 있었음 (연결은 그대로인데 드라이브가 안 보임) */
+    if (vhd_any() && vhd_cart() < 0) {
+        int vn = free_cart_slot();
+        if (vn < 0) toast(T(S_NO_FREE_SLOT), 0);
+        else special_apply(vn, 49, 1);
+    }
+    /* 8.0.63: 하드 디스크 이미지도 가상 하드처럼 기종을 바꿔도 유지. 새 기종 환경에 이미지가 기록돼 있으면 그것을, 없으면 지금 꽂힌 이미지를 그대로 (롬팩은 hd_insert 가 종류에 맞게 뒤 빈 슬롯부터 꽂음) */
+    static char keep_hd[FE_PATH_MAX], keep_hd2[FE_PATH_MAX];
+    copy_str(keep_hd, sizeof keep_hd, hd_secs ? hd_path : "");
+    copy_str(keep_hd2, sizeof keep_hd2, hd2_secs ? hd2_path : "");
     hd_eject();
-    if (e && e->hd[0]) {                                /* 하드 디스크 (2.8): 기종 환경으로 되살림 */
-        const char *nm = e->hd;
-        for (const char *q = e->hd; *q; q++) if (*q == '\\') nm = q + 1;
-        hd_insert(e->hd, nm, 1);
-        if (e->hd2[0]) { const char *n2 = e->hd2; for (const char *q = e->hd2; *q; q++) if (*q == '\\') n2 = q + 1; hd2_insert(e->hd2, n2, 1); }
+    const char *h1 = e && resume_any() && e->hd[0] ? e->hd : keep_hd;   /* 8.0.104: 끄면 기종별 하드 디스크 복원 안 함 */
+    const char *h2 = e && resume_any() && e->hd[0] ? e->hd2 : keep_hd2;
+    if (env_changed && resume_any()) { h1 = e ? e->hd : ""; h2 = e ? e->hd2 : ""; }   /* 8.0.105: 다른 기종으로 바꾸면 그 기종의 하드만 (기록이 없으면 비움). 이전엔 지금 꽂힌 것이 따라갔음 */
+    if (!resume_any() && env_changed) h1 = h2 = "";        /* 8.0.104: 끈 채 다른 기종으로 바꾸면 꽂아 둔 하드 디스크는 비워짐 (같은 기종 다시 켜기는 유지) */
+    if (h1[0]) {                                        /* 하드 디스크 (2.8): 기종 환경으로 되살림 */
+        const char *nm = h1;
+        for (const char *q = h1; *q; q++) if (*q == '\\') nm = q + 1;
+        hd_insert(h1, nm, 1);
+        if (h2[0] && hd_secs) { const char *n2 = h2; for (const char *q = h2; *q; q++) if (*q == '\\') n2 = q + 1; hd2_insert(h2, n2, 1); }
     }
 }
 
@@ -8112,10 +8427,40 @@ static void env_parse(const char *v)
         else if (f - 2 < 4) e->special[f - 2] = e->special[f - 2] * 10 + (*p - '0');   /* 카트리지 1~4 (자리 번호는 3.6.6까지와 같음) */
         else if (f == 6 && k < (int)sizeof e->hd - 1) { e->hd[k++] = *p; e->hd[k] = 0; }   /* 하드 디스크 경로 */
         else if (f == 7 && k < (int)sizeof e->hd2 - 1) { e->hd2[k++] = *p; e->hd2[k] = 0; }   /* 3.4.3 슬레이브 */
-        else if (f == 8) e->special[4] = e->special[4] * 10 + (*p - '0');   /* 3.6.7: 카트리지 5 (맨 뒤) */
+        else if (f >= 8 && f - 4 < MSX_CART_SLOTS) e->special[f - 4] = e->special[f - 4] * 10 + (*p - '0');   /* 3.6.7: 카트리지 5 (맨 뒤), 8.0.191: 6~8 */
     }
     e->mport = e->expand / 10 % 10; e->mflags = e->expand / 100 % 16; e->expand %= 10;   /* 3.4.3, 3.4.4 */
     if (e->machine[0]) nenv++;
+}
+
+/* 8.0.105: "EnvV1=기종|C,D,E,F,G,H|MB:종류,..." */
+static void envv_parse(const char *v)
+{
+    const char *bar = 0;
+    for (const char *p = v; *p; p++) if (*p == '|') { bar = p; break; }
+    if (!bar || bar - v >= 64) return;
+    char name[64]; int k = (int)(bar - v);
+    memcpy(name, v, (size_t)k); name[k] = 0;
+    Env *e = env_find(name, 1);
+    const char *p = bar + 1;
+    for (int i = 0; i < VHD_N; i++) {
+        int n = 0;
+        while (*p && *p != ',' && *p != '|') { if (n < 63) e->vhd[i][n++] = *p; p++; }
+        e->vhd[i][n] = 0;
+        if (!strcmp(e->vhd[i], "-")) e->vhd[i][0] = 0;
+        if (*p == ',') p++;
+    }
+    if (*p == '|') p++;
+    for (int i = 0; i < VHD_N && *p; i++) {
+        long mb = ini_long(p); while (*p && *p != ':' && *p != ',') p++;
+        int kd = 0; if (*p == ':') { p++; kd = (int)ini_long(p); }
+        while (*p && *p != ',') p++;
+        if (*p == ',') p++;
+        e->vmb[i] = mb >= 1 && mb <= 4095 ? (int)mb : 32;
+        e->vkind[i] = kd >= VF_AUTO && kd <= VF_FAT16 ? kd : VF_AUTO;
+    }
+    e->has_v = 0;
+    for (int i = 0; i < VHD_N; i++) if (e->vhd[i][0]) e->has_v = 1;
 }
 
 static int hex_val(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : 0; }
@@ -8133,7 +8478,7 @@ static int cmos_capture(void)
     if (e->has_cmos && !memcmp(rtc, e->rtc, sizeof rtc) && !memcmp(sr, e->s1985, sizeof sr)) return 0;
     if (!e->has_cmos) {                                 /* 처음: 기본 환경도 지금 값으로 */
         e->expand = slot_expand;
-        for (int n = 0; n < MSX_CART_SLOTS; n++) e->special[n] = cart_special[n];
+        if (resume_any()) env_copy_specials(e);
     }
     e->has_cmos = 1;
     memcpy(e->rtc, rtc, sizeof rtc); memcpy(e->s1985, sr, sizeof sr);
@@ -8171,11 +8516,16 @@ static void settings_changed(void) { settings_dirty = 1; settings_due = P.ms() +
 /* 5.3.56: 연주 중에는 설정 저장을 미룸. USB 쓰기가 0.3초 안팎 걸려 그동안 MSX·소리가 멈췄음.
  * "연주 중" = MSX 가 돌고(메뉴·창이 없고) 최근 1초 안에 소리가 났을 때. 소리가 없거나 메뉴가 열리면 저장 */
 static uint32_t snd_loud_ms;                         /* 마지막으로 소리가 컸던 때 */
+/* 8.0.224: "지금 연주 중" = MSX 가 돌고 최근 1초 안에 소리가 남. 메뉴·창이 열려 있어도 같음 (1분 주기 기록처럼 창과 상관없이 연주를 끊으면 안 되는 쓰기용) */
+static int snd_playing(uint32_t now)
+{
+    return run_state == RUN_ON && snd_loud_ms && now - snd_loud_ms < 1000;
+}
 static int ini_defer(uint32_t now)
 {
     if (run_state != RUN_ON) return 0;
     if (ui_active() && !live_ui()) return 0;
-    return snd_loud_ms && now - snd_loud_ms < 1000;
+    return snd_playing(now);
 }
 
 static void ini_put(char *b, const char *key, const char *val)
@@ -8269,7 +8619,6 @@ static void sf_load_slot(int slot, int quiet)
     f->size = n; f->state = 1;
     if (!quiet) toast(T(S_SF_LOADED), f->name);
 }
-static int sf_presets(int slot) { gm_sf_slot(slot); return gm_sf2_presets(); }
 /* Roland SC-55 (Nuked-SC55) — USB\MidiSound\SC55\ 의 롬. SC-55mkII (rom1·rom2·waverom1·waverom2·rom_sm.bin) 를 먼저, 없으면 SC-55 (sc55_rom1·2·waverom1·2·3.bin) */
 static void sc55_load(int quiet)
 {
@@ -8451,12 +8800,8 @@ enum { OF_NONE, OF_NUM, OF_PCT, OF_SIGNED, OF_GAMMA, OF_PCT_OFF, OF_INV };   /* 
 typedef struct { const char *key; int *var; uint8_t kind; int lo, hi, bad; uint8_t per_machine; uint16_t prop; uint8_t step, ui; uint16_t str; uint8_t fmt; } FeOpt;   /* RANGE: 밖이면 bad, CLAMP: lo~hi 로 자름, MASK: & hi */
 /* 속성 창 — prop = 속성 항목 번호 (0 = 창에 없음), step = 막대 한 칸 (0 = 켜기/끄기), ui = 바꾼 뒤 할 일 (OU_*)
  * str = 줄 이름(StrId), fmt = 값 글자 꼴 (OF_*). 이 둘이 있으면 속성 창 줄도 표가 그림 (opt_prop_item) */
-int mp_pool_on;                                     /* 8.0.1: ini MpPool=1 일 때만 모든 코어를 일꾼으로 띄워 시험 (uefi/main.c 가 읽음) */
 int mp_pool_done;                                   /* 8.0.17: 일꾼 시험이 끝나면 1 → DIAG.TXT 다시 저장 */
 int mp_wake_done;                                   /* 8.0.7: 깨우기 시험이 끝나면 1 → DIAG.TXT 다시 저장 */
-int mp_auto = 1;                                    /* 8.0.8: ini MpAuto=0 이면 허용 PC 에서도 코어를 깨우지 않음 (한 코어만 사용). 기본 1 */
-int mp_wake_on;                                     /* 8.0.6: ini MpWake=1 일 때만 다른 코어 하나를 APIC 로 깨워 보는 시험 (uefi/main.c 가 읽음) */
-int mp_test_on;                                     /* 8.0.1: ini MpTest=1 일 때만 다른 코어 시험 (uefi/main.c 가 읽음) */
 static const FeOpt fe_opts[] = {
     { "Mute", &muted, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
     { "Volume", &volume, OPT_CLAMP, 0, 100, 0, 1, 0, 0, 0 },
@@ -8471,24 +8816,33 @@ static const FeOpt fe_opts[] = {
     { "FxNoise", &fx_noise, OPT_CLAMP, 0, 100, 0, 1, 55, 10, OU_C32|OU_REDRAW|OU_HAND, S_FX_NOISE, OF_PCT_OFF },
     { "Aspect", &aspect_mode, OPT_RANGE, 0, 2, 0, 1, 0, 0, 0 },
     { "VdpCmdTiming", &msx_vdp_cmd_timing, OPT_BOOL, 0, 0, 0, 1, 58, 0, 0, S_VDP_TIMING, OF_NONE },
-    { "VdpAsm", &vdpk_asm_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
-    { "MpPresent", &mp_present, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
-    { "MpMidi", &msx_mp_midi, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.25: MIDI 음원(GM·MT-32) 합성을 일꾼 코어가 (다른 음원 섞는 동안, 늦어짐 없음) */
     { "LogDiag", &log_diag, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.30: 스위치 탭 — LOG\DIAG.TXT */
-    { "LogStall", &log_stall, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\STALL.TXT */
-    { "LogSndLog", &log_sndlog, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\SNDLOG.TXT */
-    { "LogKey", &log_key, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\KEY_X<버전>.TXT (기본 끔) */
-    { "LogSndGlitch", &log_sndglitch, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\SNDGLITCH.TXT (기본 끔) */
+    { "LogUsb", &log_area[LA_USB], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\USB.TXT (USB 상태 바뀔 때) */
+    { "LogKey", &log_key, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* LOG\KEY_X<버전>.TXT (처음 기본 켬, 8.0.76) */
+    { "LogSnd", &log_area[LA_SND], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\SNDLOG.TXT + SNDGLITCH.TXT */
+    { "LogMouse", &log_area[LA_MOUSE], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\MOUSE.TXT */
+    { "LogJoy", &log_area[LA_JOY], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\JOY.TXT */
+    { "LogTouchpad", &log_area[LA_TP], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\TOUCHPAD.TXT */
+    { "LogVideo", &log_area[LA_VID], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\STALL.TXT */
+    { "LogWifi", &log_area[LA_WIFI], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\WIFI.TXT */
+    { "LogLan", &log_area[LA_LAN], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\LAN.TXT */
+    { "LogColor", &log_area[LA_COLOR], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.129: LOG\COLOR.TXT */
+    { "LogBoot", &log_area[LA_BOOT], OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },    /* 8.0.134: LOG\BOOT_X·DRV_X·LASTHANG·HANG·*_HDMI */
+    { "LogCmdTrail", &log_crumb, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.86: LOG\CRUMB.TXT (USB·영상·소리 명령 흔적, 기본 켬) */
+    { "LogVramTop", &log_vram_top, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.175: 1 = VRAM 맨 앞 1 KB 에 쓰는 Z80 위치를 CRUMB.TXT 에 적음 (기본 0) */
+    { "LogUsbRead", &mmusb_log_read, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.124: 1 = USB 데이터 읽기(24)도 흔적(기본, 기존). 0 = 안 씀 */
+    { "Mp4SkipNonRef", &mp4p_skip_nonref, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.139: 1 = 화면에 안 나올 비참조 프레임은 해독 생략 (Main/High). 기본 0 */
+    { "Mp4Fast", &mp4p_fast, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.123: 1 = MP4 빠른 화면 처리(순서 디더·팔레트 8프레임마다). 기본 0 = 기존 방식 */
     { "MpMwait", &mp_mwait_ini, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.23: 노는 일꾼 코어를 MWAIT 로 재움 (0 = pause 로 돌기) */   /* 8.0.23: 화면 줄 그리기를 일꾼 코어와 나눔 (기본 켬, 일꾼이 없으면 메인 혼자) */
-    { "MpPool", &mp_pool_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.1 다중CPU 4-2a: 있는 코어를 모두 일꾼으로 (기본 끔) */
-    { "MpAuto", &mp_auto, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.8: 허용 PC 자동 깨우기 켬/끔 */
-    { "MpWake", &mp_wake_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.6: APIC 로 코어 하나 깨우기 시험 (기본 끔) */
-    { "MpTest", &mp_test_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.1 다중CPU 4-1: 다른 코어에 숫자 세기를 시키는 시험 (기본 끔) */   /* 5.3.37 7단계: VDP 그리기 점 커널 어셈블러판 (기본 끔 = C판) */
     { "PrnMode", &prn_mode, OPT_RANGE, 0, 2, 0, 1, 0, 0, 0 },
     { "PrnPreview", &prn_preview, OPT_RANGE, 0, 2, 1, 0, 0, 0, 0 },
     { "SpriteHide", &spr_hide, OPT_BOOL, 0, 0, 0, 1, 51, 0, OU_SPR, S_SPR_SHOW, OF_INV },
     { "HideIcons", &icons_off, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },
     { "IconsAlways", &icons_always, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 5.2.141 */
+    { "NtpOn", &ntp_on, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },     /* 8.0.49: IP 를 받으면 인터넷 시간으로 시계 맞추기 (기본 켜짐) */
+    { "NtpTz", &ntp_tz, OPT_CLAMP, -720, 840, 0, 0, 0, 0, 0 },     /* 8.0.49: 시간대 (UTC 와의 차, 분. 기본 540 = 한국 +9) */
+    { "NtpServer", &ntp_srv, OPT_CLAMP, 0, 6, 0, 0, 0, 0, 0 },     /* 8.0.54: 시간 서버 번호 (fe_net.inc ntp_srv_name) */
+    { "NetBootWait", &net_bw_s, OPT_CLAMP, 0, 60, 0, 0, 0, 0, 0 },     /* 8.0.45: 네트워크 롬팩이 있을 때 부팅 전에 IP 를 기다리는 최대 초 (0 = 안 기다림, ini 전용) */     /* 8.0.43: MSX에서 고친 시계를 PC 시계에도 (ini 전용) */
     { "SpriteNoLimit", &spr_nolimit, OPT_BOOL, 0, 0, 0, 1, 52, 0, OU_SPR, S_SPR_NOLIMIT, OF_NONE },
     { "RomTop", &rom_top, OPT_INT, 0, 0, 0, 0, 0, 0, 0 },
     { "DiskTop", &disk_top, OPT_INT, 0, 0, 0, 0, 0, 0, 0 },
@@ -8506,8 +8860,8 @@ static const FeOpt fe_opts[] = {
     { "MouseLock", &mouse_lock, OPT_BOOL, 0, 0, 0, 0, 97, 0, OU_ANYDIR },
     { "MousePointer", &mouse_ptr, OPT_MASK, 0, 3, 0, 0, 0, 0, 0 },
     { "MouseWheel", &mouse_wheel, OPT_RANGE, 1, 5, 1, 0, 99, 1, 0, S_MOUSE_WHEEL, OF_NUM },
-    { "GlobalSave", &global_save, OPT_BOOL, 0, 0, 0, 0, 172, 0, 0, S_GLOBAL_SAVE, OF_NONE },
     { "Resume", &resume_on, OPT_BOOL, 0, 0, 0, 0, 15, 0, 0, S_RESUME, OF_NONE },
+    { "Resume2", &resume2_on, OPT_BOOL, 0, 0, 0, 0, 267, 0, 0, S_RESUME2, OF_NONE },     /* 8.0.117 */
     { "BootCtrl", &boot_ctrl, OPT_BOOL, 0, 0, 0, 1, 170, 0, 0, S_BOOT_CTRL, OF_NONE },
     { "AutoCtrl", &auto_ctrl, OPT_BOOL, 0, 0, 0, 1, 171, 0, 0, S_AUTO_CTRL, OF_NONE },
     { "FlashAuto", &cart_flash_auto, OPT_MASK, 0, 3, 0, 0, 0, 0, 0 },
@@ -8524,10 +8878,13 @@ static const FeOpt fe_opts[] = {
     { "MidiCho", &fx_cho, OPT_CLAMP, 0, 200, 0, 0, 0, 0, 0 },
     { "MidiLen", &fx_len, OPT_CLAMP, 0, 200, 0, 0, 0, 0, 0 },
     { "MidiFxOn", &fx_on, OPT_BOOL, 0, 0, 0, 1, 0, 0, 0 },
+    { "Mt32Real", &mt_real, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* 8.0.68 */
+    { "Mt32Reverb", &mt_rev, OPT_CLAMP, 0, 4, 0, 0, 0, 0, 0 },
     { "AcpiMode", &acpi_mode, OPT_BOOL, 0, 0, 0, 0, 0, 0, 0 },   /* ini 전용 (실험) */
     { "SndSync", &snd_sync_mode, OPT_CLAMP, 1, 2, 1, 0, 0, 0, 0 },
     { "ShotFull", &shot_full, OPT_BOOL, 0, 0, 0, 0, 266, 0, 0, S_SHOT_FULL, OF_NONE },   /* 5.3.28 비디오 탭 스위치 */
-    { "PowerSave", &power_save, OPT_CLAMP, 0, 2, 0, 0, 0, 0, 0 },   /* 5.3.18 ini 전용: 1 = 프레임 사이 hlt 로 쉼 (발열·팬) */   /* 5.3.17 ini 전용: 1 기본 소리 속도 맞춤(5.3.14), 2 시험 루틴 */
+    /* 8.0.200: ini PowerSave 없앰 (절전은 늘 켬) */
+    /* 8.0.200: PowerSave 스위치 없앰 — 절전은 늘 켬 */   /* 5.3.18 ini 전용: 1 = 프레임 사이 hlt 로 쉼 (발열·팬) */   /* 5.3.17 ini 전용: 1 기본 소리 속도 맞춤(5.3.14), 2 시험 루틴 */
     { "MidiInPort", &midi_in_port, OPT_CLAMP, 0, MDP_N - 1, 0, 0, 0, 0, 0 },   /* 5.2.56 */
     { "PanaFront", &pana_front, OPT_BOOL, 0, 0, 0, 1, 0, 0, 0 },
     { "PanaPause", &pana_pause, OPT_BOOL, 0, 0, 0, 1, 0, 0, 0 },
@@ -8548,7 +8905,9 @@ static int opt_prop_change(int id, int dir)
 {
     const FeOpt *o = opt_of_prop(id);
     if (!o || (o->ui & OU_HAND)) return 0;
-    if (!o->step) { if (dir && !(o->ui & OU_ANYDIR)) return 1; *o->var = !*o->var; }
+    if (!o->step) { if (dir && !(o->ui & OU_ANYDIR)) return 1; *o->var = !*o->var;
+        if (o->var == &resume_on && resume_on) resume2_on = 0;        /* 8.0.117: 기종 상태 저장 1 과 2 는 하나만 켜짐 */
+        if (o->var == &resume2_on && resume2_on) resume_on = 0; }
     else { if (!dir) return 1; int v = *o->var + dir * o->step; *o->var = v < o->lo ? o->lo : v > o->hi ? o->hi : v; }
     opt_after(o);
     return 1;
@@ -8608,7 +8967,8 @@ static void settings_flush(void)
     char *b = (char *)ini_buf;
     b[0] = 0;
     str_append(b, INI_SIZE, "; X86MSX settings and last state (written automatically)\n[State]\n");
-    ini_put(b, "Machine", machine_name);
+    if ((resume_any() && resume_mode() == 1) || want_machine[0]) ini_put(b, "Machine", resume_any() && resume_mode() == 1 ? machine_name : want_machine);          /* 8.0.194: 마지막 기종도 1·2 따로, 둘 다 끈 세션은 예전 기록을 그대로 */
+    if ((resume_any() && resume_mode() == 2) || want_machine2[0]) ini_put(b, "Machine2", resume_any() && resume_mode() == 2 ? machine_name : want_machine2);
     ini_num(b, "VideoOut", video_out);
     
     opt_tab_save(b);                                    /* 5.2.35 설정 표 */
@@ -8672,33 +9032,48 @@ static void settings_flush(void)
     
     /* 롬팩·디스크·카세트는 저장하지 않는다 (요구 3). 기종별 환경(슬롯 확장, 특수 카트리지)만 */
     env_save_current();
-    for (int e = 0; e < nenv; e++) {
-        char k[8] = "Env1", v[2 * FE_PATH_MAX + 64];
-        k[3] = (char)('1' + e);
-        copy_str(v, sizeof v, envs[e].machine);
-        for (int q = 0; q < 1 + 4; q++) {
-            str_append(v, sizeof v, "|");
-            int x = q ? envs[e].special[q - 1] : envs[e].expand + 10 * envs[e].mport + 100 * envs[e].mflags;
-            num_append(v, sizeof v, (uint32_t)x, 0, ' ');
+    for (int es = 0; es < 2; es++) {                    /* 8.0.194: 상태 저장 1 기록(Env…)과 2 기록(Rs2Env…)을 따로 */
+        env_parse_set = es;
+        for (int e = 0; e < nenv; e++) {
+            char k[16], v[2 * FE_PATH_MAX + 64];
+            env_key(k, sizeof k, es, "Env", e);
+            copy_str(v, sizeof v, envs[e].machine);
+            for (int q = 0; q < 1 + 4; q++) {
+                str_append(v, sizeof v, "|");
+                int x = q ? envs[e].special[q - 1] : envs[e].expand + 10 * envs[e].mport + 100 * envs[e].mflags;
+                num_append(v, sizeof v, (uint32_t)x, 0, ' ');
+            }
+            int last = 0;                                   /* 8.0.191: 카트리지 5~8(자리 4~7)도 저장 — 하드 디스크 두 칸 뒤에 차례로 (0 이 아닌 마지막 칸까지) */
+            for (int n = 4; n < MSX_CART_SLOTS; n++) if (envs[e].special[n]) last = n;
+            if (envs[e].hd[0] || last) { str_append(v, sizeof v, "|"); str_append(v, sizeof v, envs[e].hd); }
+            if ((envs[e].hd[0] && envs[e].hd2[0]) || last) { str_append(v, sizeof v, "|"); str_append(v, sizeof v, envs[e].hd[0] ? envs[e].hd2 : ""); }
+            for (int n = 4; n <= last; n++) { str_append(v, sizeof v, "|"); num_append(v, sizeof v, (uint32_t)envs[e].special[n], 0, ' '); }
+            ini_put(b, k, v);
         }
-        int s5 = envs[e].special[4];                    /* 3.6.7: 카트리지 5는 하드 디스크 두 칸 뒤 (옛 ini와 자리 맞춤) */
-        if (envs[e].hd[0] || s5) { str_append(v, sizeof v, "|"); str_append(v, sizeof v, envs[e].hd); }
-        if ((envs[e].hd[0] && envs[e].hd2[0]) || s5) { str_append(v, sizeof v, "|"); str_append(v, sizeof v, envs[e].hd[0] ? envs[e].hd2 : ""); }
-        if (s5) { str_append(v, sizeof v, "|"); num_append(v, sizeof v, (uint32_t)s5, 0, ' '); }
-        ini_put(b, k, v);
-    }
-    for (int e = 0; e < nenv; e++) {                    /* 배터리 백업 내용 (기종별) */
-        if (!envs[e].has_cmos) continue;
-        static const char hx[] = "0123456789ABCDEF";
-        char k[8] = "Cmos1", v[160];
-        k[4] = (char)('1' + e);
-        copy_str(v, sizeof v, envs[e].machine);
-        str_append(v, sizeof v, "|");
-        char t[2] = "0";
-        for (int i = 0; i < 39; i++) { t[0] = hx[envs[e].rtc[i / 13][i % 13] & 15]; str_append(v, sizeof v, t); }
-        str_append(v, sizeof v, "|");
-        for (int i = 0; i < 16; i++) { t[0] = hx[envs[e].s1985[i] >> 4]; str_append(v, sizeof v, t); t[0] = hx[envs[e].s1985[i] & 15]; str_append(v, sizeof v, t); }
-        ini_put(b, k, v);
+        for (int e = 0; e < nenv; e++) {                    /* 8.0.105: 가상 하드 (기종별) — EnvV1=기종|C폴더,D폴더,...(없으면 -)|MB:종류,... */
+            if (!envs[e].has_v) continue;
+            char k[16], v[6 * 80 + 96];
+            env_key(k, sizeof k, es, "EnvV", e);
+            copy_str(v, sizeof v, envs[e].machine); str_append(v, sizeof v, "|");
+            for (int i = 0; i < VHD_N; i++) { if (i) str_append(v, sizeof v, ","); str_append(v, sizeof v, envs[e].vhd[i][0] ? envs[e].vhd[i] : "-"); }
+            str_append(v, sizeof v, "|");
+            for (int i = 0; i < VHD_N; i++) { if (i) str_append(v, sizeof v, ","); num_append(v, sizeof v, (uint32_t)envs[e].vmb[i], 0, ' '); str_append(v, sizeof v, ":"); num_append(v, sizeof v, (uint32_t)envs[e].vkind[i], 0, ' '); }
+            ini_put(b, k, v);
+        }
+        for (int e = 0; e < nenv; e++) {                    /* 배터리 백업 내용 (기종별) */
+            if (!envs[e].has_cmos) continue;
+            static const char hx[] = "0123456789ABCDEF";
+            char k[16], v[160];
+            env_key(k, sizeof k, es, "Cmos", e);
+            copy_str(v, sizeof v, envs[e].machine);
+            str_append(v, sizeof v, "|");
+            char t[2] = "0";
+            for (int i = 0; i < 39; i++) { t[0] = hx[envs[e].rtc[i / 13][i % 13] & 15]; str_append(v, sizeof v, t); }
+            str_append(v, sizeof v, "|");
+            for (int i = 0; i < 16; i++) { t[0] = hx[envs[e].s1985[i] >> 4]; str_append(v, sizeof v, t); t[0] = hx[envs[e].s1985[i] & 15]; str_append(v, sizeof v, t); }
+            ini_put(b, k, v);
+        }
+        env_parse_set = -1;
     }
     ini_put(b, "ImgDir", img_dir); ini_put(b, "ImgDirName", img_dir_disp);   /* 3.8.1 이미지 만들기 저장 폴더 */
     ini_put(b, "DirInsDir", dir_dir); ini_put(b, "DirInsDirName", dir_dir_disp); ini_put(b, "DirInsSel", dir_sel); ini_num(b, "DirInsTop", dir_top);   /* 3.8.1 */
@@ -8734,7 +9109,6 @@ static long ini_long(const char *v)
     return neg ? -x : x;
 }
 
-static char want_machine[128];
 void fe_set_default_machine(const char *name) { copy_str(machine_name, sizeof machine_name, name); }
 
 /* 4.0.13: 옛 ini의 경로(0:\\DISK\\..., 표시 "Drive 1 (boot) > DISK > ...")를 새 위치(Storage Device 아래)로 바꿔 줌. 해당 없으면 v 그대로 */
@@ -8776,6 +9150,7 @@ static void ini_parse_lines(char *line)                /* 4.0.34: ini 본문(또
             v = ini_mig(v);                                     /* 4.0.13: 옛 폴더 위치 → Storage Device 아래 */
             if (opt_tab_parse(k, v)) {}                     /* 5.2.35 설정 표 */
             else if (!strcmp(k, "Machine")) copy_str(want_machine, sizeof want_machine, v);
+            else if (!strcmp(k, "Machine2")) copy_str(want_machine2, sizeof want_machine2, v);
             else if (!strcmp(k, "VideoOut")) video_out = 0;                 /* 4.0.71: 화면·소리 출력은 항상 기본으로 시작 (저장값 무시) */
 
             else if (!strcmp(k, "DiskA")) copy_str(disk_path[0], sizeof disk_path[0], v);
@@ -8871,7 +9246,7 @@ static void ini_parse_lines(char *line)                /* 4.0.34: ini 본문(또
                 for (int q = 0; q < 7; q++) if (!strcmp(v, lang2_codes[q])) lang = 3 + q;
                 if (!strcmp(v, "ar")) lang = 10;
             }
-            else if (!strncmp(k, "Cart", 4) && k[4] >= '1' && k[4] <= '5') {   /* 3.6.7: 5 */
+            else if (!strncmp(k, "Cart", 4) && k[4] >= '1' && k[4] <= '0' + MSX_CART_SLOTS) {   /* 3.6.7: 5, 8.0.184: 8칸 */
                 int n = k[4] - '1';
                 const char *t = k + 5;
                 if (!t[0]) copy_str(cart_path[n], sizeof cart_path[n], v);
@@ -8879,9 +9254,13 @@ static void ini_parse_lines(char *line)                /* 4.0.34: ini 본문(또
                 else if (!strcmp(t, "Mapper")) cart_mapper[n] = (int)ini_long(v);
                 else if (!strcmp(t, "Special")) cart_special[n] = (int)ini_long(v);
             }
-            else if (!strncmp(k, "Env", 3) && k[3] >= '1' && k[3] <= '8' && !k[4]) env_parse(v);
-            else if (!strncmp(k, "Cmos", 4) && k[4] >= '1' && k[4] <= '8' && !k[5]) cmos_parse(v);
-            else if (!strcmp(k, "SlotExpand")) { slot_expand = (int)ini_long(v); if (slot_expand < 0 || slot_expand > 2) slot_expand = 0; }
+            else if (!strncmp(k, "Env", 3) && k[3] >= '1' && k[3] <= '8' && !k[4]) { env_parse_set = 0; env_parse(v); env_parse_set = -1; }
+            else if (!strncmp(k, "EnvV", 4) && k[4] >= '1' && k[4] <= '8' && !k[5]) { env_parse_set = 0; envv_parse(v); env_parse_set = -1; }
+            else if (!strncmp(k, "Cmos", 4) && k[4] >= '1' && k[4] <= '8' && !k[5]) { env_parse_set = 0; cmos_parse(v); env_parse_set = -1; }
+            else if (!strncmp(k, "Rs2Env", 6) && k[6] >= '1' && k[6] <= '8' && !k[7]) { env_parse_set = 1; env_parse(v); env_parse_set = -1; }      /* 8.0.194: 상태 저장 2 의 기록 */
+            else if (!strncmp(k, "Rs2EnvV", 7) && k[7] >= '1' && k[7] <= '8' && !k[8]) { env_parse_set = 1; envv_parse(v); env_parse_set = -1; }
+            else if (!strncmp(k, "Rs2Cmos", 7) && k[7] >= '1' && k[7] <= '8' && !k[8]) { env_parse_set = 1; cmos_parse(v); env_parse_set = -1; }
+            else if (!strcmp(k, "SlotExpand")) { slot_expand = (int)ini_long(v); if (slot_expand < 0 || slot_expand > 3) slot_expand = 0; }
             else if (!strcmp(k, "RomDir") && v[0]) copy_str(rom_path, sizeof rom_path, v);
             else if (!strcmp(k, "RomDirName") && v[0]) copy_str(rom_disp, sizeof rom_disp, v);
         }
@@ -8905,7 +9284,7 @@ static int opt_key(const char *k)
 }
 static void opts_path(char *out, int max)
 {
-    copy_str(out, max, "0:\\States\\Resume\\"); str_append(out, max, machine_name); str_append(out, max, ".opt");
+    copy_str(out, max, "0:\\States\\Resume\\"); str_append(out, max, machine_name); str_append(out, max, resume_full() ? ".opt" : ".op2");   /* 8.0.194: 상태 저장 2 는 .op2 (1 의 .opt 와 따로) */
 }
 static void opts_save(void)
 {
@@ -8943,10 +9322,54 @@ static void opts_load(void)
     settings_changed();
 }
 
+/* 8.0.58: 진단 스위치(Log*)를 x86msx.ini 와 별도로 USB 루트의 X86MSX.SW 에도 둔다. 실기에서 켜 둔 스위치가 다시 켜면 꺼져 있던 일이 있어,
+ * 설정 파일 쪽이 어떤 이유로 되돌려져도 이 파일이 마지막으로 정한 값을 지킨다 (읽을 때 ini 보다 나중에 적용). 쓴 뒤 다시 읽어 맞는지 확인하고 틀리면 알린다 */
+#define DGSW_PATH "0:\\X86MSX.SW"
+static void dg_sw_file_save(void)
+{
+    if (!P.write_file || !P.read_file) return;
+    static char t[400]; static uint8_t rb[512]; uint32_t rn = 0;
+    t[0] = 0;
+    for (int i = 0; i < DG_LOGN; i++) { str_append(t, sizeof t, dg_sw[i].key); str_append(t, sizeof t, *dg_sw[i].flag ? "=1\n" : "=0\n"); }   /* 8.0.129: 스위치 표(dg_sw[])를 그대로 씀 */
+    uint32_t len = 0; while (t[len]) len++;
+    if (P.create) P.create(DGSW_PATH, 0);                /* USB 쓰기는 있는 파일에만 쓰므로 먼저 만들기 (이미 있으면 그대로) */
+    int bad = P.write_file(DGSW_PATH, (const uint8_t *)t, len);
+    if (!bad) { bad = P.read_file(DGSW_PATH, rb, sizeof rb - 1, &rn) || rn != len || memcmp(rb, t, len); }   /* 쓴 것을 다시 읽어 확인 */
+    if (bad) toast(lang == 1 ? "Diagnostic switch NOT saved (USB write failed)" : "진단 스위치를 USB에 저장하지 못했습니다 (쓰기 실패)", 0);
+}
+static void dg_sw_file_load(void)
+{
+    if (!P.read_file) return;
+    static uint8_t rb[512]; uint32_t rn = 0;
+    if (P.read_file(DGSW_PATH, rb, sizeof rb - 1, &rn) || !rn) return;
+    rb[rn] = 0;
+    ini_parse_lines((char *)rb);                        /* LogDiag=… 줄들 (설정 표가 받음) */
+}
+
+/* 8.0.202: 설정을 다 읽기 전에 필요한 스위치 하나만 미리 엿봄 (x86msx.ini 를 읽고, 다음 X86MSX.SW 가 있으면 그 값이 이김). 없으면 def */
+int fe_ini_peek(const char *key, int def)
+{
+    static const char *const paths[2] = { "0:\\x86msx.ini", "0:\\X86MSX.SW" };
+    static char rb[INI_SIZE]; int val = def; size_t kl = strlen(key);
+    if (!P.read_file) return def;
+    for (int f = 0; f < 2; f++) {
+        uint32_t rn = 0;
+        if (P.read_file(paths[f], (uint8_t *)rb, sizeof rb - 1, &rn) || !rn) continue;
+        rb[rn] = 0;
+        for (char *p = rb; *p; ) {
+            if (!strncmp(p, key, kl) && p[kl] == '=') val = p[kl + 1] != '0';
+            while (*p && *p != '\n') p++;
+            if (*p) p++;
+        }
+    }
+    return val;
+}
+
 void fe_restore(void)
 {
     icons_load();
     badges_load();
+    x86_roms_boot();                                    /* 8.0.77: X86 Multimedia 롬 파일이 없으면 부팅 때 만들어 둠 (꽂기 전에도 보이게) */
     romdb_load();                                       /* 첫 롬 삽입 때 멈추지 않게 미리 읽음 */
     vhd_make_dirs();                                    /* 3.7.1: DISK\\DirFolder, VMFolder 기본 폴더 */
     uint32_t size = 0;
@@ -8982,11 +9405,13 @@ void fe_restore(void)
     if (P.set_palette) P.set_palette();
     /* 기종: 저장된 기종이 지금과 다르면 바꾼다 (실패하면 지금 기종 유지) */
     /* 전체 상태 저장이 꺼져 있어도 고른 기종은 늘 기억 (예전: OFF = 늘 C-BIOS 로 시작) */
-    if (want_machine[0] && strcmp(want_machine, machine_name)) {
+    resume_boot = resume_on ? 1 : resume2_on ? 2 : 0;   /* 8.0.194: 이 세션의 저장 모드 확정 (이후 설정을 바꿔도 다음 부팅부터) */
+    const char *want = resume_boot == 1 ? want_machine : resume_boot == 2 ? want_machine2 : "";   /* 둘 다 꺼짐 = 기본 기종 */
+    if (want[0] && strcmp(want, machine_name)) {
         char err[160];
         static MachineProfile prof;
-        if (!machine_load(M, P.read_file, want_machine, &prof, err, sizeof err)) {
-            copy_str(machine_name, sizeof machine_name, want_machine);
+        if (!machine_load(M, P.read_file, want, &prof, err, sizeof err)) {
+            copy_str(machine_name, sizeof machine_name, want);
             layout();
             fe_fill(0, 0, D.w, D.h, 1);
         }
@@ -9014,6 +9439,8 @@ void fe_restore(void)
     }   /* MidiDev 줄이 있으면 그것이 기준, 없으면 예전 설정에서 기계 하나 */
     midi_synth_apply();                                 /* 3.4.5 SND3-07 */
     if (!P.boot_failed) resume_load();                  /* 2.11: 지난번 끝낼 때의 상태로 이어서 (4.0.34: 지난번 켜다 멈췄으면 건너뜀) */
+    dg_sw_file_load();                                  /* 8.0.58: 진단 스위치는 별도 파일의 값이 마지막 말 */
+    dos2_mapper_hint();                                 /* 8.0.65 */
     x86midi_check(1);                                   /* GT 가 아닌 기종 + MIDI 기계 → X86MSX MIDI 카트리지 */
 }
 
@@ -9060,9 +9487,15 @@ static int frame_samples(void) { return (int)(48000u * fe_frame_tstates() / 3579
 void fe_init(const FeDisplay *d, const FePlatform *p, MSX *m, const char *rom_dir, const char *rom_dir_disp)
 {
     sp_menu_build();                                    /* 특수 카트리지 메뉴 (src/spcat.c 표) */
+    netcard_bootwait_cb = net_bootwait;
+    netcard_boottext_cb = net_boottext;
+    netcard_bootsetup_cb = net_bootsetup;               /* 8.0.46: 부팅 중 F2 → 무선 설정 창 */                 /* 8.0.45: 네트워크 롬 INIT 이 부팅 중 IP 를 기다릴지 물을 때 */
     D = *d;
     P = *p;
     M = m;
+    msx_set_joy_live(joystick_live_read);
+    msx_set_mm_probe(mm_auto_insert_on_probe);          /* 8.0.226 */
+    if (M) msx_io_rebuild(M);
     mix_defaults();                                     /* 믹서 처음 값 (설정 파일이 덮어씀) */
     machine_rom_find = rom_find_cb; machine_rom_seen = rom_seen_cb;   /* 3.3.2 ACC-04 */
     copy_str(rom_path, sizeof rom_path, rom_dir);
@@ -9369,9 +9802,6 @@ static void mouse_frame(void)
     }
 }
 
-#define TRC(x) fe_trace(x)
-void fe_trace_ext(const char *x) { fe_trace_str("hda", x); }
-void fe_trace_plat(const char *what, const char *x) { fe_trace_str(what, x); }   /* 플랫폼 줄 (느려짐 감지 등) */
 void fe_hot_addrs(uintptr_t a[4]) { a[0] = (uintptr_t)D.fb; a[1] = (uintptr_t)pres_line32; a[2] = (uintptr_t)M; a[3] = M ? (uintptr_t)M->vdp.fb : 0; }   /* 메모리 종류 확인할 자리 */   /* 플랫폼·hda 가 진단 추적에 줄을 보탬 */
 static void fe_frame_body(void);
 static void fe_frame_core(void);
@@ -9380,27 +9810,40 @@ void fe_frame(void)
     dbl_begin();
     fe_frame_core();
     dbl_end();
-    fe_trace("frame end (back to platform)"); fe_frame_count++;
+    fe_frame_count++;
 }
+/* 8.0.198: 진단·기록 파일 쓰기(USB)에 걸린 시간을 "file" 칸에 넣음 — 전에는 "other" 로 잡혀 소리 끊김 기록(SNDGLITCH)에서 원인을 못 가렸음 */
+static void diag_save_timed(void) { PF_BEGIN; diag_save_now(); PF_END(PF_FILE); log_wrote_ms = P.ms(); }
+/* 8.0.199: 메뉴가 열려 있으면 입력(키·마우스)이 3초 멈춘 뒤에만 기록 파일을 씀. 연주 중(소리 남)에는 ini_defer 와 같이 미룸 */
+static void log_write_gate(uint32_t now)
+{
+    static int last_x = -1, last_y = -1; static uint32_t moved_ms;
+    if ((int)ptr_x != last_x || (int)ptr_y != last_y) { last_x = (int)ptr_x; last_y = (int)ptr_y; moved_ms = now; }
+    uint32_t last_input = (int32_t)(key_ev_ms - moved_ms) > 0 ? key_ev_ms : moved_ms;
+    log_write_go = !ini_defer(now) && (!ui_active() || now - last_input >= 3000);
+}
+static void log_area_tick_timed(uint32_t now) { PF_BEGIN; log_area_tick(now); PF_END(PF_FILE); }
 static void fe_frame_core(void)
 {
-    fe_trace("frame begin");
+   
     {   /* 5.2.21 사진 대신 LOG: 켠 뒤 10초에 한 번, 진단 창 탭을 바꾸거나 소리를 다시 찾은 뒤, 진단 창에서 프레임이 0.7초 넘게 멈췄으면 LOG\DIAG.TXT */
         static int boot_saved; static uint32_t last_f, last_periodic;
         uint32_t now = P.ms();
+        mm_auto_show_notice();                          /* 8.0.226 */
         if (mp_wake_done == 1) { mp_wake_done = 2; dg_save_due = now + 300; }
         if (mp_pool_done == 1) { mp_pool_done = 2; dg_save_due = now + 300; }
         { static int vs_applied; if (!vs_applied && now > 3000) { vs_applied = 1; vs_pc_apply(); } }   /* 8.0.22: 이 PC 에 저장된 화면 맞추기 시점 */
-        if (!boot_saved && now > 10000 && !ini_defer(now)) { boot_saved = 1; diag_save_now(); }   /* 8.0.19: 연주 중에는 DIAG.TXT 저장도 미룸 (USB 쓰기 동안 MSX·소리가 멈춤) */
-        else if (dg_save_due && (int32_t)(now - dg_save_due) >= 0 && !ini_defer(now)) { dg_save_due = 0; diag_save_now(); }
-        else if (boot_saved && now - last_periodic > 60000 && !ini_defer(now)) { last_periodic = now; diag_save_now(); }   /* 1분마다 LOG\DIAG.TXT 갱신 — 소리가 갑자기 사라진 뒤 그 순간의 소리 장치 상태(stream RUN, peak, re-init, latency)를 남김 */
+        if (!boot_saved && now > 10000 && !ini_defer(now)) { boot_saved = 1; diag_save_timed(); }   /* 8.0.19: 연주 중에는 DIAG.TXT 저장도 미룸 (USB 쓰기 동안 MSX·소리가 멈춤) */
+        else if (dg_save_due && (int32_t)(now - dg_save_due) >= 0 && !ini_defer(now)) { dg_save_due = 0; diag_save_timed(); }
+        else if (boot_saved && now - last_periodic > 60000 && !ini_defer(now) && !snd_playing(now)) { last_periodic = now; diag_save_timed(); }   /* 8.0.224: 진단 창이 열려 있어도 연주 중이면 1분 기록을 미룸 (이지형 PC: 60초마다 파일 쓰기와 소리 over 가 겹침) */   /* 1분마다 LOG\DIAG.TXT 갱신 — 소리가 갑자기 사라진 뒤 그 순간의 소리 장치 상태(stream RUN, peak, re-init, latency)를 남김 */
         else if (last_f && now - last_f > 700 && dialog == 2) dg_save_due = now + 100;
-        if (last_f && now - last_f > 1000) stall_note(now - last_f);   /* 1초 넘게 멈췄다 다시 돌면 LOG\STALL.TXT */
+        log_area_tick_timed(now);                             /* 8.0.129 분야별 상태 기록 (fe_log.inc) */
+        log_write_gate(now);
+        if (last_f && now - last_f > 1000 && !(log_wrote_ms && (int32_t)(log_wrote_ms - last_f) >= 0)) stall_note(now - last_f);   /* 8.0.199: 기록 쓰기 자신이 만든 멈춤은 제외 */   /* 1초 넘게 멈췄다 다시 돌면 LOG\STALL.TXT */
         last_f = now;
     }
-    TRC("core: after diag save");
+    vhd_notice_tick();                                  /* 8.0.169: 가상 하드 용량 부족 안내 창을 열 때가 됐으면 */
     int vl = P.video_lost ? P.video_lost() : 0;
-    TRC("core: after video_lost");
     if (vl == 1) {                                      /* 4.0.74: HDMI를 뽑으면 화면·소리 출력을 기본으로 */
         video_out = 0; audio_out = 0; snd_auto_hdmi = 0;
         if (P.audio_select) P.audio_select(0, snd_status, sizeof snd_status);
@@ -9422,11 +9865,8 @@ static void fe_frame_core(void)
     { static int ok_n; if (ok_n < 300 && ++ok_n == 300 && P.boot_ok) P.boot_ok(); }   /* 4.0.34: 5초쯤 잘 돌면 켜기 성공 */
     ptr_restore();                                      /* 지난 프레임의 포인터 자리를 되돌리고 */
     mouse_frame();
-    TRC("core: after mouse_frame");
     fe_frame_body();
-    TRC("core: after body");
     if (ptr_wanted()) ptr_draw();                       /* 이번 프레임 그림 위에 다시 그림 */
-    TRC("core: after pointer");
 }
 
 static void auto_ctrl_check(void)
@@ -9466,6 +9906,10 @@ static void probe_tick(uint32_t now)
     menu_dirty = 1;
 }
 
+static int midi_cart_present(void)                  /* 8.0.75: MIDI 메뉴를 보일지 — GT 내장 MIDI 단자, 또는 MIDI 카트리지(외장 MSX-MIDI·X86MSX MIDI·SFG·Music Module)가 꽂혀 있음 */
+{
+    return msx_dev(M, MDEV_MIDI_HW) || msx_midi_jacks(M) != 0 || (sp_msxmidi_slot >= 0 && M->cart[sp_msxmidi_slot].present);
+}
 static int midi_io_on(void)                           /* MSX-MIDI 입출력이 살아 있음 — GT 내장 MIDI 켬, 또는 GT 단자에 모듈이 꽂힘 (내장 끔과 따로), 또는 외장 MSX-MIDI 카트리지 */
 {
     int port_dev = 0;
@@ -9478,12 +9922,10 @@ static void fe_frame_body(void)
     msx_set_midi(M, midi_io_on());
     if (midi_bus.def_on != (uint8_t)(msx_dev(M, MDEV_MIDI_HW) && midi_int && !mix_mute[MIX_MIDI_INT])) midi_synth_apply();   /* 기종·내장 MIDI 켜기가 바뀌면 기본 음원도 */   /* 3.6.1: 내장 MIDI 설정 (기종을 바꿔도 늘 맞춤). 5.2.56: 외장 MSX-MIDI 카트리지 */
     msx_io_rebuild(M);                                  /* MIDI 포트 사슬 */
-    TRC("body: after io_rebuild");
     uint32_t kl_t0, now = P.ms();
     klog_frame_begin(now, &kl_t0);
     process_keys();
     klog_frame_end(P.ms(), kl_t0);
-    TRC("body: after keys");
     probe_tick(now);
     if (rep_key >= 0) {                                 /* 메뉴·대화 창 키 반복 (2.16) */
         if (!ui_active() || !key_down[rep_key]) rep_key = -1;
@@ -9508,29 +9950,27 @@ static void fe_frame_body(void)
     if (now - gap_reset >= 1000) { gap_show = gap_max; gap_max = 0; gap_reset = now; }
     pf_window(now);
     sysperf_tick(now);                                  /* 8.0.34: 시스템 보기 > 성능이 열려 있을 때만 1초마다 */
-    if (settings_dirty && (int32_t)(now - settings_due) >= 0 && !dialog && !ini_defer(now)) settings_flush();   /* 5.3.56: 연주 중이면 미룸 */
-    TRC("body: after settings");
+    if (settings_dirty && (int32_t)(now - settings_due) >= 0 && !dialog && !ini_defer(now)) { PF_BEGIN; settings_flush(); PF_END(PF_FILE); }   /* 5.3.56: 연주 중이면 미룸 */
     if (M->tape && M->tape_dirty && !M->tape_motor) {   /* 테이프: 모터가 멈추고 2초 뒤 저장 */
         if (!tape_due) tape_due = now + 2000;
-        if ((int32_t)(now - tape_due) >= 0) { tape_flush(); tape_due = 0; }
+        if ((int32_t)(now - tape_due) >= 0) { PF_BEGIN; tape_flush(); PF_END(PF_FILE); tape_due = 0; }
     } else tape_due = 0;
-    if (hd_dirty && now - hd_write_ms >= 2000) hd_flush();   /* 하드 디스크: 마지막 쓰기 2초 뒤 장치에 */
+    if (hd_dirty && now - hd_write_ms >= 2000) { PF_BEGIN; hd_flush(); PF_END(PF_FILE); }   /* 하드 디스크: 마지막 쓰기 2초 뒤 장치에 */
     for (int d = 0; d < 2; d++) {                       /* 디스크: 마지막 쓰기 2초 뒤 저장 */
         if (!M->fdc.drv[d].dirty) { disk_due[d] = 0; continue; }   /* (가상 디스크가 쓴 플로피도 같은 길) */
         if (!disk_due[d]) disk_due[d] = now + 2000;
-        if ((int32_t)(now - disk_due[d]) >= 0 && !M->fdc.motor) { disk_flush(d); disk_due[d] = 0; }
+        if ((int32_t)(now - disk_due[d]) >= 0 && !M->fdc.motor) { PF_BEGIN; disk_flush(d); PF_END(PF_FILE); disk_due[d] = 0; }
     }
     {                                                   /* 2.14: RTC를 PC 시계에 맞춤 (1초마다 확인) */
         static uint32_t rtc_last;
-        if (now - rtc_last >= 1000) { rtc_last = now; rtc_sync(0); }
+        if (now - rtc_last >= 1000) { rtc_last = now; rtc_sync(0); rtc_push_pc(); }
     }
     if (pend_act) {                                     /* 키를 모두 놓았으면(또는 1.5초 지나면) 오래 걸리는 동작 */
         int down = 0;
         for (int k = 0; k < 256 && !down; k++) down = key_down[k];
         if (!down || now - pend_since >= 1500) { int a = pend_act; pend_act = 0; run_pending(a); key_resync(); }
     }
-    TRC("body: after pending");
-    bgw_step(6);                                        /* 화면·소리·영상 파일을 프레임마다 6 ms 만큼 조금씩 */
+    { PF_BEGIN; bgw_step(6); PF_END(PF_FILE); }         /* 화면·소리·영상 파일을 프레임마다 6 ms 만큼 조금씩 */
     menu_out_ms = 0;                                    /* 4.0.15: 메뉴는 저절로 닫히지 않음 (옛 5초 자동 숨김·포인터가 밖에 0.8초면 닫힘 제거) — Esc나 선택으로만 닫음 */
     int running = run_state == RUN_ON && (((!dialog || live_mixer()) && (menu_under || (!depth && !bar_visible))) || live_pop());   /* 미디어 팝업도 */   /* 메뉴가 보이는 동안 정지 (3.3.3: 믹서 창은 계속) */
     M->vdp.spr_hide = (uint8_t)spr_hide; M->vdp.spr_nolimit = (uint8_t)spr_nolimit;   /* 3.2.0: 기종을 바꾸거나 상태를 불러와도 설정대로 */
@@ -9545,7 +9985,6 @@ static void fe_frame_body(void)
         if (n > 0) msx_midi_in_to(M, port, mb, n);
     }
     { PF_BEGIN; vhd_frame(now); PF_END(PF_IO); }      /* 3.7.1 가상 하드 (하이퍼콜·디스크 롬 숨김·USB 반영) */
-    TRC("body: after vhd");
     stall_flush();
     if (running) { PF_BEGIN; msx_run_frame(M);
 #ifdef FE_UEFI
@@ -9554,19 +9993,18 @@ static void fe_frame_body(void)
         { extern int nethost_poll(void) __attribute__((weak)); if (nethost_poll && M->net.enabled && nethost_poll()) msx_net_event(M); }   /* 5.0.108 */
 #endif
         PF_END(PF_CORE); { extern uint64_t msx_synth_wcyc; pf_wacc += msx_synth_wcyc; msx_synth_wcyc = 0; } { extern uint64_t msx_synth_cyc; uint64_t sy_ = msx_synth_cyc; msx_synth_cyc = 0; if (sy_ > pf_acc[PF_CORE]) sy_ = pf_acc[PF_CORE]; pf_acc[PF_CORE] -= sy_; fe_pf_add(PF_SYNTH, sy_); } mix_meter_frame(); { PF_BEGIN; midi_frame(now); PF_END(PF_MIDI); } }
-    vrec_frame();                                       /* 영상 녹화는 보이는 화면 전체 — 창이 열려 MSX가 멈춰 있어도 */
-    TRC("body: before audio");
+    { PF_BEGIN; vrec_frame(); PF_END(PF_TICK); }        /* 영상 녹화는 보이는 화면 전체 — 창이 열려 MSX가 멈춰 있어도 */
     if (live_mixer()) { static uint32_t lm; if (now - lm >= 66) { lm = now; menu_dirty = 1; } }   /* 계기 다시 그리기 */
     { PF_BEGIN; play_audio(); PF_END(PF_AUDIO); }
     snd_glitch_check();
-    TRC("body: after audio");
 
+    { PF_BEGIN;
     read_leds();
     md_tick(now);                                      /* 3.5.3 */
     cpu_tick(now);
     v9_tick(now);                                      /* 5.0.178 */
     net_tick();                                          /* 인터넷 아이콘 */
-    TRC("body: after ticks");
+    PF_END(PF_TICK); }
     {
         {   /* 3.2.2: PSG는 4프레임(약 70 ms) 넘게 이어질 때만 소리로 봄 — 키 누를 때 짧게 나는 소리(클릭·삑)로 아이콘이 켜지지 않게 */
             static int psg_run;
@@ -9602,8 +10040,7 @@ static void fe_frame_body(void)
         uint32_t sg = slot_map_sig();
         if (sg != slot_sig) { slot_sig = sg; menu_dirty = 1; }
     }
-    sram_tick(now);                                     /* 2.11: SRAM 바뀐 내용 저장 */
-    TRC("body: after sram");
+    { PF_BEGIN; sram_tick(now); PF_END(PF_FILE); }      /* 2.11: SRAM 바뀐 내용 저장 */
     if (dialog == 5) {                                  /* 기종 선택: 보이는 줄 중 아직 검사 안 한 것을 프레임마다 몇 개씩 (2.11) */
         int rows = list_rows(), done = 0;
         for (int r = 0; r < rows && mach_top + r < nmach && done < 3; r++) if (!mach_st(mach_top + r)) { mach_check(mach_top + r); done++; }
@@ -9628,7 +10065,6 @@ static void fe_frame_body(void)
         return;
     }
     if (dialog) {                                       /* 대화 창: MSX 화면 자리를 덮음 */
-        TRC("body: dialog draw");
         if (margin_bd < 0) draw_margins(bd);
         if (force_redraw || menu_dirty) { if (menu_under && force_redraw) draw_menu_under(); draw_dialog_direct(); force_redraw = 0; menu_dirty = 0; }   /* 메뉴는 카드를 처음·전체로 그릴 때만 밑에 그림 — 키마다 다시 그리면 줄만 고쳐 그리는 창(파일 탐색기) 위에 메뉴가 덧씌워짐 */
         draw_toast_center();                            /* 대화 창 위에도 알림 */
@@ -9637,16 +10073,11 @@ static void fe_frame_body(void)
     }
     int sp = fe_speed_pct();
     int need = force_redraw || margin_bd < 0 || (running && (sp == 100 || now - last_present >= 16));
-    TRC("body: screen");
     if (need) present();
-    TRC("body: after present");
     ov_tick(0);                                        /* 3.5.0: 떠 있는 막대 (밑 줄을 다시 그렸으면 다시) */
-    TRC("body: after ov_tick");
     if ((bar_visible || depth) && (need || menu_dirty)) draw_menus();
-    TRC("body: after menus");
     if ((bar_visible || depth) && toast_msg[0]) draw_toast_center();   /* 메뉴 위에도 알림 */
     draw_state_osd();                                   /* 2.12: 일시 정지·중지는 가운데에 */
-    TRC("body: after osd");
     if (!need && vol_osd_on) draw_vol_osd();            /* 멈춤·일시 정지 중에도 */
     else if (need && (bar_visible || depth) && vol_osd_on) draw_vol_osd();
 }

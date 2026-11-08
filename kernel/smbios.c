@@ -57,13 +57,3 @@ int smbios_lines(const uint8_t *ep, char (*lines)[64], int max)
     return n;
 }
 
-const uint8_t *smbios_find_legacy(void)
-{
-#if defined(__i386__)
-    for (uintptr_t a = 0xF0000; a < 0x100000; a += 16) {
-        const uint8_t *p = (const uint8_t *)a;
-        if (eq(p, "_SM3_", 5) || (eq(p, "_SM_", 4) && eq(p + 0x10, "_DMI_", 5))) return p;
-    }
-#endif
-    return 0;
-}

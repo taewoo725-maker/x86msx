@@ -126,7 +126,6 @@ static uint32_t ui_ty(uint32_t y, uint32_t h) { return y + (h > LH ? (h - LH) / 
 static uint32_t ui_sty(uint32_t y, uint32_t h) { return y + (h > SLH ? (h - SLH) / 2 : 0); }
 /* 5.2.190 글씨 7단계 (시안 8번): 이름표·칸 값 11, 설명 12, 단추 13, 본문 14, 소제목 16, 이름 17, 창 제목 20. 큰 화면(S>=2)은 한 단계씩 낮은 글꼴을 2배로 */
 static const UiFont *ft_cap(void) { return S >= 2 ? SF : &font_tiny; }
-static const UiFont *ft_btn(void) { return S >= 2 ? SF : &font_btn; }
 static const UiFont *ft_title(void) { return S >= 2 ? &font_bold : &font_title; }
 static uint32_t ui_sw(const char *s) { return text_f(SF, 1, 0, 0, s, 0, 0, 0, 0); }
 

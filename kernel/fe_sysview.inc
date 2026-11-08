@@ -241,6 +241,7 @@ static void sv_over(uint8_t *dst, uint32_t dw, uint32_t dh, const SvSpr *s, int 
 static int sv_exp(void);
 static int sv_drv(void);
 static const char *sv_md(int k);
+static int sv_tape(void);
 static void sv_sprites_load(void)                       /* 창을 열 때 (그림이 덮였으면 다시) */
 {
     sv_art = sv_art_exp = sv_art_cart = 0; memset(sv_sp, 0, sizeof sv_sp);
@@ -361,6 +362,7 @@ static const char *sv_midi_nm(int kind)                 /* 긴 이름에서 " /"
 }
 static int sv_demo, sv_demo_req;                                     /* 시험용: 주변기기를 모두 꽂은 것처럼 그림 (fe_test_action "svdemo") */
 static const char *sv_demo_carts[5] = { "SCC+", "FM-PAC", "MOONSOUND", "SCC", "ROM" };
+static int sv_tape(void) { return sv_demo || tape_slot(); }   /* 8.0.104: 데이터 레코더 — 카세트 단자가 있는 기종이면 테이프 없이도 (turbo R 은 단자 없음) */
 static int sv_cart_in(int n) { return sv_demo ? 1 : n >= 0 && n < MSX_CART_SLOTS && M->cart_slot[n] >= 0 && M->cart[n].present; }
 static const char *sv_cart_nm(int n) { return sv_demo ? sv_demo_carts[n % 5] : cart_name[n][0] ? cart_name[n] : "ROM"; }
 static void sv_cart_art(const SvSpr *c, uint32_t x, int y, const char *name, const UiFont *f)   /* 카트리지 그림 + 라벨 아래쪽에 이름 */
@@ -375,7 +377,14 @@ static void sv_cart_art(const SvSpr *c, uint32_t x, int y, const char *name, con
     sv_text(px + (pw - tw) / 2, (uint32_t)py + (ph - (uint32_t)f->height) / 2, name, 0x2a2f36, pw, f);
 }
 static int sv_drv(void) { return sv_demo ? 2 : disk_drives(); }
-static int sv_exp(void) { return sv_demo ? 2 : slot_expand; }
+/* 8.0.182: 슬롯 확장 — 값은 비트 (1 = 본체 커넥터 A 에 확장 박스, 2 = 커넥터 B). 카트 번호: 없음 A=0 B=1 / 1 → 박스 0~3, B=4 / 2 → A=0, 박스 1~4 / 3 → 박스 0~3, 박스 4~7 */
+static int sv_expand(void) { return sv_demo ? 3 : slot_expand; }   /* 데모: 확장 박스 둘 다 */
+static int sv_exp_count(void) { int x = sv_expand(); return (x & 1) + (x >> 1 & 1); }                 /* 그려야 할 확장 박스 수 */
+static int sv_exp_conn(int box) { int x = sv_expand(); return x == 3 ? box : x == 1 ? 0 : 1; }     /* box 번째 박스가 꽂힌 본체 커넥터 (0 = A, 1 = B) */
+static int sv_exp_first_cart(int box) { return sv_exp_conn(box) == 0 ? 0 : sv_expand() == 3 ? 4 : 1; }   /* 그 박스 칸 0 의 카트 번호 */
+static int sv_direct_cart(int conn) { int x = sv_expand(); return x >> conn & 1 ? -1 : conn == 0 ? 0 : x == 1 ? 4 : 1; }   /* 본체에 직접 꽂힌 카트 번호 (박스가 붙었으면 -1) */
+static uint32_t sv_shift(void) { return sv_art && sv_art_exp && sv_exp_count() > 1 ? SL(30) : 0; }   /* 확장 박스가 둘이면 (그림) 컴퓨터·모니터를 이만큼 왼쪽으로 */
+static int sv_conn_digit(int conn) { int ps = M->prof.ext_slot[conn]; return ps >= 0 && ps <= 3 ? ps : conn + 1; }   /* 그 커넥터가 있는 실제 슬롯 번호 */
 static const char *sv_md(int k) { if (sv_demo) return k == MD_HD ? "NEXTOR.HDD" : k == MD_DISKA ? "SDSNATCH.DSK" : k == MD_DISKB ? "GAME2.DSK" : "TAPE01.CAS"; return md_name(k); }
 
 static void sv_layout(void)                             /* 장면 배율: 시안 1200x626 이 창 안(b) x (명령줄 위) 에 */
@@ -419,7 +428,7 @@ static void draw_sysview(void)
 
     /* ---- 모니터 (본체 위) ---- */
     if (sv_art) {                                          /* 5.3.48: 그림 (화면 자리는 투명, 실제 MSX 화면이 비침) */
-      const SvSpr *m = &sv_sp[SP_MON]; uint32_t mx = SX(610) - m->w / 2; int my = (int)SY(402) - (int)m->h;                     /* 5.3.48: 마스터님 배치 — 모니터·본체·마우스·조이스틱을 아래로 */
+      const SvSpr *m = &sv_sp[SP_MON]; uint32_t mx = SX(610) - sv_shift() - m->w / 2; int my = (int)SY(402) - (int)m->h;                     /* 5.3.48: 마스터님 배치 — 모니터·본체·마우스·조이스틱을 아래로 */
       sv_hole = 1; sv_hx = mx + (uint32_t)m->sx; sv_hy = (uint32_t)(my + m->sy); sv_hw = (uint32_t)m->sw; sv_hh = (uint32_t)m->sh;
       sv_spr_blit(m, mx, my); sv_hole = 0;
     } else
@@ -432,15 +441,15 @@ static void draw_sysview(void)
       sv_box(mx + SL(80), my + mh + SL(18), SL(170), SL(8), SL(4), 0xb9b6ae, 0xb9b6ae, 0xb9b6ae); }
 
     /* ---- 본체 (사진 또는 내장 그림) ---- */
-    { uint32_t bx = SX(330), by = SY(sv_art ? 410 : 334), bw = SL(560);
+    { uint32_t bx = SX(330) - sv_shift(), by = SY(sv_art ? 410 : 334), bw = SL(560);
       if (sv_img && strcmp(sv_img_for, machine_name) == 0 && sv_iw == bw) sv_blit_img(bx, by);
       else sv_body_builtin(bx, by, bw);
       /* 겹침: 꽂힌 카트리지·램프 (위치표가 있을 때만) */
       for (int i = 0; sv_img && i < sv_ov_n; i++) {
           uint32_t ox = bx + (uint32_t)(sv_ov[i][1] * (int)sv_iw / (int)sv_src_w), oy = (uint32_t)((int)by + sv_ov[i][2] * (int)sv_iw / (int)sv_src_w);
           if (sv_ov[i][0] == 2) { sv_led(ox, oy, 1); continue; }
-          int n = sv_ov[i][0] == 0 ? 0 : 1;
-          if (!sv_cart_in(n)) continue;
+          int n = sv_direct_cart(sv_ov[i][0] == 0 ? 0 : 1);
+          if (n < 0 || !sv_cart_in(n)) continue;
           if (sv_art_cart) { sv_cart_art(&sv_sp[SP_CART], ox, (int)oy, sv_cart_nm(n), FM); continue; }
           uint32_t cw = SL(68), chh = SL(34);
           sv_box(ox, oy, cw, chh, SL(3), 0x3a3f47, 0x2a2f36, 0x555b64);
@@ -451,7 +460,7 @@ static void draw_sysview(void)
 
     /* ---- 왼쪽 열: 있는 것만 위에서부터 차례로 (자리를 비워 두지 않음) ---- */
     uint32_t lx = SX(30), ly = SY(272);
-    { int nl = (sv_md(MD_HD) ? 1 : 0) + (sv_drv() >= 1) + (sv_drv() >= 2) + (sv_exp() ? 1 : 0) + (sv_md(MD_TAPE) ? 1 : 0);   /* 있는 장치 수만큼 위로 올려 아래에 넘치지 않게 */
+    { int nl = (sv_md(MD_HD) ? 1 : 0) + (sv_drv() >= 1) + (sv_drv() >= 2) + (sv_art_exp ? 0 : sv_exp_count()) + (sv_tape() ? 1 : 0);   /* 있는 장치 수만큼 위로 올려 아래에 넘치지 않게 */
       if (nl > 2) ly = SY(272 - (nl - 2) * 62); }
     int nleft = 0;
     if (sv_art) {                                          /* 5.3.48: 그림 — 외장 하드, 드라이브(두 대면 A 가 B 위에 3 mm 간격으로 쌓음) */
@@ -461,10 +470,10 @@ static void draw_sysview(void)
       const SvSpr *hd = &sv_sp[SP_HD], *dr = &sv_sp[SP_DRV];
       int gap = (int)SL(5), g14 = (int)SL(14);
       int tot = (nH ? hd->bh + g14 : 0) + (nd == 1 ? dr->bh + g14 : nd == 2 ? 2 * dr->bh + gap + g14 : 0)
-              + ((sv_exp() && !sv_art_exp) ? (int)(SL(14 + 56 + 20) + CH + SL(14)) : 0) + (sv_md(MD_TAPE) ? (int)(SL(20 + 60 + 6) + CH) : 0);
+              + ((sv_art_exp ? 0 : sv_exp_count()) * (int)(SL(14 + 56 + 20) + CH + SL(14))) + (sv_tape() ? (int)(SL(20 + 60 + 6) + CH) : 0);
       int cur = (int)SY(516) - tot; if (cur > (int)SY(300)) cur = (int)SY(300); if (cur < (int)SY(24)) cur = (int)SY(24);
       uint32_t ax = SX(42), cx = ax + SL(186) + SL(8);
-      uint32_t capw = SX(346) > cx ? SX(346) - cx : SL(90);
+      uint32_t capw = SX(346) - sv_shift() > cx ? SX(346) - sv_shift() - cx : SL(90);
       if (nH) {
           sv_spr_blit(hd, ax, cur - hd->by);
           uint32_t yc = (uint32_t)(cur + hd->bh / 2);
@@ -512,46 +521,46 @@ static void draw_sysview(void)
                 sv_text(lx + SL(44), y + SL(38), nm ? nm : "DRIVE B", 0x4a4f58, SL(140), FM);   /* 드라이브 등 옆: 디스크 이름 */
                 char t[96]; t[0] = 0; str_append(t, sizeof t, grow_t("드라이브 B", "Drive B", "ドライブB"));
                 sv_text(lx, y + h + SL(8), t, nm ? 0x4a4f58 : 0x7a7f88, SL(230), FS); ly += h + SL(8) + CH + SL(14); nleft++; } }
-    { /* 4슬롯 확장 박스 — 슬롯 확장이 켜져 있을 때만 (그림이 있으면 컴퓨터 오른쪽에) */
-      if (sv_exp() && !sv_art_exp) {
+    { /* 4슬롯 확장 박스 — 슬롯 확장이 켜져 있을 때만, 켜진 커넥터마다 하나 (그림이 있으면 컴퓨터 오른쪽에) */
+      for (int box = 0; !sv_art_exp && box < sv_exp_count(); box++) {
           uint32_t y = ly + SL(14), w = SL(292), h = SL(56);
           sv_box(lx, y + SL(14), w, h, SL(5), 0xe6e4de, 0xcfccc4, 0xa9a69e);
           for (int i = 0; i < 4; i++) {
-              int n = i + 1;                                   /* 확장 자리: 카트리지 2~5 */
+              int n = sv_exp_first_cart(box) + i;              /* 확장 자리의 카트 번호 */
               uint32_t sx = lx + SL(12 + 68 * i);
               sv_rgb(sx, y + SL(20), SL(62), SL(12), sv_cart_in(n) ? 0x1b1f25 : 0xbdbab2);
               if (sv_cart_in(n)) { sv_box(sx, y - SL(10), SL(62), SL(30), SL(2), 0x3a3f47, 0x2a2f36, 0x555b64); sv_text(sx + S, y - SL(10) + (SL(30) - (uint32_t)FM->height) / 2, sv_cart_nm(n), 0xe6e9ed, SL(62) - 2 * S, FM); }
-              char l[8] = { (char)('0' + sv_exp()), '-', (char)('0' + i), 0 }; sv_text(sx + SL(23), y + SL(36), l, 0x4a4f58, SL(30), FM);
+              char l[8] = { (char)('0' + sv_conn_digit(sv_exp_conn(box))), '-', (char)('0' + i), 0 }; sv_text(sx + SL(23), y + SL(36), l, 0x4a4f58, SL(30), FM);
           }
           sv_led(lx + SL(274), y + SL(60), 1);
           sv_text(lx + SL(12), y + SL(54), "EXPANDER x4", 0x2a2f36, SL(120), FM);
           char t[128]; t[0] = 0; str_append(t, sizeof t, grow_t("4슬롯 확장 박스", "4-slot expander", "4スロット拡張"));
+          str_append(t, sizeof t, sv_exp_conn(box) ? " \xC2\xB7 SLOT2" : " \xC2\xB7 SLOT1");
                     sv_text(lx, y + h + SL(20), t, 0x4a4f58, SL(240), FS); ly += SL(14) + h + SL(20) + CH + SL(14); nleft++;
       } }
-    { /* 데이터 레코더 — 테이프를 넣었을 때만 */
-      const char *nm = sv_md(MD_TAPE);
-      if (nm && sv_art && sv_sp[SP_TAPE].px) {                 /* 5.3.48: 데이터 레코더 그림 */
+    { /* 데이터 레코더 — 카세트 단자가 있는 기종(MSX1·MSX2·MSX2+)이면 테이프가 없어도 보임 (8.0.104). turbo R·GT 는 단자가 없어 안 보임 */
+      const char *nm = sv_tape() ? sv_md(MD_TAPE) : 0; int tp_on = sv_tape();
+      if (tp_on && sv_art && sv_sp[SP_TAPE].px) {                 /* 5.3.48: 데이터 레코더 그림 */
           const SvSpr *tp = &sv_sp[SP_TAPE]; uint32_t y = ly + SL(8);
           sv_spr_blit(tp, SX(42), (int)y - tp->by);
-          char t[96]; t[0] = 0; str_append(t, sizeof t, grow_t("데이터 레코더", "Data recorder", "データレコーダ"));
+          char t[96]; t[0] = 0; str_append(t, sizeof t, grow_t("데이터 레코더", "Data recorder", "データレコーダ")); if (nm) { str_append(t, sizeof t, " \xC2\xB7 "); str_append(t, sizeof t, nm); }
           sv_text(SX(42) + (uint32_t)tp->bx, y + (uint32_t)tp->bh + SL(4), t, 0x4a4f58, SL(240), FS);
           ly += SL(8) + (uint32_t)tp->bh + SL(4) + CH; nleft++;
       } else
-      if (nm) { uint32_t y = ly + SL(20), w = SL(180), h = SL(60);
+      if (tp_on) { uint32_t y = ly + SL(20), w = SL(180), h = SL(60);
       sv_box(lx + SL(5), y, w, h, SL(6), 0xe6e4de, 0xcfccc4, 0xa9a69e);
       sv_box(lx + SL(19), y + SL(10), SL(100), SL(40), SL(3), 0x3a3f47, 0x2a2f36, 0x2a2f36);
       g_disc((int)(lx + SL(45)), (int)(y + SL(30)), (int)SL(9), 0x1b1f25); g_disc((int)(lx + SL(93)), (int)(y + SL(30)), (int)SL(9), 0x1b1f25);
       g_disc((int)(lx + SL(45)), (int)(y + SL(30)), (int)SL(3), 0x8a929c); g_disc((int)(lx + SL(93)), (int)(y + SL(30)), (int)SL(3), 0x8a929c);
       for (int i = 0; i < 3; i++) sv_rgb(lx + SL(129 + 14 * i), y + SL(16), SL(10), SL(26), 0xa9a59d);
       sv_led(lx + SL(133), y + SL(50), md_busy(MD_TAPE) ? 2 : 1);
-      char t[96]; t[0] = 0; str_append(t, sizeof t, grow_t("데이터 레코더", "Data recorder", "データレコーダ"));
+      char t[96]; t[0] = 0; str_append(t, sizeof t, grow_t("데이터 레코더", "Data recorder", "データレコーダ")); if (nm) { str_append(t, sizeof t, " \xC2\xB7 "); str_append(t, sizeof t, nm); }
       sv_text(lx, y + h + SL(6), t, 0x4a4f58, SL(240), FS); ly += SL(20) + h + SL(6) + CH; nleft++; } }
 
     /* ---- 오른쪽 열: 있는 것만 ---- */
     uint32_t ry = SY(290);
     { int km = 0; for (int i = 0; i < (sv_demo ? 3 : midi_bus.n); i++) if (sv_demo || (midi_bus.dev[i].kind != MDK_NONE && midi_bus.dev[i].kind != MDK_FILE)) km++; if (km > 3) km = 3; if (km > 1) ry = SY(290 - (km - 1) * 45); }
     uint32_t spk_top = 0;
-    int nright = 0;
     if (sv_art) {                                          /* 5.3.48: MIDI 그림 (MT-32 는 MT-32 그림, SC-55·GM 은 SC-55 그림), 이름은 그림 아래 */
       int kinds[3], km = 0;
       for (int i = 0; i < (sv_demo ? 3 : midi_bus.n) && km < 3; i++) {
@@ -569,7 +578,7 @@ static void draw_sysview(void)
               sv_text(x + (uint32_t)u->bx, (uint32_t)(cur + u->bh) + SL(2), sv_midi_nm(kinds[k]), 0x4a4f58, (uint32_t)u->bw, FS);
               cur += unit;
           }
-          ry = (uint32_t)cur + SL(6); nright++;
+          ry = (uint32_t)cur + SL(6);
       } else ry = SY(300);
     }
     if (!sv_art) { /* MIDI 모듈 (꽂힌 대수만큼, 최대 3단) */
@@ -586,21 +595,28 @@ static void draw_sysview(void)
           k++;
       }
       if (k) { char t[96]; t[0] = 0; str_append(t, sizeof t, "MIDI");
-              sv_text(x, ry + (uint32_t)k * SL(48) + SL(2), t, 0x4a4f58, SL(260), FS); ry += (uint32_t)k * SL(48) + SL(2) + CH + SL(18); nright++; } }
-    int exp_art = sv_art && sv_art_exp && sv_exp();
-    if (exp_art) {                                         /* 5.3.48: 4슬롯 확장 박스 — 컴퓨터 오른쪽 책상 위, 꽂힌 카트리지는 칸 0(아래)~3(위) */
-      const SvSpr *e = &sv_sp[SP_EXP]; uint32_t ex = SX(910); int ey = (int)SY(442);
-      sv_spr_blit(e, ex, ey);
+              sv_text(x, ry + (uint32_t)k * SL(48) + SL(2), t, 0x4a4f58, SL(260), FS); ry += (uint32_t)k * SL(48) + SL(2) + CH + SL(18); } }
+    int exp_art = sv_art && sv_art_exp && sv_exp_count();
+    for (int box = 0; exp_art && box < sv_exp_count(); box++) {   /* 5.3.48: 4슬롯 확장 박스 — 컴퓨터 오른쪽 책상 위, 꽂힌 카트리지는 칸 0(아래)~3(위). 8.0.182: 둘 다 켜면 나란히 */
+      const SvSpr *ep = &sv_sp[SP_EXP];
+      uint32_t gap = SL(4), total = (uint32_t)sv_exp_count() * ep->w + (uint32_t)(sv_exp_count() - 1) * gap, right = SX(1192);
+      uint32_t ex0 = SX(910); if (ex0 + total > right) ex0 = right > total ? right - total : 0;   /* 둘 다 켜면 오른쪽 끝에 맞춰 나란히 */
+      uint32_t ex = ex0 + (uint32_t)box * (ep->w + gap); int ey = (int)SY(442);
+      int first = sv_exp_first_cart(box);
+      sv_spr_blit(ep, ex, ey);
+      { const UiFont *fm = &font_mini; const char *nm = sv_exp_conn(box) ? "SLOT2" : "SLOT1";   /* 8.0.182: 박스 정면(까만 면)에 어느 커넥터인지 */
+        uint32_t tw = text_f(fm, 1, 0, 0, nm, 0, 0, 0, 0), fy = (uint32_t)ey + ep->h * 72 / 100 > (uint32_t)fm->height / 2 ? (uint32_t)ey + ep->h * 72 / 100 - (uint32_t)fm->height / 2 : 0;
+        sv_text(ex + ep->w * 46 / 100 - tw / 2, fy, nm, 0xd9dde3, ep->w / 3, fm); }
       for (int j = 3; j >= 0; j--) {                       /* 뒤(위)쪽 칸부터 그려 앞(아래) 카트리지가 위에 */
-          if (!sv_cart_in(j + 1)) continue;
+          if (!sv_cart_in(first + j)) continue;
           const SvSpr *c = &sv_sp[SP_CX0 + j];
-          sv_cart_art(c, ex + (uint32_t)e->slot[j][0] - c->w / 2, ey + e->slot[j][1] - (int)c->h, sv_cart_nm(j + 1), FM);
+          sv_cart_art(c, ex + (uint32_t)ep->slot[j][0] - c->w / 2, ey + ep->slot[j][1] - (int)c->h, sv_cart_nm(first + j), FM);
       }
     }
     /* 5.3.48: 스피커 그림은 뺌(마스터님 요청) */
     { /* 조이스틱 · 마우스 — 포트에 꽂힌 것만 */
       uint32_t x = SX(1085), y = ry > SY(430) ? ry : SY(430);
-      uint32_t px = sv_art ? SX(620) : SX(690), py = sv_art ? SY(544) : SY(540);                   /* 마우스·조이스틱: 본체 앞, 가운데에서 조금 오른쪽부터 나란히 */
+      uint32_t px = sv_art ? SX(620) - sv_shift() : SX(690), py = sv_art ? SY(544) : SY(540);                   /* 마우스·조이스틱: 본체 앞, 가운데에서 조금 오른쪽부터 나란히 */
       (void)x; (void)y; (void)spk_top;
       for (int q = 0; q < 2; q++) {                         /* 5.3.48: 포트 1 → 포트 2 순서로, 그 포트에 꽂힌 것만 */
           char t[64]; t[0] = 0;
@@ -614,9 +630,9 @@ static void draw_sysview(void)
           if (t[0]) { char t2[96]; copy_str(t2, sizeof t2, pn == 1 ? "1: " : "2: "); str_append(t2, sizeof t2, t); copy_str(t, sizeof t, t2); }
           if (!t[0]) continue;
           if (is_mouse) {                                   /* 마우스: 본체 앞, 가운데에서 조금 오른쪽에 붙여 놓음 */
-              uint32_t mx = sv_art ? SX(808) : px, my = sv_art ? SY(500) : py; if (!sv_art) px += SL(80);   /* 마스터님 배치: 마우스는 본체 오른쪽 끝 */
+              uint32_t mx = sv_art ? SX(838) - sv_shift() : px,   /* 8.0.183: 조이스틱 그림이 마우스 글자를 덮던 것을 30 단위 오른쪽으로 */  my = sv_art ? SY(500) : py; if (!sv_art) px += SL(80);   /* 마스터님 배치: 마우스는 본체 오른쪽 끝 */
               uint32_t lw = text_f(FS, 1, 0, 0, t, 0, 0, 0, 0), mh = SL(50);
-              if (sv_art && sv_sp[SP_MOU].px) { sv_spr_blit(&sv_sp[SP_MOU], mx, (int)my); mh = sv_sp[SP_MOU].h; lw = lw; }
+              if (sv_art && sv_sp[SP_MOU].px) { sv_spr_blit(&sv_sp[SP_MOU], mx, (int)my); mh = sv_sp[SP_MOU].h; }
               else { mh = SL(50); sv_box(mx, my, SL(34), SL(50), SL(14), 0xe6e4de, 0xcfccc4, 0xa9a69e); sv_rgb(mx + SL(17), my, S, SL(14), 0xa9a69e); }
               sv_text(mx + (sv_art && sv_sp[SP_MOU].px ? sv_sp[SP_MOU].w / 2 : SL(17)) - lw / 2, my + mh + SL(4), t, 0x4a4f58, SL(140), FS);
               continue;

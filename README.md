@@ -4,7 +4,7 @@
 <p align="center"><b>운영체제 없이 PC에서 바로 부팅하는 MSX 에뮬레이터 — MSX1 · MSX2 · MSX2+ · turbo R · V9990</b></p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-8.0.41-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-8.0.234-blue">
   <img alt="target" src="https://img.shields.io/badge/target-x86--64%20UEFI-orange">
   <img alt="license" src="https://img.shields.io/badge/license-GPLv3-green">
 </p>
@@ -13,7 +13,7 @@
 
 <p align="center"><img src="docs/images/system-view-performance.png" width="720" alt="시스템 보기 > 성능: 코어별 사용률"></p>
 
-USB 메모리에 넣고 부팅하면 윈도우도 리눅스도 거치지 않고 MSX 화면이 바로 뜹니다.
+USB 메모리에 넣고 UEFI로 부팅하면 윈도우도 리눅스도 거치지 않고 MSX 화면이 바로 뜹니다.
 같은 에뮬이라면 꼭 운영체제 위나 FPGA에서만 돌려야 할까? 하는 물음에서 시작했습니다.
 8.0판부터는 PC의 여러 코어를 나눠 써서 화면 확대와 MIDI 합성을 다른 코어에 맡깁니다.
 
@@ -35,16 +35,17 @@ Ai와 협동으로 만들었습니다.
 
 ## 안에 들어 있는 것
 
-- **기종:** MSX1 / MSX2 / MSX2+ / turbo R (Z80, R800). blueMSX의 `config.ini`와 Machines 폴더 구조를 그대로 읽어 기종을 고릅니다. 처음에는 자유 BIOS인 C-BIOS 기종으로 뜹니다.
-- **영상:** V9938 / V9958 / V9990, 화면 확대, 주사선 효과, 화면 비율 조절, 스크린샷과 영상 녹화.
-- **소리:** PSG, FM(OPLL), MSX-Audio, SCC(두 개), MoonSound(OPL4), MIDI(MT-32 / CM-32L, SC-55, SoundFont)를 장치별로 따로 다루고, PC의 HD Audio로 내보냅니다.
-- **저장 장치:** 디스크 이미지, zip 안의 디스크, Nextor 하드디스크, USB 폴더를 하드디스크처럼 보이게 하는 **가상 하드(VMFolder)**.
-- **카트리지:** 일반 ROM, ASCII8/16, Konami, SCC 등 여러 매퍼와 특수 카트리지. ROM 데이터베이스로 자동 판별합니다.
-- **네트워크:** 유선(DHCP)·무선 LAN, UNAPI 네트워크 카트리지.
+- **기종:** MSX1 / MSX2 / MSX2+ / turbo R (Z80, R800). blueMSX의 `config.ini`와 Machines 폴더 구조를 그대로 읽어 기종을 고릅니다. 처음에는 자유 BIOS인 C-BIOS 기종으로 뜹니다. 기종 편집기에서 슬롯 구성(확장 슬롯 포함)을 그림으로 보고 고를 수 있습니다.
+- **영상:** V9938 / V9958 / V9990, 별도 카트리지형 V9968(두 번째 VDP), 화면 확대, 주사선 효과, 화면 비율 조절, 스크린샷과 영상 녹화.
+- **소리:** PSG, FM(OPLL), MSX-Audio, SCC(두 개), MoonSound(OPL4, 좌우 스테레오), MIDI(MT-32 / CM-32L, SC-55, SoundFont)를 장치별로 따로 다루고, PC의 HD Audio로 내보냅니다.
+- **X86 Multimedia 카트리지:** MSX 안에서 쓰는 영상(MV, MP4)·음악(MP3, WAV, FLAC) 재생 장치입니다. 부팅 USB나 직접 연 USB의 파일을 바로 읽어 재생합니다. USB를 마음대로 DOS 드라이브로 잡지는 않고, 재생 프로그램이 쓸 때만 접근합니다.
+- **저장 장치:** 디스크 이미지, 압축 파일(zip, ARJ, PMA, LZH) 안의 디스크·ROM, Nextor 하드디스크, USB 폴더를 하드디스크처럼 보이게 하는 **가상 하드(VMFolder)**. 선택 창에서 다른 USB 메모리도 고를 수 있습니다.
+- **카트리지:** 일반 ROM, ASCII8/16, Konami, SCC, 합본(30in1) 등 여러 매퍼와 특수 카트리지. ROM 데이터베이스로 자동 판별합니다.
+- **네트워크:** 유선 카트리지(X86Ethernet)와 무선 카트리지(x86wifi)를 따로 꽂아 씁니다. DHCP, UNAPI, 무선 접속 선택을 지원합니다.
 - **입력:** 키보드 중심 메뉴, 키 편집기, 조이스틱·마우스.
 - **다중 코어(8.0):** 일꾼 코어 풀이 화면 확대 줄 그리기와 MIDI 합성을 나눠 맡습니다. 쉴 때는 CPU를 재우는 절전(AMD MONITORX/MWAITX 등)으로 팬 소리를 줄입니다.
-- **도구:** 시스템 보기(코어·메모리·디스크 사용률, 배치), 파일 관리자(이미지 안 ↔ USB 폴더 복사), 이미지 만들기, USB 전체 용량 사용, 진단정보(USB·키보드·소리).
-- **상태 저장·다국어:** 상태 저장과 이어하기, 한국어·영어·일본어 외 여러 언어.
+- **도구:** 시스템 보기(코어·메모리·디스크 사용률, 배치), 파일 관리자(이미지 안 ↔ USB 폴더 복사), 이미지 만들기, USB 전체 용량 사용, 진단정보(USB·키보드·소리)와 진단 스위치.
+- **상태 저장·다국어:** 전체 상태 저장과 기종 상태 저장을 따로 켜고 끌 수 있고, 한국어·영어·일본어 외 여러 언어를 지원합니다.
 
 <p align="center"><img src="docs/images/file-manager-copy.png" width="720" alt="파일 관리자: F5 복사 확인"></p>
 
@@ -81,8 +82,8 @@ Ai와 협동으로 만들었습니다.
 ## 설치
 
 1. 배포 폴더의 `X86MSX_v8.0.N.img_….zip`을 풀어 나온 `.img`를 USB에 씁니다. (또는 `X86MSX_v8.0.N_USB_….zip`의 내용을 FAT32 USB에 폴더째 복사)
-2. 이미 쓰던 USB는 `EFI/BOOT/BOOTX64.EFI`와 `X86MSX.BIN` **두 파일을 모두** 새 판으로 바꿉니다. 한쪽만 바꾸면 판이 어긋납니다.
-3. PC를 USB로 부팅합니다. 진단정보(DIAG)의 `efi=`와 `ver=`가 같은 판 번호인지 확인합니다.
+2. 이미 쓰던 USB는 `EFI/BOOT/BOOTX64.EFI`를 새 판으로 바꿉니다. 새 판이 폴더나 파일(아이콘, ROM 등)을 더한 경우에는 함께 주는 `USB추가파일` 압축을 USB에 풀어 덮어씁니다.
+3. PC를 USB로 부팅합니다. 진단정보의 판 번호가 새 판인지 확인합니다.
 4. 게임·ROM·디스크는 USB의 `Storage Device` 폴더 아래에 넣습니다.
 
 > 상용 BIOS ROM과 게임은 이 저장소에 없습니다. 기본으로 들어 있는 것은 C-BIOS뿐이며, MT-32·SC-55 ROM은 사용자가 `MidiSound\MT32`, `MidiSound\SC55`에 넣어야 합니다.
@@ -105,7 +106,8 @@ USB의 `VMFolder`에 파일을 복사했으면 **하드 리셋(LAlt+F2)** 을 �
 ```sh
 make test                     # 단위·장치 시험
 make regress                  # 기종 부팅 회귀 시험 (ROM 필요)
-make build/BOOTX64.EFI build/kernel.bin build/msx1.img
+make build/BOOTX64.EFI         # UEFI 실행 파일
+make image                    # build/msx1.img (USB에 쓰는 부팅 이미지)
 ```
 
 ## 시험 상태
@@ -115,26 +117,29 @@ Z80 코어는 ZEXALL/ZEXDOC를 통과합니다. 고칠 때마다 단위·회귀 
 ## 저장소 구성
 
 ```
-boot/       부팅 로더
-uefi/       UEFI 부팅 코드
+uefi/       UEFI 부팅 코드(화면·소리·USB·네트워크 드라이버)
 kernel/     화면·메뉴·시스템 보기·파일 관리자 등 본체
 src/        Z80/R800, VDP, 소리 칩, 카트리지, 디스크, 네트워크 장치
 host/       PC 위에서 돌려 보는 시험용 호스트
 machines/   기본 기종(C-BIOS) ***  Bluemsx의 머신방식으로 사용하였습니다.
 assets/     아이콘·키보드 그림·네트워크 ROM 등
 third_party/  포함한 외부 구성요소
-tools/      이미지 만들기 등 빌드 도구
+tools/      이미지 만들기 등 빌드 도구, X86VHD(윈도우용 가상 하드 복사 도구), X86NTP(MSX-DOS 시간 맞춤)
 tests/      자동 시험
 docs/       문서 그림
 ```
 
 ## 8.0판에서 달라진 것
 
-- 화면 확대와 MIDI 합성을 다른 코어에서 처리하고, 성능 탭에서 코어별 사용률(코어 1 = 본체, 코어 2~)을 봅니다.
-- 쉬는 동안 CPU를 재우는 절전, 진단 스위치 탭(진단 기록 켜고 끄기).
-- 시스템 보기·파일 관리자·이미지 만들기·USB 전체 용량 사용·진단정보로 도움말 메뉴 정리.
-- 파일 관리자 복사 전 "복사할까요?" / "덮어쓸까요?" 확인.
-- 부팅 이미지의 설정(INI) 기본값을 필요한 항목만 골라 정리.
+- **다중 코어:** 화면 확대와 MIDI 합성을 다른 코어에서 처리하고, 성능 탭에서 코어별 사용률(코어 1 = 본체, 코어 2~)을 봅니다. 쉬는 동안 CPU를 재우는 절전.
+- **UEFI 전용:** 옛 BIOS(CSM) 부팅 코드를 없애고 UEFI만 지원합니다.
+- **X86 Multimedia 카트리지:** MV·MP4 영상과 MP3·WAV·FLAC 재생, USB 직접 접근(재생 프로그램이 쓸 때만).
+- **V9968:** V9990처럼 별도 화면을 가진 두 번째 VDP를 카트리지로 꽂습니다.
+- **네트워크:** 유선(X86Ethernet)과 무선(x86wifi)을 카트리지로 분리, 둘 중 하나만 동작.
+- **파일:** 압축 파일 ARJ·PMA·LZH 열기, 선택 창에서 다른 USB 고르기, 파일 관리자 복사·덮어쓰기 확인.
+- **소리:** MoonSound 좌우 스테레오, MP3 스테레오.
+- **매퍼:** 30in1 합본, Holy Quran 매퍼 등 추가.
+- **설정:** 전체 상태 저장과 기종 상태 저장을 따로 쓰고, 둘 다 끄면 아무것도 읽거나 쓰지 않습니다. 진단 스위치 탭에서 진단 기록을 켜고 끕니다.
 
 ## 라이선스
 

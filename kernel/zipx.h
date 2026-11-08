@@ -12,8 +12,6 @@ int zip_extract(const uint8_t *zip, uint32_t zlen, const char *exts, uint8_t *ou
 
 int zip_extract_nth(const uint8_t *zip, uint32_t zlen, const char *exts, int nth, uint8_t *out, uint32_t max, uint32_t *size, char *name, int namemax, int *total);   /* 4.0.34 */
 int zip_names_ex(const uint8_t *zip, uint32_t zlen, const char *exts, char (*names)[48], uint32_t *usize, uint32_t *dos, int max);   /* 4.0.136 */
-int zip_names(const uint8_t *zip, uint32_t zlen, const char *exts, char (*names)[48], int max);   /* 4.0.34 */
-int zip_peek(const uint8_t *zip, uint32_t zlen, const char *exts, char *name, int namemax, uint32_t *usize_out);   /* 4.0.34 */
 
 /* 4.0.3: zip 안을 폴더처럼 보기 (이미지 파일 관리). 폴더 칸이 없는 zip도 경로에서 폴더를 만들어 보여 줌 */
 typedef struct { char name[256]; uint8_t dir; uint32_t size; uint16_t year; uint8_t mon, day, hour, min; } ZipEnt;

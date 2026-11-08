@@ -5,8 +5,7 @@
  * vdpk.h - VDP 그리기 점 커널 (7단계: 자주 도는 곳을 어셈블러로)
  *
  * 레고 방식: 같은 일을 하는 C판(기준)과 어셈블러판(x86-64 NASM, SSSE3)을 함수표로 바꿔 끼움.
- * 기본은 C판 (이미 검증된 루틴). 어셈블러판은 ini `VdpAsm=1` 일 때만 쓰고, 시험(tests/vdpktest.c)이 두 판의 결과가
- * 모든 입력에서 바이트까지 같음을 확인한다. C판은 호스트 시험·레거시 빌드·어셈블러가 없는 곳의 기준으로 남는다.
+ * 8.0.159: 비교용 어셈블러판(VdpAsm)을 삭제해 C판 하나만 쓴다.
  */
 #ifndef MSX_VDPK_H
 #define MSX_VDPK_H
@@ -25,10 +24,6 @@ typedef struct {
 } VdpKernels;
 
 extern const VdpKernels vdpk_c;        /* C판 (기준) */
-extern const VdpKernels vdpk_x64;      /* 어셈블러판 — VDPK_ASM 으로 빌드했을 때만 있음 */
 extern const VdpKernels *vdpk;         /* 지금 쓰는 표 (기본 vdpk_c) */
-extern int vdpk_asm_on;                /* ini VdpAsm — vdpk_apply() 가 표를 고름 */
-int vdpk_have_asm(void);               /* 어셈블러판이 빌드에 들어 있고 CPU 가 SSSE3 를 지원하면 1 */
-void vdpk_apply(void);                 /* vdpk_asm_on 에 따라 vdpk 를 바꿈 */
 
 #endif

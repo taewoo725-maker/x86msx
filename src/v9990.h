@@ -48,6 +48,7 @@ void v9990_init(V9990 *v);
 void v9990_reset(V9990 *v);
 uint8_t v9990_read(V9990 *v, int port, int tick);     /* tick: 줄 안 위치 0~2735 (HR 상태용) */
 void v9990_write(V9990 *v, int port, uint8_t val);
+void v9990_write_vram(V9990 *v, const uint8_t *p, int n);   /* 8.0.133: 포트 0 쓰기를 n 번 한 것과 같음 */
 void v9990_line_start(V9990 *v, int line, int total);
 void v9990_line_end(V9990 *v, int line);
 int v9990_frame_lines(const V9990 *v);                /* V9990 자기 프레임의 줄 수 (PAL 313 / NTSC 262) */

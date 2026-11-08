@@ -8,5 +8,4 @@
 /* ep = "_SM3_" 또는 "_SM_" 입구. 돌려줌: 만든 줄 수 ("SMBIOS system …", "SMBIOS bios …", "SMBIOS board …") */
 int smbios_lines(const uint8_t *ep, char (*lines)[64], int max);
 /* 레거시: 0xF0000~0xFFFFF 에서 입구 찾기 (없으면 0) */
-const uint8_t *smbios_find_legacy(void);
 #endif

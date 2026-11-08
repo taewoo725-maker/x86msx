@@ -1,0 +1,21 @@
+/* 만든이: KimTaeWoo */
+/* 도와준이: Lee.J.H */
+#include <windows.h>
+#include "x86vhd_version.h"
+1 24 "x86vhd.manifest"
+1 ICON "x86vhd.ico"
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION X86VHD_VERSION_RC
+ PRODUCTVERSION X86VHD_VERSION_RC
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo" BEGIN BLOCK "041204B0" BEGIN
+    VALUE "ProductName", "X86VHD"
+    VALUE "FileDescription", "X86MSX Virtual HD folder manager"
+    VALUE "FileVersion", X86VHD_VERSION
+    VALUE "ProductVersion", X86VHD_VERSION
+    VALUE "LegalCopyright", "Copyright (C) 2026 Kim Taewoo. GPL-3.0-or-later"
+  END END
+  BLOCK "VarFileInfo" BEGIN VALUE "Translation", 0x412, 1200 END
+END

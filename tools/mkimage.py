@@ -5,16 +5,14 @@
 """mkimage.py - 부팅 이미지 조립 (설계서 §8)
 
 배치
-  LBA 0          MBR (loader.bin 첫 섹터) + FAT32 파티션 표
-  LBA 1~         2단계 로더                              ← 파티션 앞 빈 공간 (Windows에서 안 보임)
+  LBA 0          MBR (파티션 표만, 부팅 코드 없음 — UEFI 전용)
   LBA 2048~      FAT32 파티션 "X86MSX"                  ← Windows에서 보임
                    \\EFI\\BOOT\\BOOTX64.EFI                UEFI 부팅용 에뮬레이터 (x86_64)
-                   \\X86MSX.BIN                          레거시(CSM) 부팅용 에뮬레이터 본체
                    \\MACHINES\\MSX - C-BIOS\\CONFIG.INI, CBIOS_*.ROM
                    \\Storage Device\\ROMS\\                게임 카트리지 (*.ROM)
                    \\README.txt
 
-사용법: mkimage.py out.img loader.bin kernel.bin profile_dir [--no-roms] [--test-carts DIR] [--efi BOOTX64.EFI]
+사용법: mkimage.py out.img profile_dir [--no-roms] [--test-carts DIR] [--efi BOOTX64.EFI]
 """
 ROOT = __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__)))
 import os, struct, subprocess, sys, tempfile
@@ -30,7 +28,6 @@ README = """X86MSX - MSX 에뮬레이터 부팅 USB
 처음 기종은 C-BIOS(무료 대체 BIOS)입니다. C-BIOS에는 BASIC이 없고 카트리지(롬)를 넣으면 실행합니다.
 BASIC·디스크가 필요하면 본인이 가진 기종의 ROM을 Machines\\<기종 이름>\\ 에 넣으세요 (상용 ROM은 들어 있지 않습니다).
   UEFI 부팅: EFI\\BOOT\\BOOTX64.EFI (펌웨어 설정에서 Secure Boot 끄기)
-  레거시(CSM) 부팅: X86MSX.BIN (메모리 118 MB 이상)
 
 폴더
   Machines\\<기종 이름>\\    기종 프로필 (blueMSX의 Machines 폴더와 같은 구조)
@@ -117,19 +114,16 @@ def main():
         del argv[i:i + 2]
     args = [a for a in argv if not a.startswith('--')]
     no_roms = '--no-roms' in argv
-    if len(args) != 4:
+    if len(args) != 2:
         sys.exit(__doc__)
-    out, loader_p, kernel_p, profile = args
-    loader = open(loader_p, 'rb').read()
-    kernel = open(kernel_p, 'rb').read()
-    assert len(loader) % 512 == 0 and loader[510:512] == b'\x55\xaa', 'bad loader'
+    out, profile = args
+    loader = bytearray(512)                                     # UEFI 전용: 부팅 코드 없는 MBR (파티션 표 + 55AA)
+    loader[510:512] = b'\x55\xaa'
 
     # 파티션 앞 영역: MBR + 2단계 로더
     head = bytearray(loader)
     if len(head) > PART_LBA * 512:
         sys.exit('loader too large for the area before the partition')
-    if len(kernel) > 0x800000:                                  # 로더 KERNEL_MAX (3.0부터 8 MiB)
-        sys.exit('kernel larger than 8 MiB')
 
     total = IMAGE_MIB * 2048
     part_sectors = total - PART_LBA
@@ -148,7 +142,7 @@ def main():
         env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
         def mt(*a):
             subprocess.run(a, check=True, env=env, stdout=subprocess.DEVNULL)
-        mt('mcopy', '-i', part, kernel_p, '::/X86MSX.BIN')
+        pass
         if efi:
             mt('mmd', '-i', part, '::/EFI')
             mt('mmd', '-i', part, '::/EFI/BOOT')
@@ -182,6 +176,14 @@ def main():
         lic2 = os.path.join(ROOT, 'third_party', 'dejavu', 'LICENSE.txt')     # 3.4.3: 아랍어 글자
         if os.path.exists(lic2):
             mt('mcopy', '-i', part, lic2, '::/LICENSE-DejaVu-font.txt')
+        mmrom = bytearray(b'\xff' * 16384)                           # 8.0.77: X86 Multimedia 카트리지 롬 (코드 없는 표시 파일, 에뮬레이터가 만드는 것과 같은 내용)
+        mmrom[0:256] = bytes(256)
+        mmrom[0:8] = b'X86MM-ID'
+        mmtxt = b'X86 Multimedia cartridge (X86MSX) - sound I/O 2Ch-2Fh + video I/O 24h-27h (MV2 from the Video folder). No ROM code: this file only marks the cartridge.\0'
+        mmrom[16:16 + len(mmtxt)] = mmtxt
+        mmf = os.path.join(tmp, 'X86-Multimedia.rom')
+        open(mmf, 'wb').write(bytes(mmrom))
+        mt('mcopy', '-i', part, mmf, '::/Machines/Shared Roms/X86-Multimedia.rom')
         unapi = os.path.join(ROOT, 'assets', 'net', 'unapi.rom')       # 네트워크 카트리지 UNAPI ROM (자체 제작)
         if os.path.exists(unapi):
             mt('mcopy', '-i', part, unapi, '::/Machines/Shared Roms/UNAPI.ROM')
@@ -245,8 +247,8 @@ def main():
     img = bytes(head) + b'\0' * (PART_LBA * 512 - len(head)) + part_data
     assert len(img) == total * 512
     open(out, 'wb').write(img)
-    print('%s: %d MiB, loader %d sectors, kernel %d bytes, FAT32 partition at LBA %d (%d MiB)'
-          % (out, IMAGE_MIB, len(loader) // 512, len(kernel), PART_LBA, part_sectors // 2048))
+    print('%s: %d MiB, FAT32 partition at LBA %d (%d MiB)'
+          % (out, IMAGE_MIB, PART_LBA, part_sectors // 2048))
     for line in listing.splitlines():
         if line.strip() and ('ROM' in line or 'INI' in line or 'TXT' in line or 'BIN' in line or 'Directory' in line or '<DIR>' in line):
             print('  ' + line.strip())

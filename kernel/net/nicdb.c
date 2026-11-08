@@ -4,22 +4,16 @@
 /* nicdb.c - 5.2.101 랜카드 표 (설명 nicdb.h). 새 랜카드: 드라이버 파일 하나 + 아래 표에 한 줄. */
 #include "nicdb.h"
 
-#ifdef FE_UEFI
 #define DRV_RTW     (&nic_rtw)        /* uefi/rtwdet.c */
 #define DRV_R8152   (&nic_r8152)      /* uefi/usbnic_r8152.c */
 #define DRV_ASIX    (&nic_asix)       /* uefi/usbnic_asix.c (5.2.117, 미시험) */
-#define DRV_BCM5778 0                 /* 레거시(BIOS) 판에만 있음 */
-#else
-#define DRV_R8152   0
-#define DRV_ASIX    0
-#define DRV_RTW     0                 /* UEFI 판에만 있음 */
-#define DRV_BCM5778 (&nic_bcm57785)   /* kernel/net/nic_bcm57785.c */
-#endif
+#define DRV_BCM5778 0                 /* 레거시(BIOS) 전용이던 드라이버는 8.0.75에서 없앰 (칩 표시만 남김) */
 
 static const NicId tab[] = {
     /* 붙는 길  종류      제조사   장치      클래스  칩 이름                          드라이버 */
     /* ---- PCI 무선 ---- */
     { NB_PCI, NK_WIFI,  0x10EC, 0xC822,   0,      "Realtek RTL8822CE",              DRV_RTW },
+    { NB_PCI, NK_WIFI,  0x10EC, 0xC821,   0,      "Realtek RTL8821CE",              DRV_RTW },   /* 8.0.219: 시험PC 8번 (같은 rtwdet.c 가 칩 종류를 스스로 구분) */
     /* ---- PCI 유선 ---- */
     { NB_PCI, NK_WIRED, 0x14E4, 0x16B5,   0,      "Broadcom BCM57785",              DRV_BCM5778 },
     /* ---- USB 유선 (제조사 전용 인터페이스 FF/00) ---- */

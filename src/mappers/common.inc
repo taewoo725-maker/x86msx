@@ -46,5 +46,9 @@ static void cm_plain(MSX *m, Cartridge *c, int s, int q)
     }
     for (uint32_t k = 0; k < blocks && base + (int)k < 8; k++)
         m->slot_rd[s][q][base + k] = c->data + k * 8192;
+    if (blocks == 2 && base == 0) {                     /* 8.0.233: 16 KiB 롬이 0x0000 쪽(INIT 가 0x0xxx)이면 0x4000~0x7FFF 에도 거울로 보이게 한다.
+                                                         * BIOS 는 0x4000 에서 "AB" 를 찾으므로 거울이 없으면 카트리지를 못 찾는다 (Crazy Train 4종) */
+        for (uint32_t k = 0; k < 2; k++) m->slot_rd[s][q][2 + k] = c->data + k * 8192;
+    }
     return;
 }

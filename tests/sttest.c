@@ -195,6 +195,7 @@ int main(void)
         for (int i = 0; i < msx_st_ndevs; i++) MARK(msx_st_devs[i].off, msx_st_devs[i].size, 1);
         MARK(offsetof(MSX, mram), sizeof(((MSX *)0)->mram), 2);
         MARK(offsetof(MSX, scr), sizeof(((MSX *)0)->scr), 3);
+        MARK(offsetof(MSX, kbd_row_reads), sizeof(((MSX *)0)->kbd_row_reads), 5);   /* 입력 층이 쓰는 임시 값 — 상태 파일에 안 넣기로 한 것 (msx.h) */
         for (int i = 0; i < msx_st_ncore; i++) {
             MARK(msx_st_core[i].off, msx_st_core[i].size, 4);
             CHECK(strlen(msx_st_core[i].name) > 0 && strlen(msx_st_core[i].name) < 256, "core name %d", i);
@@ -225,7 +226,7 @@ int main(void)
             for (int f = 0; f < 5; f++) msx_run_frame(&a);
             CHECK(msx_vsrc_pick(&a, VSRC_V9990) == VSRC_V9990 && msx_vsrc_pick(&a, VSRC_VDP) == VSRC_VDP, "vsrc: forced");
             CHECK(msx_vsrc_pick(&a, -1) == (v9990_visible(&v9) ? VSRC_V9990 : VSRC_VDP), "vsrc: auto follows V9990 display");
-            CHECK(msx_vsrc[VSRC_V9990].aspect43 && !msx_vsrc[VSRC_VDP].aspect43, "vsrc: aspect");
+            CHECK(msx_vsrc[VSRC_V9990].prio > msx_vsrc[VSRC_VDP].prio, "vsrc: prio");   /* aspect43 은 5.2.125 부터 화면 가로 비율 설정(aspect_mode)이 대신해 안 쓰임 */
         }
     }
     printf("sttest: %d/%d passed\n", checks - fails, checks);

@@ -63,6 +63,7 @@ typedef struct {
     void (*key_poll)(void);                                /* 4.0.34: 막힌 반복 안에서 키보드를 읽음 (없으면 NULL — 인터럽트 방식) */
     int boot_failed;                                        /* 4.0.34: 지난번 켜다가 끝내 못 켜졌음 (표시가 남아 있었음) → 저장된 이어하기 상태는 건너뜀 */
     void (*boot_ok)(void);                                  /* 4.0.34: 잘 켜졌음 (표시를 지움). 없으면 NULL */
+    void (*crumb)(const char *what);                        /* 8.0.83 진단: 파일 여는 단계를 UEFI 변수에 남김 (PC가 갑자기 꺼져도 다음 부팅 LASTHANG.TXT 에 나옴). 없으면 NULL */
     void (*reboot)(void);
     void (*poweroff)(void);                                 /* 없으면 NULL (재부팅으로 대신) */
     void (*audio)(const int16_t *s, int n, int volume, int mute);   /* 없으면 NULL */
@@ -121,6 +122,7 @@ typedef struct {
     int (*pad_view)(int idx, PadView *v, char *name, int max);   /* 3.8.1: 진단 조이스틱 시험 — 풀어 낸 마지막 보고. 패드 없음 -1, 보고 없음 0, 있음 1. 없으면 NULL */
     int (*pad_read)(int idx, char *name, int max);          /* USB 게임패드 idx의 PAD_* 비트, 없으면 -1 (2.13). 없으면 NULL */
     int (*now)(int t[6]);                                   /* PC 시계: 년 월 일 시 분 초, 실패 -1 (2.14). 없으면 NULL */
+    int (*set_time)(const int t[6]);                        /* 8.0.43: PC 시계 고치기(년 월 일 시 분 초). 성공 0, 실패 -1. 없으면 NULL */
     /* 3.0 PC 마우스: 지난 호출 뒤 움직인 양(오른쪽·아래가 +), 휠(위로 굴리면 +), 지금 버튼(비트 0 왼쪽, 1 오른쪽, 2 가운데).
      * 마우스 개수를 돌려줌 (0 = 없음). name에 장치 설명. 없으면 NULL */
     int (*mouse_read)(int *dx, int *dy, int *dz, int *buttons, char *name, int max);
@@ -133,6 +135,7 @@ typedef struct {
     int (*make_file)(const char *path, uint32_t size, const uint8_t *prefix, uint32_t plen, void (*progress)(int pct));
     uint8_t *scratch;                                       /* 상태 저장·소리 녹음용 큰 작업 메모리 (2.10, 없으면 NULL) */
     uint32_t scratch_size;
+    void *v9968;                                            /* 8.0.94 V9968 카트리지(두 번째 VDP) 상태 메모리 1 MiB (없으면 NULL) */
     void *v9990;                                            /* 4.0.29 V9990(Gfx9000) 상태 메모리 2 MiB (없으면 NULL) */
     uint8_t *xram;                                          /* 외장 메모리 매퍼 RAM 4 MiB (2.12, 없으면 NULL) */
     uint8_t *vbuf;                                          /* 3.2.13 영상 녹화 버퍼 (없으면 NULL) */
@@ -182,6 +185,7 @@ int fe_test_dialog(void);
 void fe_test_menu_dump(void (*out)(const char *));                 /* 5.2.130 시험: 메뉴 끝 항목을 키 순서로 */
 int fe_dump_shortcut(int r, char *out, int max);
 void fe_test_hd(const char *path);
+int fe_test_net_state(void); int fe_test_bootwait(void);                       /* 8.0.45 시험 틀 */
 int fe_test_cart_special(int n);                      /* 3.9.4: 시험 틀 */
 void fe_test_vhd(const char *dirs, int slot);         /* 3.7.1: 시험 틀 (가상 하드 연결, 콤마로 C, D, …) */                  /* 3.7.1: 시험 틀 (하드 디스크 이미지 넣기) */               /* 3.7.0: 시험 틀 (diskcopy, mixer, keymap, about) */
 void fe_insert_special(int n, int kind);               /* 3.6.7: 특수 카트리지 (시험 틀) */
@@ -191,9 +195,7 @@ uint32_t fe_frame_tstates(void);                       /* 2.14: 한 프레임 �
 
 /* 모니터 종류를 적용한 MSX 16색 (8비트 화면의 DAC용, [16][3]) */
 const uint8_t *fe_palette_rgb(void);
-void fe_fatal(const char *msg, const char *detail);
 /* 지난번 이후 그린 줄 범위 [*y0, *y1). 없으면 *y1 <= *y0. 가져가면 비움 (UEFI GOP Blt 갱신용) */
-void fe_take_dirty(uint32_t *y0, uint32_t *y1);
 typedef struct { uint32_t x0, y0, x1, y1; } FeRect;
 int fe_take_dirty_rects(FeRect *out, int max);       /* 3.5.5: 바뀐 사각형들 (가져가면 비움) */
 void fe_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t c);

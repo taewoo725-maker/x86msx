@@ -66,6 +66,7 @@ typedef enum {
     MAPPER_FRSCC,               /* popolon Flash-ROM SCC (Developer Edition) - M29W128 16 MiB(128 KiB 섹터), Konami SCC 매퍼 + 오프셋(3800h/3801h) + 16비트 레지스터 모드(3804h), SCC + 8비트 DAC(98FBh/98FCh, 코나미 창 4000h). 상태: xbank[0..3] 뱅크, xbank[4] 오프셋, y_en 모드, y_cfg DAC 제어 */
     MAPPER_RS232,               /* Philips NMS1210 RS-232C 인터페이스 - 8251 + 8253 포트 80h~87h, 롬 없음(BIOS 는 디스크에서 RAM 으로). 상태 rs */
     MAPPER_HBI55,               /* Sony HBI-55 데이터 카트리지 - 배터리 SRAM 4 KiB, 자기 i8255 (포트 B0h~B3h). 메모리 창 없음, sram[0..4095], ppi[4] */
+    MAPPER_MMEDIA,              /* 8.0.75: X86 Multimedia 카트리지 - 소리(2Ch~2Fh) + 영상(MV2 직접 재생, 24h~27h), 롬 없음 (src/mvsnd.c·mmvid.c) */
     MAPPER_COUNT
 } MapperType;
 

@@ -15,6 +15,8 @@ static const PcEntry pcdb[] = {
     { 0x8086, 0x7D55, 0, "LG gram 16Z90S (Intel Meteor Lake)" , 1 },          /* 8.0.3: 2026-10-30 진단 로그에서 확인된 ID (표시용) */
     { 0x1002, 0x15BF, 7, "GPD G1619-04 (AMD Ryzen, 이지형컴퓨터)" },
     { 0x8086, 0x5912, 9, "ASRock H110M-HDV (Intel HD 630급, 회사 2번 데스크탑)" , 1 },
+    { 0x8086, 0x9A78, 8, "Dell Inspiron 15 3511 (Intel Tiger Lake, 따님 노트북)" },       /* 8.0.200: 2026-11-06 진단 로그 */
+    { 0x8086, 0x9A49, 10, "LG 15ZB95N-GP5KL (Intel Tiger Lake, 이지형 LG PC)" },        /* 8.0.200: 2026-11-06 진단 로그 */
     /* #3 ASUS B860M + RTX 4060 Ti: 시험 결과가 없어 ID 미확정 — 넣지 않음 */
 };
 static inline const PcEntry *pcdb_find(uint32_t id)   /* id = PCI 설정 공간 0번 dword (장치<<16 | 제조사) */

@@ -18,6 +18,10 @@
  *   그 사이 예약 사건은 시간표(sched.h), 인터럽트는 인터럽트선(irqline.h)으로.
  */
 #include "msx.h"
+#include "mvsnd.h"
+#include "mmvid.h"
+static int mvsnd_cart(const MSX *m);
+static void mvsnd_mirror(MSX *m, int n);
 #include "device.h"
 
 /* 소프트웨어 MIDI 음원 렌더에 쓴 시간(TSC 틱) 합계 — 프런트엔드가 프레임마다 가져가 진단 "synth" 칸에 더함 */
@@ -117,6 +121,21 @@ void msx_v9990_enable(MSX *m, V9990 *mem)
     m->v9 = mem;
     msx_io_rebuild(m);                                  /* V9990 포트 */
 }
+/* 8.0.94 V9968 카트리지 = 두 번째 VDP (V9990 처럼 별개 칩). 본체 VDP(98h~9Bh·9Ch)는 그대로, 카트리지는 자기 VRAM·자기 포트 (VDP 88h~8Bh, 잠금 8Ch) 로 따로 돈다.
+ * 화면은 카트리지 자기 출력 → 화면 소스 "V9968" 으로 봄. 인터럽트: 8.0.98 부터 본체 INT 에 연결 (RTL 도 슬롯 INT 로 냄. 켜지 않으면 안 섬; 8.0.94~97 은 연결 안 했음). 메모리는 프런트엔드가 줌 (mem = 0이면 뺌) */
+static void sync_int(MSX *m);
+void msx_v9968_enable(MSX *m, VDP *mem)
+{
+    if (mem && m->v2 != mem) {
+        vdp_init(mem, 3);
+        mem->progressive = 0;                           /* 명령은 시간 끌지 않고 바로 실행 (본체 CPU 시간과 별개) */
+        mem->spr_hide = m->vdp.spr_hide; mem->spr_nolimit = m->vdp.spr_nolimit;
+        vdp_reset(mem);
+    }
+    m->v2 = mem;
+    msx_io_rebuild(m);                                  /* 포트 88h~8Ch */
+    sync_int(m);
+}
 void msx_y8950_regs(const MSX *m, uint8_t out[256])
 {
     memset(out, 0, 256);
@@ -131,6 +150,15 @@ static void y8950_sync(MSX *m)                          /* 지금 시각까지 �
     while (m->y_pos < target) m->y_buf[m->y_pos++] = OPL_calc(m->y8950);
 }
 
+/* MoonSound 한 샘플을 만들어 모노 합과 좌우 칸에 넣음 */
+static int16_t clip16(int v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
+static void ms_make_sample(MSX *m)
+{
+    int l, r, v = opl4_calc48_stereo(&m->opl4, &l, &r);
+    m->ms_buf[m->ms_pos] = clip16(v); m->ms_buf_l[m->ms_pos] = clip16(l); m->ms_buf_r[m->ms_pos] = clip16(r);
+    m->ms_pos++;
+}
+
 /* 3.1.0 MoonSound: 지금 시각까지 48 kHz 소리를 만들어 둠 (쓰기 전에 불러 시간이 맞게) */
 static void ms_sync(MSX *m)
 {
@@ -138,7 +166,7 @@ static void ms_sync(MSX *m)
     uint64_t el = m->cpu.cycles - m->frame_start;
     uint32_t target = (uint32_t)(el * 48000u / 3579545u);
     if (target > sizeof m->ms_buf / sizeof m->ms_buf[0]) target = sizeof m->ms_buf / sizeof m->ms_buf[0];
-    while (m->ms_pos < target) { int v = opl4_calc48(&m->opl4); m->ms_buf[m->ms_pos++] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
+    while (m->ms_pos < target) ms_make_sample(m);
 }
 void msx_moonsound_enable(MSX *m, int on)
 {
@@ -353,30 +381,57 @@ static void spc_mem_write(MSX *m, uint16_t a, uint8_t v)
 #include "mappers/misc.inc"
 #include "mappers/table.inc"
 
+/* 8.0.179: 슬롯 확장기. which = 0 없음 / 1 슬롯 1 / 2 슬롯 2 / 3 둘 다.
+ *  없음  : 카트 0·1 = 슬롯 A·B, 2~4 = 기종 설정의 C·D·E, 5~7 = 없음
+ *  1 또는 2 : 카트 0~3 = 나눈 슬롯의 서브슬롯 0~3, 4 = 나누지 않은 다른 슬롯 (예전과 같음), 5~7 = 없음
+ *  둘 다  : 카트 0~3 = 1-0~1-3, 카트 4~7 = 2-0~2-3 */
+static void expand_clear(MSX *m)
+{
+    for (int k = 0; k < 2; k++) {
+        int ps = m->prof.ext_slot[k];
+        if ((m->expand == 1 + k || m->expand == 3) && ps >= 0 && ps <= 3) m->prof.subslotted[ps] = 0;     /* 원래대로 */
+    }
+    m->expand = 0;
+}
+
+static int expand_possible(const MSX *m, int ps) { return ps >= 0 && ps <= 3 && !m->prof.subslotted[ps]; }
+
+static void expand_place(MSX *m, int first, int ps)         /* 카트 first~first+3 = 슬롯 ps 의 서브슬롯 0~3 */
+{
+    for (int n = 0; n < 4; n++) { m->cart_slot[first + n] = ps; m->cart_ss[first + n] = n; }
+    m->prof.subslotted[ps] = 1;
+}
+
 int msx_set_expand(MSX *m, int which)
 {
-    if (which < 0 || which > 2) return -1;
+    if (which < 0 || which > 3) return -1;
     int a = m->prof.ext_slot[0], b = m->prof.ext_slot[1];
-    if (m->expand) m->prof.subslotted[m->cart_slot[m->expand - 1]] = 0;      /* 원래대로 */
-    m->expand = 0;
+    expand_clear(m);
+    for (int n = 0; n < MSX_CART_SLOTS; n++) { m->cart_slot[n] = -1; m->cart_ss[n] = 0; }
     m->cart_slot[0] = a; m->cart_slot[1] = b;
-    for (int n = 0; n < MSX_CART_SLOTS; n++) m->cart_ss[n] = 0;
-    for (int n = 2; n < MSX_CART_SLOTS; n++) {              /* 3.3.1: 기종 설정의 카트리지 C·D (3.6.7: E) */
+    for (int n = 2; n < MSX_PROF_EXT; n++) {                /* 3.3.1: 기종 설정의 카트리지 C·D (3.6.7: E) */
         int es = m->prof.ext_slot[n];
         m->cart_slot[n] = es >= 0 && es <= 3 ? es : -1;
         if (es >= 0 && es <= 3 && m->prof.subslotted[es]) m->cart_ss[n] = m->prof.ext_ss[n] & 3;
     }
     if (!which) { update_all_pages(m); return 0; }
-    int ps = which == 1 ? a : b;
-    if (ps < 0 || ps > 3 || m->prof.subslotted[ps]) { update_all_pages(m); return -1; }   /* 이미 나뉜 슬롯은 다시 못 나눔 */
+    int want_a = which == 1 || which == 3, want_b = which == 2 || which == 3;
+    if ((want_a && !expand_possible(m, a)) || (want_b && !expand_possible(m, b)) || (want_a && want_b && a == b)) {   /* 이미 나뉜 슬롯은 다시 못 나눔 */
+        update_all_pages(m); return -1;
+    }
     m->expand = which;
-    m->prof.subslotted[ps] = 1;
-    /* 확장기의 4칸 (2.7.7): 확장기를 꽂은 슬롯의 서브슬롯 0~3 = SLOT1~4, 3.6.7: 다른 카트리지 슬롯 = SLOT5 */
-    for (int n = 0; n < 4; n++) { m->cart_slot[n] = ps; m->cart_ss[n] = n; }
-    {
-        int o = which == 1 ? b : a, ox = which == 1 ? 1 : 0;
-        m->cart_slot[4] = o >= 0 && o <= 3 && o != ps ? o : -1;
-        m->cart_ss[4] = m->cart_slot[4] >= 0 && m->prof.subslotted[o] ? m->prof.ext_ss[ox] & 3 : 0;
+    for (int n = 0; n < MSX_CART_SLOTS; n++) { m->cart_slot[n] = -1; m->cart_ss[n] = 0; }
+    if (which == 3) {
+        expand_place(m, 0, a);                              /* 1-0~1-3 */
+        expand_place(m, 4, b);                              /* 2-0~2-3 */
+    } else {
+        /* 8.0.180: 카트 번호 차례 = 슬롯 번호 차례 (메뉴·상태 아이콘이 슬롯 1 부터 나오게).
+         * 슬롯 1 확장: 카트 0~3 = 1-0~1-3, 카트 4 = 슬롯 2.  슬롯 2 확장: 카트 0 = 슬롯 1, 카트 1~4 = 2-0~2-3 */
+        int ps = which == 1 ? a : b, o = which == 1 ? b : a, ox = which == 1 ? 1 : 0;
+        int expander_first = which == 1 ? 0 : 1, other_cart = which == 1 ? 4 : 0;
+        expand_place(m, expander_first, ps);                /* 확장기의 4칸 (2.7.7) */
+        m->cart_slot[other_cart] = o >= 0 && o <= 3 && o != ps ? o : -1;      /* 3.6.7: 다른 카트리지 슬롯 */
+        m->cart_ss[other_cart] = m->cart_slot[other_cart] >= 0 && m->prof.subslotted[o] ? m->prof.ext_ss[ox] & 3 : 0;
     }
     for (int n = 0; n < MSX_CART_SLOTS; n++) cart_map(m, n);
     update_all_pages(m);
@@ -425,6 +480,9 @@ int msx_insert_cart(MSX *m, int n, const uint8_t *data, uint32_t size, MapperTyp
     c->mapper = mapper;
     c->banks8 = (size + 8191) / 8192;
     c->plain_base = mapper == MAPPER_SFG ? 0 : cart_plain_base(data, size);   /* 3.4.1: SFG는 0x0000부터 (blueMSX와 같음) */
+    if (mapper == MAPPER_MMEDIA) mvsnd_reset();
+    if (mapper == MAPPER_MMEDIA) { mmvid_reset(); mmvid_attach(&m->vdp); }   /* 8.0.75 X86 Multimedia: 소리 + 영상 */
+             /* 8.0.55 X86MV 소리 카트리지: 꽂으면 STOP 상태 */
     msx_io_rebuild(m);                                  /* 카트에 딸린 I/O 장치 (MegaRAM·Zemina90·IDE 카트) */
     cart_reset(m, n);
     update_all_pages(m);
@@ -881,6 +939,20 @@ void msx_cart_set_uart(MSX *m, int n, int uart) { if (n >= 0 && n < MSX_CART_ALL
 
 static int ior_rs232(MSX *m, int p, uint8_t *v) { int n = rs232_cart(m); if (n < 0) return 0; *v = rs232_read(m, &m->cart[n].rs, p); return 1; }
 static int iow_rs232(MSX *m, int p, uint8_t v) { int n = rs232_cart(m); if (n < 0) return 0; rs232_write(m, &m->cart[n].rs, p, v); return 1; }
+/* ---- 8.0.55 X86MV 소리 카트리지 (src/mvsnd.c): 포트 2Ch~2Fh, 롬 없음. 상태(첫 프레임·흐른 샘플·PLAY)는 카트의 빈 칸에 비춰 두어 상태 파일에 같이 들어감 */
+static int mvsnd_cart(const MSX *m) { for (int n = 0; n < MSX_CART_ALL; n++) if (m->cart[n].present && m->cart[n].mapper == MAPPER_MMEDIA) return n; return -1; }
+static void mvsnd_mirror(MSX *m, int n) { int pl; mvsnd_state_get(&m->cart[n].rs.tx_count, &m->cart[n].rs.rx_count, &pl); m->cart[n].rs.tflag = (uint8_t)pl; }
+static int mm_cart(const MSX *m) { for (int n = 0; n < MSX_CART_ALL; n++) if (m->cart[n].present && m->cart[n].mapper == MAPPER_MMEDIA) return n; return -1; }
+static int ior_mmvid(MSX *m, int p, uint8_t *v) { if (mm_cart(m) < 0) return 0; *v = mmvid_read(p); return 1; }   /* 8.0.75 */
+static int iow_mmvid(MSX *m, int p, uint8_t v) { if (mm_cart(m) < 0) return 0; mmvid_write(p, v); return 1; }
+static int ior_mvsnd(MSX *m, int p, uint8_t *v) { int n = mvsnd_cart(m); if (n < 0) return 0; *v = mvsnd_read(p); return 1; }
+static int iow_mvsnd(MSX *m, int p, uint8_t v) { int n = mvsnd_cart(m); if (n < 0) return 0; mvsnd_write(p, v); mvsnd_mirror(m, n); return 1; }
+static MsxMmProbeFn mm_probe_fn;
+/* 8.0.226: 카트리지가 없을 때 소리 포트 2Ch~2Fh 를 처음 건드리면 호스트에게 꽂을 기회를 준다 (X86MV·X86MP3 가 시작할 때 이 포트로 카트리지를 찾음) */
+static int mm_probe_insert(MSX *m) { return mm_probe_fn && mm_probe_fn(m) && mvsnd_cart(m) >= 0; }
+static int ior_mmprobe(MSX *m, int p, uint8_t *v) { if (!mm_probe_insert(m)) return 0; *v = mvsnd_read(p); return 1; }
+static int iow_mmprobe(MSX *m, int p, uint8_t v) { if (!mm_probe_insert(m)) return 0; mvsnd_write(p, v); mvsnd_mirror(m, mvsnd_cart(m)); return 1; }
+void msx_mvsnd_after_load(MSX *m) { int n = mvsnd_cart(m); if (n >= 0 && m->cart[n].mapper == MAPPER_MMEDIA) { mmvid_reset(); mmvid_attach(&m->vdp); } if (n >= 0) { mvsnd_state_set(m->cart[n].rs.tx_count, m->cart[n].rs.rx_count); mvsnd_mirror(m, n); } }   /* 상태 불러오기 뒤: 그 위치에서 STOP */
 
 static void midi_reset(MSX *m)
 {
@@ -900,8 +972,9 @@ void msx_irq_set(MSX *m, int line, int on)
 /* 아직 선을 직접 움직이지 않는 장치들의 상태를 선에 옮김 (장치를 부품으로 떼어 낼 때 하나씩 직접 msx_irq_set 으로 바뀜) */
 static void sync_int(MSX *m)                    /* 3.4.1: SFG 타이머 IRQ, 응답 벡터는 0x3FF4에 쓴 값 */
 {
-    uint32_t l = m->irq_lines & ~((1u << IRQ_VDP) | (1u << IRQ_V9990) | (1u << IRQ_OPM) | (1u << IRQ_OPL4) | (1u << IRQ_MIDI) | (1u << IRQ_NET) | (1u << IRQ_RS232) | (1u << IRQ_SFGMIDI) | (1u << IRQ_MMMIDI));
+    uint32_t l = m->irq_lines & ~((1u << IRQ_VDP) | (1u << IRQ_V9990) | (1u << IRQ_OPM) | (1u << IRQ_OPL4) | (1u << IRQ_MIDI) | (1u << IRQ_NET) | (1u << IRQ_RS232) | (1u << IRQ_SFGMIDI) | (1u << IRQ_MMMIDI) | (1u << IRQ_V9968));
     if (vdp_irq(&m->vdp)) l |= 1u << IRQ_VDP;
+    if (m->v2 && vdp_irq(m->v2)) l |= 1u << IRQ_V9968;           /* 8.0.98 카트리지 VDP 인터럽트 (R#1 IE0·R#0 IE1 켠 때만. 8Ch 에 1을 써서 지움) */
     if (m->v9 && v9990_irq(m->v9)) l |= 1u << IRQ_V9990;
     if (m->sfg_on && opm_irq(&m->opm)) l |= 1u << IRQ_OPM;
     if (m->ms_on && (m->opl4.status & 0x80)) l |= 1u << IRQ_OPL4;   /* 3.4.4: MoonSound(OPL4) FM 타이머 IRQ */
@@ -934,6 +1007,10 @@ void msx_sched_test(MSX *m, uint64_t when) { sched_set(&m->sched, EV_TEST, when)
 
 void msx_net_event(MSX *m) { netcard_raise_irq(&m->net); sync_int(m); }   /* 호스트가 받은 자료·망 상태 변화를 알림 */
 
+static MsxJoyLiveFn joy_live_fn;
+void msx_set_joy_live(MsxJoyLiveFn fn) { joy_live_fn = fn; }
+void msx_set_mm_probe(MsxMmProbeFn fn) { mm_probe_fn = fn; }
+
 static uint8_t psg_read(MSX *m)
 {
     switch (m->psg.sel) {
@@ -944,6 +1021,7 @@ static uint8_t psg_read(MSX *m)
             int v = m->mouse_phase == 0 ? m->mouse_lx >> 4 : m->mouse_phase == 1 ? m->mouse_lx : m->mouse_phase == 2 ? m->mouse_ly >> 4 : m->mouse_ly;
             return (uint8_t)(0xC0 | (~m->mouse_btn & 3) << 4 | (v & 0x0F));
         }
+        if (joy_live_fn) joy_live_fn(m, port);          /* 8.0.189: 패드는 읽는 순간의 최신 값 (프레임 복사를 기다리지 않음) */
         return (uint8_t)(0xC0 | (~m->joy[port] & 0x3F));
     }
     default: return psg_read_reg(&m->psg, m->psg.sel);
@@ -1182,6 +1260,7 @@ static uint32_t rtc_time(const MSX *m)
     uint64_t el = m->cpu.cycles >= m->rtc_ref ? (m->cpu.cycles - m->rtc_ref) / 3579545u : 0;
     return base + (uint32_t)el + (uint32_t)m->rtc_delta;
 }
+uint32_t msx_rtc_time(const MSX *m) { return rtc_time(m); }
 static void rtc_fields(uint32_t t, int v[13])
 {
     int sec = (int)(t % 60), min = (int)(t / 60 % 60), hour = (int)(t / 3600 % 24);
@@ -1356,7 +1435,7 @@ enum IoDev {               /* 순서 = 우선순위 (예전 io_read/io_write 의
     IOD_NET = 1, IOD_V9990, IOD_MAT, IOD_VHD, IOD_BEER, IOD_GOUDA, IOD_GIDE, IOD_FDC63,
     IOD_S1990, IOD_TRTIMER, IOD_F4, IOD_TRPAUSE, IOD_PCM,     /* 예전 IOD_TURBOR 를 장치마다 (포트 겹침 없음) */
     IOD_MIDI, IOD_PRN, IOD_VDP, IOD_OPLL, IOD_ZEM90, IOD_MEGARAM, IOD_PSG2, IOD_Y8950,
-    IOD_OPL4, IOD_RTC, IOD_KANJI, IOD_SYSID, IOD_PSG, IOD_PPI, IOD_MAPPER, IOD_HBI55, IOD_RS232, IOD_MMMIDI, IOD_COUNT
+    IOD_OPL4, IOD_RTC, IOD_KANJI, IOD_SYSID, IOD_PSG, IOD_PPI, IOD_MAPPER, IOD_HBI55, IOD_RS232, IOD_MMMIDI, IOD_MVSND, IOD_VDP9C, IOD_MMVID, IOD_V2VDP, IOD_V2P4, IOD_V2PAD, IOD_MMPROBE, IOD_COUNT
 };
 
 /* ---- 읽기: 1 = 내 것 (*v 에 값), 0 = 아님 ---- */
@@ -1399,6 +1478,7 @@ static int ior_midi(MSX *m, int p, uint8_t *v)
     case 0xE8: midi_tick(m); *v = m->midi_rx_data; m->midi_rxrdy = 0; sync_int(m); return 1;   /* 3.4.4: 받은 자료 */
     case 0xE9: midi_tick(m); {   /* TxRDY(비트 0) 는 버퍼가 비었을 때, TxE(비트 2) 는 다 내보냈을 때 */
         uint64_t c = m->cpu.cycles; int rdy = c >= m->midi_tx_rdy || m->midi_tx_rdy > c + 4096, emp = c >= m->midi_tx_done || m->midi_tx_done > c + 8192;
+        if (!rdy) msx_midi_busy_polls++;
         *v = (uint8_t)((rdy ? 0x01 : 0) | (emp ? 0x04 : 0) | (m->midi_rxrdy ? 0x02 : 0) | (m->midi_tflag ? 0x80 : 0)); } return 1;   /* TxRDY TxE, RxRDY, DSR = 타이머 깃발 */
     case 0xEC: case 0xED: case 0xEE: *v = pit_read(m, &m->pit[p - 0xEC]); return 1;   /* 3.4.4: 8253 카운터 */
     }
@@ -1574,6 +1654,17 @@ static int iow_pcm(MSX *m, int p, uint8_t v)
     return 1;
 }
 unsigned long msx_midi_drop;
+unsigned msx_midi_frame_max, msx_midi_burst_frames;     /* 8.0.163 진단: 한 프레임 최대 MIDI 바이트, 실기 한도(52바이트)를 넘은 프레임 수 */
+unsigned long msx_midi_busy_polls;                      /* 8.0.163 진단: 프로그램이 "보내기 준비 안 됨"을 읽은 횟수 (많으면 보내기에 막힘) */
+#define MIDI_BYTE_CLOCKS_REAL 1146u                     /* 31250 baud 10비트 = 320 µs */
+#define MIDI_FAST_DIV 8u                                /* 항상 8배 빠름 (스위치 없음, 8.0.163) (프레임당 약 416바이트 — 큐 1024 안) */
+#define MIDI_FAST_QUEUE_LIMIT 768u                      /* 큐가 이만큼 차면 실기 속도로 되돌려 바이트가 버려지지 않게 함 */
+static uint32_t midi_byte_clocks(const MSX *m)          /* 한 바이트를 보내는 데 걸리는 클럭 */
+{
+    if (m->midi_n >= MIDI_FAST_QUEUE_LIMIT) return MIDI_BYTE_CLOCKS_REAL;
+    if (midibus_find(MDK_USB)) return MIDI_BYTE_CLOCKS_REAL;   /* 진짜 USB MIDI 장치가 꽂혀 있으면 실제 선로 속도를 지킴 */
+    return MIDI_BYTE_CLOCKS_REAL / MIDI_FAST_DIV;
+}
 static int iow_midi(MSX *m, int p, uint8_t v)
 {
     switch (p) {
@@ -1581,8 +1672,9 @@ static int iow_midi(MSX *m, int p, uint8_t v)
         if ((m->midi_cmd & 1) && m->midi_n >= sizeof m->midi_q) msx_midi_drop++;   /* 5.2.158 진단 */
         if ((m->midi_cmd & 1) && m->midi_n < sizeof m->midi_q) {
             int gt_own = dev_on(m, MDEV_MIDI_HW) && midi_bus.def_on;   /* GTMIDI 띠 계기 = GT 내장 음원이 켜졌을 때. 음량은 소리에 곱함 (모듈로 가는 바이트는 그대로) */
-            { uint64_t c = m->cpu.cycles, sd = m->midi_tx_done > c + 8192 ? c : m->midi_tx_done;   /* 한 바이트 = 1146 클럭, 한 바이트는 버퍼에 쌓임 */
-              if (c >= sd) { m->midi_tx_rdy = c; m->midi_tx_done = c + 1146; } else { m->midi_tx_rdy = sd; m->midi_tx_done = sd + 1146; } }
+            { uint64_t c = m->cpu.cycles, sd = m->midi_tx_done > c + 8192 ? c : m->midi_tx_done;   /* 한 바이트 = midi_byte_clocks() 클럭, 한 바이트는 버퍼에 쌓임 */
+              uint32_t bc = midi_byte_clocks(m);
+              if (c >= sd) { m->midi_tx_rdy = c; m->midi_tx_done = c + bc; } else { m->midi_tx_rdy = sd; m->midi_tx_done = sd + bc; } }
             m->midi_t[m->midi_n] = (uint32_t)(m->cpu.cycles - m->frame_start); m->midi_q[m->midi_n++] = v; if (gt_own) msx_midi_int_bytes++;
         }
         return 1;
@@ -1606,6 +1698,37 @@ static int iow_prn(MSX *m, int p, uint8_t v)
     m->prn_strobe = !(v & 1);                           /* 1 = 스트로브 내려가 있음 */
     return 1;
 }
+static int ior_vdp9c(MSX *m, int p, uint8_t *v) { (void)p; vdp_sync(m); *v = vdp_read_9c(&m->vdp); return 1; }   /* 8.0.69 V9968 포트 9Ch */
+static int iow_vdp9c(MSX *m, int p, uint8_t v) { (void)p; vdp_sync(m); vdp_write_9c(&m->vdp, v); sync_int(m); return 1; }
+/* 8.0.94 두 번째 VDP (V9968 카트리지): 포트 88h 데이터, 89h 제어·상태, 8Ah 팔레트, 8Bh 간접 레지스터, 8Ch 잠금(PORT#4) */
+static int ior_v2vdp(MSX *m, int p, uint8_t *v)
+{
+    VDP *d = m->v2;
+    switch (p & 3) {
+    case 0: *v = vdp_read_data(d); break;
+    case 1: d->hr = (m->cpu.cycles - m->line_start) > 180; *v = vdp_read_status(d); sync_int(m); break;
+    default: *v = 0xFF; break;
+    }
+    return 1;
+}
+static int iow_v2vdp(MSX *m, int p, uint8_t v)
+{
+    VDP *d = m->v2;
+    d->line_t = 0; d->late_defer = 0;
+    switch (p & 3) {
+    case 0: vdp_write_data(d, v); break;
+    case 1: vdp_write_ctrl(d, v); break;
+    case 2: vdp_write_palette(d, v); break;
+    default: vdp_write_indirect(d, v); break;
+    }
+    d->cmd_cost = 0; sync_int(m);
+    return 1;
+}
+static int ior_v2p4(MSX *m, int p, uint8_t *v) { (void)p; *v = vdp_read_9c(m->v2); return 1; }
+static int iow_v2p4(MSX *m, int p, uint8_t v) { (void)p; vdp_write_9c(m->v2, v); sync_int(m); return 1; }
+/* 8.0.103 카트리지는 A7~A3 만 디코드해서 88h~8Fh 8칸 전체를 차지: 8Dh~8Fh 는 읽기 FFh, 쓰기 무시 (8Eh 는 MegaRAM 이 먼저 받음 — 표 순서) */
+static int ior_v2pad(MSX *m, int p, uint8_t *v) { (void)m; (void)p; *v = 0xFF; return 1; }
+static int iow_v2pad(MSX *m, int p, uint8_t v) { (void)m; (void)p; (void)v; return 1; }
 static int iow_vdp(MSX *m, int p, uint8_t v)
 {
     vdp_sync(m);
@@ -1750,6 +1873,14 @@ IOP(pcm, p == 0xA4 || p == 0xA5)
 IOP(midi, p == 0xE8 || p == 0xE9 || p == 0xEA || (p >= 0xEC && p <= 0xEF))
 IOP(prn, p == 0x90 || p == 0x91)
 IOP(vdp, (p & 0xFC) == 0x98)
+IOP(vdp9c, p == 0x9C)
+IOP(v2vdp, p >= 0x88 && p <= 0x8B)                                            /* 8.0.94 V9968 카트리지 (두 번째 VDP) */
+IOP(v2p4, p == 0x8C)
+IOP(v2pad, p >= 0x8D && p <= 0x8F)
+IOS(v2vdp, m->v2 != 0)
+IOS(v2p4, m->v2 != 0)
+IOS(v2pad, m->v2 != 0)
+IOS(vdp9c, m->vdp.v9968)
 IOP(opll, p == 0x7C || p == 0x7D)
 IOP(zem90, p == 0x77)
 IOP(megaram, p == 0x8E)
@@ -1764,6 +1895,8 @@ IOP(ppi, p >= 0xA8 && p <= 0xAB)
 IOP(mapper, p >= 0xFC)
 IOP(hbi55, (p & 0xFC) == 0xB0)                                               /* 5.2.45 Sony HBI-55 (자기 i8255) */
 IOP(rs232, (p & 0xF8) == 0x80)                                               /* 5.2.48 RS-232C 카트리지 (NMS1210) */
+IOP(mmvid, p >= 0x24 && p <= 0x27)                                           /* 8.0.75 X86 Multimedia 영상 (28h~2Bh 는 네트워크 카트) */
+IOP(mvsnd, p >= 0x2C && p <= 0x2F)                                           /* 8.0.55 X86MV 소리 카트리지 */
 IOP(mmmidi, p <= 0x01 || p == 0x04 || p == 0x05)                             /* 5.2.56 Music Module MIDI (MC6850) */
 IOS(net, m->net.enabled)                                                     /* 5.0.57 네트워크 카트 (프레임 시작에 갱신) */
 IOS(v9990, m->v9 != 0)                                                       /* 4.0.29 Gfx9000 을 꽂았을 때 */
@@ -1775,6 +1908,10 @@ IOS(zem90, io_cart(m, MAPPER_ZEMINA90) >= 0)                                 /* 
 IOS(megaram, io_cart(m, MAPPER_MEGARAM) >= 0)                                /* 2.16 */
 IOS(hbi55, io_cart(m, MAPPER_HBI55) >= 0)                                    /* 5.2.45 */
 IOS(rs232, io_cart(m, MAPPER_RS232) >= 0)                                    /* 5.2.48 */
+IOS(mmvid, io_cart(m, MAPPER_MMEDIA) >= 0)                                   /* 8.0.75 */
+IOP(mmprobe, p >= 0x2C && p <= 0x2F)                                        /* 8.0.226 */
+IOS(mmprobe, mm_probe_fn != 0 && io_cart(m, MAPPER_MMEDIA) < 0)
+IOS(mvsnd, io_cart(m, MAPPER_MMEDIA) >= 0)   /* 8.0.55 (8.0.75: X86 Multimedia 도 소리 포트) */                                    /* 8.0.55 */
 IOS(mmmidi, uart_cart(m, UART_MC6850) >= 0)                                  /* 5.2.56 */
 IOS(mat, dev_on(m, MDEV_MATSU))                                              /* 3.4.0 Matsushita 교환 I/O (기종) */
 IOS(fdc63, m->fdc_kind == 63)                                                /* 3.4.0 Microsol I/O 포트 FDC */
@@ -1817,6 +1954,13 @@ static const DeviceOps io_dev[IOD_COUNT] = {
     IODEV(IOD_HBI55,   "HBI-55",         ip_hbi55,   is_hbi55,   ior_hbi55,   iow_hbi55),
     IODEV(IOD_RS232,   "RS-232C",        ip_rs232,   is_rs232,   ior_rs232,   iow_rs232),
     IODEV(IOD_MMMIDI,  "Music Module MIDI", ip_mmmidi, is_mmmidi, ior_mmmidi, iow_mmmidi),
+    IODEV(IOD_VDP9C,   "V9968 port 9Ch",  ip_vdp9c,   is_vdp9c,   ior_vdp9c,   iow_vdp9c),
+    IODEV(IOD_V2VDP,   "V9968 cart VDP",  ip_v2vdp,   is_v2vdp,   ior_v2vdp,   iow_v2vdp),
+    IODEV(IOD_V2P4,    "V9968 cart 8Ch",  ip_v2p4,    is_v2p4,    ior_v2p4,    iow_v2p4),
+    IODEV(IOD_V2PAD,   "V9968 cart 8Dh-8Fh", ip_v2pad, is_v2pad,  ior_v2pad,   iow_v2pad),
+    IODEV(IOD_MVSND,   "X86 Multimedia Sound",    ip_mvsnd,   is_mvsnd,   ior_mvsnd,   iow_mvsnd),   /* 8.0.55 */
+    IODEV(IOD_MMPROBE, "X86 Multimedia auto-insert", ip_mmprobe, is_mmprobe, ior_mmprobe, iow_mmprobe),   /* 8.0.226 */
+    IODEV(IOD_MMVID,   "X86 Video",      ip_mmvid,   is_mmvid,   ior_mmvid,   iow_mmvid),   /* 8.0.75 X86 Multimedia 의 영상 */
 };
 int msx_io_dev_count(void) { return IOD_COUNT; }
 const char *msx_io_dev_name(int d) { return d > 0 && d < IOD_COUNT && io_dev[d].name ? io_dev[d].name : ""; }
@@ -1918,11 +2062,12 @@ int msx_setup(MSX *m, const MachineProfile *prof, const RomImage roms[MAX_REGION
     int v9938 = prof->vdp[0] == 'V';
     netcard_init(&m->net, NETCARD_DEFAULT_BASE);          /* 5.0.57 */
     if (msx_net_host) netcard_set_host(&m->net, msx_net_host);
-    vdp_init(&m->vdp, !strcmp(prof->vdp, "V9958") ? 2 : v9938 ? 1 : 0);
+    vdp_init(&m->vdp, !strcmp(prof->vdp, "V9968") ? 3 : !strcmp(prof->vdp, "V9958") ? 2 : v9938 ? 1 : 0);
     m->vdp.progressive = msx_vdp_cmd_timing;
     m->rtc_on = v9938 || prof->cmos;
     m->s1985 = prof->s1985;
-    for (int n = 0; n < MSX_CART_SLOTS; n++) {
+    for (int n = MSX_PROF_EXT; n < MSX_CART_SLOTS; n++) { m->cart_slot[n] = -1; m->cart_ss[n] = 0; }   /* 8.0.179: 기종 데이터에 없는 6~8번 자리는 확장했을 때만 */
+    for (int n = 0; n < MSX_PROF_EXT; n++) {
         if (n >= 2) {                                   /* 3.3.1 MENU3-07: 카트리지 C·D (기종 설정에 있을 때) */
             int es = prof->ext_slot[n];
             m->cart_slot[n] = es >= 0 && es <= 3 ? es : -1;
@@ -2002,6 +2147,7 @@ static void reset_common(MSX *m)
     if (m->audio_on && m->y8950) { OPL_reset(m->y8950); m->y_pos = 0; }
     if (m->ms_on) { opl4_reset(&m->opl4); m->ms_pos = 0; }
     if (m->v9) v9990_reset(m->v9);
+    if (m->v2) vdp_reset(m->v2);
     update_all_pages(m);
 }
 
@@ -2023,6 +2169,7 @@ const MsxChInfo msx_ch_info[MSX_CH_N] = {
     [MSX_CH_MA]   = { "M-A", "MSX-AUDIO", "M-A", "MSX-AUDIO (Y8950)", 100, 1, 0, 4 },
     [MSX_CH_MS]   = { "M-S", "MoonSound", "MOON", "MoonSound (YMF278B)", 100, 1, 0, 5 },
     [MSX_CH_SFG]  = { "OPP", "OPP", "OPP", "YAMAHA SFG-YM2151(OPM),SFG-YM2164(OPP)", 100, 1, 0, 6 },
+    [MSX_CH_MMX]  = { "MMX", "X86 MM", "MMX", "X86 Multimedia (MP3/MP4 sound)", 100, 1, 0, -1 },   /* 8.0.97: 멀티미디어 롬팩 소리 (예전엔 PCM 채널에 더했음). 활동 표시는 재생 중 여부로 (chip_act 8비트가 다 참) */
     [MSX_CH_IO]   = { "I-O", "I-O", "I-O", "I-O", 0, 1, 1, -1 },          /* 드라이브·테이프 기계 소리 (처음엔 0, 프런트엔드가 정함) */
     [MSX_CH_MIDI] = { "MIDI", "MIDI", "MIDI", "MIDI devices (all plugged in)", 100, 1, 0, -1 },   /* 단자에 꽂힌 MIDI 기계 전체의 마스터 (기계별은 MIDI 믹서) — 기본 100, 좌우 있음 */
     [MSX_CH_PSG2] = { "PSG2", "PSG2", "PSG2", "PSG2 (Joyrex)", 100, 1, 0, 7 },
@@ -2042,7 +2189,8 @@ int msx_ch_present(const MSX *m, int ch)
     case MSX_CH_SCC: for (int n = 0; n < MSX_CART_ALL; n++) if (m->cart[n].present && CART_HAS_SCC(m->cart[n].mapper)) return 1; return 0;
     case MSX_CH_MM: return m->opll_on;
     case MSX_CH_MA: return m->audio_on;
-    case MSX_CH_PCM: return dev_on(m, MDEV_PCM) || dac_cart(m);                /* 카트리지 DAC 도 */
+    case MSX_CH_PCM: return dev_on(m, MDEV_PCM) || dac_cart(m);   /* 카트리지 DAC 도 */
+    case MSX_CH_MMX: return mvsnd_cart(m) >= 0;                          /* 8.0.97 X86 Multimedia 롬팩 */
     case MSX_CH_MS: return m->ms_on;                                      /* 3.1.0 */
     case MSX_CH_SFG: return m->sfg_on;                                    /* 3.4.1 */
     case MSX_CH_MIDI: return dev_on(m, MDEV_MIDI) || m->sfg_on;                   /* MIDI 를 내는 장치 (내장 MSX-MIDI·SFG) */
@@ -2052,6 +2200,7 @@ int msx_ch_present(const MSX *m, int ch)
 }
 int msx_ch_active(const MSX *m, int ch)
 {
+    if (ch == MSX_CH_MMX) return mvsnd_cart(m) >= 0 && mvsnd_playing();
     int b = (unsigned)ch < MSX_CH_N ? msx_ch_info[ch].act_bit : -1;
     return b >= 0 && (m->chip_act >> b & 1);
 }
@@ -2063,6 +2212,7 @@ void msx_reset(MSX *m)
     sched_init(&m->sched); m->irq_lines = 0;             /* 리셋하면 예약·인터럽트선 모두 풀림 */
     midi_reset(m);                                      /* 3.4.4 */
     netcard_reset(&m->net);                             /* 5.0.57 */
+    if (mvsnd_cart(m) >= 0) { mvsnd_reset(); mvsnd_mirror(m, mvsnd_cart(m)); if (m->cart[mvsnd_cart(m)].mapper == MAPPER_MMEDIA) { mmvid_reset(); mmvid_attach(&m->vdp); } }   /* 8.0.55 */
     for (int i = 0; i < GM_INST_MAX; i++) gmi_reset(i);  /* 3.4.5: 소프트웨어 음원도 모든 음 끔 (5.2.51: 인스턴스 모두) */
     memset(m->ram, 0, sizeof m->ram);
     if (m->mram_size) memset(m->mram, 0, m->mram_size);
@@ -2203,6 +2353,8 @@ void msx_run_frame(MSX *m)
     m->midi_n = 0;                                      /* 3.4.5: 지난 프레임 MIDI는 프런트엔드가 이미 읽었음 */
     netcard_tick(&m->net, m->cpu.cycles);                /* 5.0.57 */
     msx_run_frame_inner(m);
+    if (m->midi_n > msx_midi_frame_max) msx_midi_frame_max = m->midi_n;   /* 8.0.164: 프레임이 끝난 직후에 잼 (프런트엔드가 큐를 비우기 전. 8.0.163 은 비운 뒤라 늘 0 이었음) */
+    if (m->midi_n > 52) msx_midi_burst_frames++;                          /* 실기였다면 한 프레임(59,736 클럭)에 못 보냈을 양 */
     m->chip_act = chip_activity(m);
     /* 3.3.3 SND3-01·02: 음원마다 모노 합(psg.buf, 녹음·영상용), 좌우(out_l·out_r), 최대 진폭(lvl) */
     static int32_t am[PSG_FRAME_MAX], al[PSG_FRAME_MAX], ar[PSG_FRAME_MAX];
@@ -2224,6 +2376,9 @@ void msx_run_frame(MSX *m)
     }
 #define ADDC(i, v, c) do { int32_t v_ = (v); am[i] += v_; al[i] += v_ * gl[c] >> 8; ar[i] += v_ * gr[c] >> 8; \
         uint32_t a_ = (uint32_t)(v_ < 0 ? -v_ : v_); if (a_ > m->lvl[c]) m->lvl[c] = (uint16_t)(a_ > 65535 ? 65535 : a_); } while (0)
+/* 좌우가 따로 있는 소리: 모노 합(am)과 계기는 mono 로, 왼쪽/오른쪽은 각자 값에 믹서 좌우 몫(gl/gr)을 곱해 더함 (SFG 와 같은 규칙) */
+#define ADDC_STEREO(i, mono, lv, rv, c) do { int32_t m_ = (mono); am[i] += m_; al[i] += (int32_t)(lv) * gl[c] >> 8; ar[i] += (int32_t)(rv) * gr[c] >> 8; \
+        uint32_t a_ = (uint32_t)(m_ < 0 ? -m_ : m_); if (a_ > m->lvl[c]) m->lvl[c] = (uint16_t)(a_ > 65535 ? 65535 : a_); } while (0)
     for (int i = 0; i < n; i++) { am[i] = al[i] = ar[i] = 0; ADDC(i, m->psg.buf[i] * 1196 / 1000, MSX_CH_PSG); }   /* openMSX 와 같은 크기 (같은 SOUND 440 Hz 시험: 교류분 3479 → 4160) */
     if (!m->psg.tone_seen) m->lvl[MSX_CH_PSG] = 0;     /* 3.7.2: 키 클릭만이면 PSG 계기·아이콘 꺼짐 */
     m->psg.tone_seen = 0;
@@ -2237,6 +2392,15 @@ void msx_run_frame(MSX *m)
         }
     }
     m->pcm_last = m->pcm_da;
+    if (mvsnd_cart(m) >= 0 && n) {   /* 8.0.55 X86MV 소리 카트리지: 48 kHz 해독분을 PCM 채널에 (최대치 ≈ PCM DAC 최대치 128×55). 8.0.97: 따로 MMX 채널. 믹서 음량 0 이어도 소리 시계(위치)는 흘러야 하므로 항상 가져감 */
+        static int16_t mv[PSG_FRAME_MAX], mvl[PSG_FRAME_MAX], mvr[PSG_FRAME_MAX];
+        if (mvsnd_render_stereo(mv, mvl, mvr, n) && m->ch_vol[MSX_CH_MMX] > 0)
+            for (int i = 0; i < n; i++)
+                ADDC_STEREO(i, (int)mv[i] * 55 / 256 * m->ch_vol[MSX_CH_MMX] / 100, (int)mvl[i] * 55 / 256 * m->ch_vol[MSX_CH_MMX] / 100, (int)mvr[i] * 55 / 256 * m->ch_vol[MSX_CH_MMX] / 100, MSX_CH_MMX);
+        mvsnd_mirror(m, mvsnd_cart(m));
+        mvsnd_tick(msx_job_post, msx_job_wait);   /* 8.0.61: MIDI 전용 스위치(MpMidi)에 묶지 않음 — MP3 해독은 MIDI 와 무관. 일꾼이 없으면(플랫폼 함수 NULL) 메인, 일꾼이 꺼져 있으면(-1) 프레임 끝에 메인이 */
+        { int mn = mvsnd_cart(m); if (mn >= 0 && m->cart[mn].mapper == MAPPER_MMEDIA) mmvid_set_v9990(m->v9); mmvid_tick(&m->vdp); }   /* 8.0.75 X86 Multimedia: 프레임 끝에 소리 먹이기·영상 갱신 */
+    } else mvsnd_tick(0, 0);                              /* 카트리지가 빠졌으면 남은 일만 정리 */
     if (psg2_on(m)) {                                   /* 2.16: Joyrex PSG (3.6.7: 믹서 PSG2 채널), 4.0.129: Yamanooto 보조 PSG */
         psg_sync(&m->psg2, m->cpu.cycles);
         m->psg2.vol_tone = (uint8_t)m->ch_vol[MSX_CH_PSG2]; m->psg2.vol_click = 0;
@@ -2276,11 +2440,13 @@ void msx_run_frame(MSX *m)
     if (m->ms_on) {                                     /* 3.1.0 MoonSound: 프레임 끝까지 만들고 섞음 (믹서 M-S 음량) */
         ms_sync(m);
         while (m->ms_pos < n && m->ms_pos < sizeof m->ms_buf / sizeof m->ms_buf[0]) {
-            int v = opl4_calc48(&m->opl4);
-            m->ms_buf[m->ms_pos++] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+            ms_make_sample(m);
         }
         if (m->ch_vol[MSX_CH_MS] > 0 && m->ms_pos && n)
-            for (int i = 0; i < n; i++) ADDC(i, m->ms_buf[(uint32_t)i * m->ms_pos / (uint32_t)n] * m->ch_vol[MSX_CH_MS] / 100, MSX_CH_MS);
+            for (int i = 0; i < n; i++) {
+                uint32_t at = (uint32_t)i * m->ms_pos / (uint32_t)n;
+                ADDC_STEREO(i, m->ms_buf[at] * m->ch_vol[MSX_CH_MS] / 100, m->ms_buf_l[at] * m->ch_vol[MSX_CH_MS] / 100, m->ms_buf_r[at] * m->ch_vol[MSX_CH_MS] / 100, MSX_CH_MS);
+            }
         m->ms_pos = 0;
     }
     if (m->sfg_on && n) {                               /* 3.4.1 SFG (YM64: YM2164/YM2151) 55,930 Hz → 48 kHz, 좌우는 RL 비트 */
@@ -2470,6 +2636,7 @@ static void msx_run_frame_inner(MSX *m)
 {
     fast_refresh(m);                                    /* 4.0.138: 프레임마다 한 번 더 (카트리지·가상 디스크 변경 반영) */
     vdp_frame_start(&m->vdp);
+    if (m->v2) vdp_frame_start(m->v2);
     sync_int(m);
     int lines = m->vdp.lines, total = msx_frame_lines(m);
     int early_f = 0;
@@ -2480,9 +2647,11 @@ static void msx_run_frame_inner(MSX *m)
             else vdp_frame_end(&m->vdp);
             sync_int(m);
         }
+        if (m->v2 && line == m->v2->lines) vdp_frame_end(m->v2);   /* 8.0.94 두 번째 VDP: 자기 표시 줄 수에서 F */
         int vb = m->v9 ? (line + 1) * vt / total : 0;
         if (m->v9) { for (int k = vl; k < vb; k++) v9990_line_start(m->v9, k, vt); sync_int(m); }   /* 4.0.29, 5.2.128 */
         vdp_sync(m);
+        if (m->v2 && line < 256) vdp_line_start(m->v2, line);
         if (line < 256) { vdp_line_start(&m->vdp, line); sync_int(m); }   /* 줄 일치(FH)는 표시 영역 밖 줄(212~255)에서도 */
         if (m->sfg_on) { opm_advance(&m->opm, (uint32_t)(m->cpu.cycles - m->opm_t)); m->opm_t = m->cpu.cycles; sync_int(m); }   /* 3.4.1 */
         if (m->ms_on && (m->opl4.fmreg[0x04] & 3)) { ms_sync(m); sync_int(m); }   /* 3.4.4: OPL4 타이머가 돌면 줄마다 IRQ 확인 */
@@ -2545,6 +2714,7 @@ static void msx_run_frame_inner(MSX *m)
         }
         vdp_sync(m);
         if (line < 256) { vdp_line_end(&m->vdp, line); sync_int(m); }   /* 4.0.29: FH는 줄 끝(수평 귀선)에 */
+        if (m->v2) { if (line < 256) { vdp_line_end(m->v2, line); sync_int(m); } if (line < VDP_H) vdp_render_line(m->v2, line); }
         if (line < VDP_H)
             vdp_render_line(&m->vdp, line);
         if (m->v9) { for (int k = vl; k < vb; k++) v9990_line_end(m->v9, k); vl = vb; }

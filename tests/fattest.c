@@ -64,7 +64,7 @@ int main(int argc, char **argv)
     if (nv) {
         int n = fat_list(&vols[0], "", e, 256);
         snprintf(d, sizeof d, "%d entries", n);
-        check("usb image: root has Storage Device dir and X86MSX.BIN", has(e, n, "Storage Device", 1) >= 0 && has(e, n, "X86MSX.BIN", 0) >= 0, d);
+        check("usb image: root has Storage Device dir and EFI dir (no X86MSX.BIN)", has(e, n, "Storage Device", 1) >= 0 && has(e, n, "EFI", 1) >= 0 && has(e, n, "X86MSX.BIN", 0) < 0, d);
         n = fat_list(&vols[0], "\\Storage Device\\ROMS", e, 256);
         int k = has(e, n, "TEST-Konami SCC mapper.ROM", 0);
         snprintf(d, sizeof d, "%d entries, date %04d-%02d-%02d", n, k >= 0 ? e[k].year : 0, k >= 0 ? e[k].mon : 0, k >= 0 ? e[k].day : 0);
@@ -77,7 +77,6 @@ int main(int argc, char **argv)
         n = fat_list(&vols[0], "storage device\\roms", e, 256);
         check("usb image: case-insensitive path", n >= 6, 0);
         compare_file(&vols[0], "\\Storage Device\\ROMS\\TEST-Konami SCC mapper.ROM", "tests/carts/konamiscc.rom");
-        compare_file(&vols[0], "\\X86MSX.BIN", "build/img_kernel.bin");
         check("usb image: missing file", fat_list(&vols[0], "\\NOPE", e, 256) < 0, 0);
         fclose(f);
     }

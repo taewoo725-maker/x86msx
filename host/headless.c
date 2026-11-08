@@ -36,6 +36,32 @@ static void save_v9_ppm(const MSX *m, const char *path)      /* V9990 화면 (64
     fclose(f);
 }
 
+
+/* 8.0.71 시험: VRAMHASH=1 이면 프레임마다 실제 칩 배치 VRAM 의 SHA-256 을 "H 프레임 해시" 로 출력 (openMSX 기준 해시와 비교용) */
+static uint32_t sh_k[64];
+static void sha256_blk(uint32_t *h, const uint8_t *p)
+{
+    uint32_t w[64], a, b, c, d, e, f, g, hh;
+    #define R(x,n) (((x) >> (n)) | ((x) << (32 - (n))))
+    for (int i = 0; i < 16; i++) w[i] = (uint32_t)p[4*i] << 24 | (uint32_t)p[4*i+1] << 16 | (uint32_t)p[4*i+2] << 8 | p[4*i+3];
+    for (int i = 16; i < 64; i++) { uint32_t s0 = R(w[i-15],7) ^ R(w[i-15],18) ^ (w[i-15] >> 3), s1 = R(w[i-2],17) ^ R(w[i-2],19) ^ (w[i-2] >> 10); w[i] = w[i-16] + s0 + w[i-7] + s1; }
+    a=h[0];b=h[1];c=h[2];d=h[3];e=h[4];f=h[5];g=h[6];hh=h[7];
+    for (int i = 0; i < 64; i++) { uint32_t t1 = hh + (R(e,6)^R(e,11)^R(e,25)) + ((e&f)^(~e&g)) + sh_k[i] + w[i], t2 = (R(a,2)^R(a,13)^R(a,22)) + ((a&b)^(a&c)^(b&c)); hh=g;g=f;f=e;e=d+t1;d=c;c=b;b=a;a=t1+t2; }
+    h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=hh;
+    #undef R
+}
+static void sha256_hex(const uint8_t *d, size_t n, char *out)
+{
+    if (!sh_k[0]) { uint32_t pr[64], c = 0; for (uint32_t x = 2; c < 64; x++) { int ok = 1; for (uint32_t y = 2; y * y <= x; y++) if (x % y == 0) ok = 0; if (ok) pr[c++] = x; }
+        for (int i = 0; i < 64; i++) { double cb = __builtin_cbrt((double)pr[i]); cb -= (double)(uint32_t)cb; sh_k[i] = (uint32_t)(cb * 4294967296.0); } }
+    uint32_t h[8]; for (int i = 0; i < 8; i++) { double sq = __builtin_sqrt((double)(i == 0 ? 2 : i == 1 ? 3 : i == 2 ? 5 : i == 3 ? 7 : i == 4 ? 11 : i == 5 ? 13 : i == 6 ? 17 : 19)); sq -= (double)(uint32_t)sq; h[i] = (uint32_t)(sq * 4294967296.0); }
+    size_t i = 0; for (; i + 64 <= n; i += 64) sha256_blk(h, d + i);
+    uint8_t tail[128] = {0}; size_t r = n - i; memcpy(tail, d + i, r); tail[r] = 0x80; size_t tl = r + 9 <= 64 ? 64 : 128;
+    uint64_t bits = (uint64_t)n * 8; for (int k = 0; k < 8; k++) tail[tl - 1 - k] = (uint8_t)(bits >> (8 * k));
+    for (size_t o = 0; o < tl; o += 64) sha256_blk(h, tail + o);
+    for (int k = 0; k < 8; k++) sprintf(out + 8 * k, "%08x", h[k]);
+}
+
 static void save_ppm(const MSX *m, const char *path)
 {
     if (m->v9 && v9990_visible(m->v9)) { save_v9_ppm(m, path); return; }
@@ -49,8 +75,19 @@ static void save_ppm(const MSX *m, const char *path)
         for (int x = 0; x < w; x++) {
             int sx = x / SCALE - BORDER;
             uint8_t c = (sx >= 0 && sx < VDP_W && sy >= 0 && sy < VDP_H) ? m->vdp.fb[sy][sx] : bd;
+            if (sx >= 0 && sx < VDP_W && sy >= 0 && sy < VDP_H && m->vdp.line_direct[sy] >= 2) {   /* 8.0.71: YJK (SCREEN 10~12) 해독 */
+                uint8_t raw[256], rgb[256][3], pi[256];
+                for (int q = 0; q < 256; q++) raw[q] = m->vdp.fb[sy][2 * q];
+                vdp_yjk_line(raw, m->vdp.line_direct[sy] == 3, rgb, pi);
+                int qx = sx >> 1; uint8_t o[3] = { rgb[qx][0], rgb[qx][1], rgb[qx][2] };
+                if (m->vdp.spr_ov[sy][qx] != 0xFF) vdp_g7_rgb(&m->vdp, m->vdp.spr_ov[sy][qx], &o[0], &o[1], &o[2]);
+                else if (pi[qx] != 0xFF) { o[0] = m->vdp.palette[pi[qx]][0]; o[1] = m->vdp.palette[pi[qx]][1]; o[2] = m->vdp.palette[pi[qx]][2]; }
+                fwrite(o, 1, 3, f);
+            } else
             if (sx >= 0 && sx < VDP_W && sy >= 0 && sy < VDP_H && m->vdp.line_direct[sy] == 1) {   /* 4.0.129: SCREEN 8 직접색 (GGGRRRBB) */
-                uint8_t rgb[3] = { (uint8_t)(((c >> 2) & 7) * 255 / 7), (uint8_t)(((c >> 5) & 7) * 255 / 7), (uint8_t)((c & 3) * 255 / 3) };
+                uint8_t rgb[3];
+                if (vdp_epal(&m->vdp)) vdp_g7_rgb(&m->vdp, c, &rgb[0], &rgb[1], &rgb[2]);   /* 8.0.69: V9968 확장 팔레트 */
+                else { rgb[0] = (uint8_t)(((c >> 2) & 7) * 255 / 7); rgb[1] = (uint8_t)(((c >> 5) & 7) * 255 / 7); rgb[2] = (uint8_t)((c & 3) * 255 / 3); }
                 fwrite(rgb, 1, 3, f);
             } else
             fwrite(m->vdp.palette[c], 1, 3, f);
@@ -116,10 +153,11 @@ int main(int argc, char **argv)
 
     static MSX m;
     static V9990 v9;
+    static VDP v2;                                   /* 8.0.94 */
     char err[256];
     if (msx_host_init(&m, argv[1], err, sizeof err)) { fprintf(stderr, "init: %s\n", err); return 1; }
+    if (getenv("V9968")) msx_v9968_enable(&m, &v2);          /* 8.0.94: V9968 카트리지 (두 번째 VDP) */
     if (getenv("V9990")) msx_v9990_enable(&m, &v9);          /* 4.0.29: Gfx9000 */
-    if (getenv("VDPASM")) vdpk_asm_on = 1;            /* 7단계: 어셈블러판 VDP 커널 (VDPK_ASM 으로 빌드했을 때) */
     if (getenv("AUDIO")) { msx_audio_enable(&m, 1); m.ch_vol[MSX_CH_MM] = 100; }
     if (getenv("MOON")) { static uint8_t wm[4u << 20]; opl4_set_memory(wm, 2u << 20); msx_moonsound_enable(&m, 1); }   /* 시험용 MoonSound (웨이브 롬은 0) */
     if (getenv("EXPAND")) msx_set_expand(&m, atoi(getenv("EXPAND")));   /* 확장기를 먼저 (카트리지 번호 SLOT1~5 를 서브슬롯에 꽂으려고) */
@@ -217,6 +255,11 @@ int main(int argc, char **argv)
             if (df) { size_t dn = fread(db2, 1, sizeof db2, df); fclose(df); fdc_insert(&m.fdc, 0, db2, (uint32_t)dn, 0); }
         }
         msx_run_frame(&m);
+        if (getenv("VDPROW") && f == 600) { int y = atoi(getenv("VDPROW")); printf("ROW il=%d mask=%X evr=%d:", m.vdp.il, m.vdp.vram_mask, vdp_evr(&m.vdp)); for (int q = 0; q < 48; q++) printf(" %02X", m.vdp.fb[y][q * 2]); printf(" | ld=%d\n", m.vdp.line_direct[y]); }
+        if (getenv("VDPPHYS") && f == 600) { static uint8_t pv[2 * VDP_VRAM]; vdp_vram_physical(&m.vdp, pv); uint32_t b[6] = { 0x3200, 0x13200, 0x23200, 0x33200, 0x6400, 0x26400 }; for (int i = 0; i < 6; i++) { printf("PH %05X:", b[i]); for (int q = 0; q < 16; q++) printf(" %02X", pv[b[i] + q]); printf("\n"); } }
+        if (getenv("VDPDUP") && f == 600) { static uint8_t pv[2 * VDP_VRAM]; vdp_vram_physical(&m.vdp, pv); int same = 0, nz_hi = 0, nz_lo = 0; for (int i = 0; i < 0x20000; i++) { same += pv[i] == pv[i + 0x20000]; nz_lo += pv[i] != 0; nz_hi += pv[i + 0x20000] != 0; } printf("DUP same=%d nz_lo=%d nz_hi=%d\n", same, nz_lo, nz_hi); }
+        if (getenv("VDPREGS") && f % 100 == 0) { printf("R %d:", f); for (int q = 0; q < 28; q++) printf(" %02X", m.vdp.reg[q]); printf("\n"); }
+        if (getenv("VRAMHASH")) { static uint8_t pv[2 * VDP_VRAM]; size_t pn = vdp_vram_physical(&m.vdp, pv); char hx[65]; sha256_hex(pv, pn, hx); printf("H %d %s\n", f, hx); }
         if (getenv("MIDIDUMP")) { static FILE *mf; if (!mf) mf = fopen(getenv("MIDIDUMP"), "wb"); if (mf && m.midi_n) fwrite(m.midi_q, 1, m.midi_n, mf); if (mf) fflush(mf); }   /* 이번 프레임 MIDI 바이트 */
         if (getenv("TRACE") && f % atol(getenv("TRACE")) == 0) {
             printf("f=%ld PC=%04X SP=%04X slot=%02X IFF=%d halt=%d", f, m.cpu.pc, m.cpu.sp.w, m.primary, m.cpu.iff1, m.cpu.halted);

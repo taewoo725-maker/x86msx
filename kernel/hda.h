@@ -18,7 +18,7 @@
  * dma: 64 KiB 이상, 4 GiB 아래, 128바이트 정렬된 DMA 영역 (가상 = 물리) */
 int hda_init(char *status, int len, uintptr_t dma);
 void hda_set_dma_dev(int64_t off);
-extern void (*hda_trace)(const char *);          /* 진단 추적 */              /* 장치 주소 - 물리 주소 (UEFI VT-d Map 결과, 보통 0) */
+              /* 장치 주소 - 물리 주소 (UEFI VT-d Map 결과, 보통 0) */
 /* 출력 장치 다시 고르기: 0 자동, 1 스피커·라인 출력(아날로그), 2 HDMI·DisplayPort(디지털). 성공 0 */
 int hda_select(int pref, char *status, int len);
 const char *hda_dbg_text(void);   /* 4.0.84: 마지막 소리 선택 과정 기록 */
@@ -31,7 +31,6 @@ void hda_write(const int16_t *mono, int n, int volume, int mute);
 void hda_write2(const int16_t *left, const int16_t *right, int n, int volume, int mute);   /* 3.3.3 스테레오 (right NULL = 모노) */
 
 int hda_ok(void);
-int hda_hdmi_present(void);             /* 4.0.102: 그래픽 코덱의 모니터 감지 (-1 모름) */
 int hda_headphone(void);                /* 4.0.34: 1 꽂힘, 0 빠짐, -1 모름 */
 void hda_silence(void);                 /* 3.8.1: 재생 버퍼를 비우고 스트림 멈춤 (재부팅 직전) */
 /* 진단 정보: 찾은 HD Audio 장치와 코덱, 쓰는 출력 핀 */

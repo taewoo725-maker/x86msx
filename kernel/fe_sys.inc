@@ -151,25 +151,6 @@ static void img_make(void)
     num_append(img_name, sizeof img_name, num + 1, l - k > 0 ? (uint32_t)(l - k) : 2, '0');
 }
 
-static void img_change(int id, int dir)
-{
-    switch (id) {
-    case IMG_KIND: img_kind = !img_kind; img_ins = img_kind ? 0 : 1; if (img_kind) img_fix_size(); break;
-    case IMG_FMT:
-        if (img_kind) { img_hdk = (img_hdk + (dir < 0 ? HDI_KINDS - 1 : 1)) % HDI_KINDS; img_fix_size(); }
-        else img_fmt = (img_fmt + (dir < 0 ? DSK_FORMATS - 1 : 1)) % DSK_FORMATS;
-        break;
-    case IMG_SIZE:
-        for (int k = 1; k <= HD_SIZES; k++) {
-            int i = (img_size + (dir < 0 ? HD_SIZES - k : k)) % HD_SIZES;
-            if (hd_size_ok(img_hdk, hd_sizes_mb[i])) { img_size = i; break; }
-        }
-        break;
-    case IMG_AFTER: img_ins = img_kind ? !img_ins : (img_ins + (dir < 0 ? 2 : 1)) % 3; break;
-    case IMG_GO: if (dir == 0) img_make(); break;
-    }
-    menu_dirty = 1;
-}
 
 static void open_image_dialog(void)
 {
@@ -1136,7 +1117,7 @@ static void dc_enter(int p)
     }
     FeDirEntry *x = &dc_ue[p][it];
     if (dc_zip[p]) { if (x->is_dir) dc_zip_push(p, x); else if (dc_is_text(x->key[0] ? x->key : x->name)) dc_edit_start(); return; }   /* 4.0.3: zip 안 폴더는 들어감, 5.0.37: 글 파일은 편집기로 (보기만) */
-    if (!x->is_dir && ext_is(x->key[0] ? x->key : x->name, "zip", 0, 0)) { dc_zip_open(p, x); return; }
+    if (!x->is_dir && (ext_is(x->key[0] ? x->key : x->name, "zip", "arj", "pma") || ext_is(x->key[0] ? x->key : x->name, "lzh", "lha", "lzs"))) { dc_zip_open(p, x); return; }
     if (!x->is_dir && ext_is(x->key[0] ? x->key : x->name, "png", 0, 0)) { dc_preview(p, x); return; }
     if (!x->is_dir && dc_is_text(x->key[0] ? x->key : x->name)) { dc_edit_start(); return; }
     char np[PATH_MAX_FE];
@@ -2042,10 +2023,11 @@ static void disk_copy_key(int key)
 /* 진단 (3.0.2): 탭 USB · 키보드 · 소리 · 마우스 (소리 진단을 합침)        */
 /* ================================================================== */
 static int diag_tab;
-#define DG_TABS 11                                       /* 6 = 화면 (4.0.29: 작은 화면에서 USB 탭 아래 줄이 잘려 따로 뺌) */
+#define DG_TABS 12                                       /* 6 = 화면 (4.0.29: 작은 화면에서 USB 탭 아래 줄이 잘려 따로 뺌) */
 #define DG_SW 10
+#define DG_LAN 11                                       /* 8.0.130 유선 네트워크 탭 (WiFi 탭 바로 뒤) */
 #define DG_SUM 9                                        /* 요약 탭 (보이는 차례는 맨 앞) */
-static const uint8_t dg_order[DG_TABS] = { DG_SUM, 0, 1, 2, 3, 4, 5, 6, 7, 8, DG_SW };   /* 화면 차례 → 탭 번호 */
+static const uint8_t dg_order[DG_TABS] = { DG_SUM, 0, 1, 2, 3, 4, 5, 6, 7, DG_LAN, 8, DG_SW };   /* 화면 차례 → 탭 번호 */
 static int dg_pos(int id) { for (int i = 0; i < DG_TABS; i++) if (dg_order[i] == id) return i; return 0; }
 /* 5.2.26 진단 판정 (kernel/diag.c): 1초마다 다시 — 요약 탭·각 탭 맨 위 판정 줄·DIAG.TXT 가 같이 씀 */
 static int diag_pc_sel = -1;                            /* -1 자동, 0~ 시험 PC 번호 (기본 표 + TESTPC.TXT), 그 밖 = 목록에 없음 (ini DiagPC) */
@@ -2134,45 +2116,9 @@ static int dg_mx, dg_my, dg_btn, dg_wheel;
 static uint32_t dg_events, dg_last_ev;
 
 static int gpu_sel = -1;                                   /* 4.0.58: 0 = AMD, 1 = Intel (Video 탭 V 키) */
-/* 멈춤 추적 — 프레임 안 단계·코덱 명령을 메모리 고리(64줄)에만 남김 (USB 쓰기 없음, 거의 공짜).
- * UEFI 는 펌웨어 타이머가 프레임이 1.5초 넘게 안 바뀌면 이 고리를 LOG\HANG.TXT 로 씀 (fe_hang_dump). 진단 저장(DIAG.TXT)에도 붙임 */
-static int tr_sync;                                     /* (5.2.22~23 의 바로 쓰기 — 이제 안 씀, 표시만) */
-#define TR_N 128
-static struct { uint32_t t; const char *s; char x[24]; uint8_t tab; } tr_ring[TR_N];
-static volatile uint32_t tr_pos;
 volatile uint32_t fe_frame_count;                       /* fe_frame 이 끝날 때마다 +1 (플랫폼 멈춤 감시) */
-static void fe_trace(const char *what)
-{
-    uint32_t k = tr_pos % TR_N;
-    tr_ring[k].t = P.ms ? P.ms() : 0; tr_ring[k].s = what; tr_ring[k].x[0] = 0; tr_ring[k].tab = (uint8_t)(dialog == 2 ? diag_tab : 255);
-    tr_pos++;
-}
-static void fe_trace_str(const char *what, const char *x)   /* 문자열을 복사해 둠 (hda 명령 줄 등 임시 버퍼) */
-{
-    uint32_t k = tr_pos % TR_N;
-    fe_trace(what);
-    int i = 0; for (; x && x[i] && i < 23; i++) tr_ring[k].x[i] = x[i]; tr_ring[k].x[i] = 0;
-}
-int fe_hang_dump(char *b, int max)                      /* 고리를 글로 (오래된 것부터) */
-{
-    int q = 0;
-#define HP(str) do { const char *s_ = (str); while (*s_ && q < max - 1) b[q++] = *s_++; } while (0)
-    HP("X86MSX " MSXEMU_VERSION " HANG/TRACE (last steps, oldest first)\r\n");
-    uint32_t n = tr_pos < TR_N ? tr_pos : TR_N;
-    for (uint32_t i = tr_pos - n; i != tr_pos; i++) {
-        uint32_t k = i % TR_N; char nb[16]; int m = 0; uint32_t v = tr_ring[k].t;
-        char t[12]; int tn = 0; do { t[tn++] = (char)('0' + v % 10); v /= 10; } while (v); while (tn) nb[m++] = t[--tn]; nb[m] = 0;
-        HP("t="); HP(nb);
-        if (tr_ring[k].tab != 255) { char tb[8] = " tab 0"; tb[5] = (char)('0' + tr_ring[k].tab % 10); HP(tb); }
-        HP(" "); HP(tr_ring[k].s ? tr_ring[k].s : "?");
-        if (tr_ring[k].x[0]) { HP(" "); HP(tr_ring[k].x); }
-        HP("\r\n");
-    }
-    b[q] = 0;
-    return q;
-}
 
-/* 멈췄다가 다시 돈 경우 (HANG.TXT 는 다음 멈춤이 덮어씀) — 멈춘 길이와 그때 고리를 LOG\STALL.TXT 에 모아 둠 (최대 4번) */
+/* 멈췄다가 다시 돈 경우 (HANG.TXT 는 다음 멈춤이 덮어씀) — 멈춘 길이를 LOG\STALL.TXT 에 모아 둠 (최대 4번) */
 static char stall_buf[4][2600]; static int stall_n, stall_due;
 static void stall_note(uint32_t ms)
 {
@@ -2182,7 +2128,6 @@ static void stall_note(uint32_t ms)
     char nb[16]; { int m = 0; uint32_t v = ms; char t[12]; int tn = 0; do { t[tn++] = (char)('0' + v % 10); v /= 10; } while (v); while (tn) nb[m++] = t[--tn]; nb[m] = 0; }
     SP("== stall "); SP(nb); SP(" ms (frames stopped, then resumed) ==\r\n");
     b[q] = 0;
-    { int r = fe_hang_dump(b + q, (int)sizeof stall_buf[0] - q); q += r; }
     b[q] = 0;
 #undef SP
     if (stall_n < 4) stall_n++;
@@ -2190,17 +2135,52 @@ static void stall_note(uint32_t ms)
 }
 static void stall_flush(void)
 {
-    if (!stall_due || !P.write_file) return;
+    if (!stall_due || !P.write_file || !log_write_go) return;   /* 8.0.199: 입력 중·연주 중에는 미룸 */
     stall_due = 0;
     if (!log_stall) return;
     static char ob[4 * 2600 + 200]; int q = 0;
-    const char *h = "#LOG 1\r\n#prog=X86MSX ver=" MSXEMU_VERSION "\r\n#what=frames stopped >1 s then resumed; trace ring at that moment (oldest first)\r\n";
+    const char *h = "#LOG 1\r\n#prog=X86MSX ver=" MSXEMU_VERSION "\r\n#what=frames stopped >1 s then resumed (how long)\r\n";
     while (*h) ob[q++] = *h++;
     for (int i = 0; i < stall_n; i++) for (const char *c = stall_buf[i]; *c && q < (int)sizeof ob - 1; c++) ob[q++] = *c;
     if (P.create) { P.create("0:\\LOG", 1); P.create("0:\\LOG\\STALL.TXT", 0); }
-    P.write_file("0:\\LOG\\STALL.TXT", (const uint8_t *)ob, (uint32_t)q);
+    { PF_BEGIN; P.write_file("0:\\LOG\\STALL.TXT", (const uint8_t *)ob, (uint32_t)q); PF_END(PF_FILE); }
+    log_wrote_ms = P.ms();
 }
 static uint32_t dg_t_info, dg_t_snd, dg_save_due;   /* dg_save_due: 이 시각에 DIAG.TXT 다시 저장 (0 = 없음) */                 /* 진단 창 그리기에서 P.info·P.sound_diag 가 걸린 ms (최대) */
+static void dg_sw_line(char *hb, int max);               /* 8.0.129 (아래 스위치 표 뒤) */
+/* 8.0.195: DIAG.TXT 의 "== VDP ==" 구역. MSX 화면이 한 색으로 보이는 것처럼 "프로그램이 그린 것"인지 "화면에 내보내는 쪽"인지
+ * 가릴 때 쓴다: 레지스터(R#0·1·2·7·8·9), 팔레트 0~3 (VDP 값 → 모니터 보정 뒤 값), 프레임 버퍼·VRAM 맨 앞의 색 번호,
+ * 화면 출력 방식(bpp·보일 장치·모니터 종류·보정 값)과 이번 프레임의 팔레트 바뀜 수. 스위치 LogDiag 가 켜져 있어야 파일에 들어간다. */
+static void diag_vdp_palette_line(char *hb, int max, int first, int count)
+{
+    for (int i = first; i < first + count; i++) {
+        str_append(hb, max, " p"); num_append(hb, max, (uint32_t)i, 0, ' '); str_append(hb, max, "=");
+        for (int k = 0; k < 3; k++) hex_append(hb, max, M->vdp.palette[i][k], 2);
+        str_append(hb, max, "/"); for (int k = 0; k < 3; k++) hex_append(hb, max, mon_rgb[i][k], 2);
+    }
+}
+static void diag_vdp_lines(char *hb, int max)
+{
+    static const uint8_t regs[] = { 0, 1, 2, 7, 8, 9 };
+    str_append(hb, max, "\r\n== VDP ==\r\nswitch LogDiag="); str_append(hb, max, log_diag ? "1" : "0");
+    str_append(hb, max, "  run "); num_append(hb, max, (uint32_t)run_state, 0, ' ');
+    str_append(hb, max, "  bpp "); num_append(hb, max, (uint32_t)D.bpp, 0, ' ');
+    str_append(hb, max, "  shown "); str_append(hb, max, msx_vsrc[vsrc_cur].key);
+    str_append(hb, max, "  VideoSource(ini)="); num_append(hb, max, (uint32_t)(vsrc_pref + 1), 0, ' ');
+    str_append(hb, max, "\r\nmonitor "); num_append(hb, max, (uint32_t)monitor_kind, 0, ' ');
+    str_append(hb, max, "  satur "); num_append(hb, max, (uint32_t)vid_satur, 0, ' ');
+    str_append(hb, max, "  contrast "); num_append(hb, max, (uint32_t)vid_contrast, 0, ' ');
+    str_append(hb, max, "  gamma "); num_append(hb, max, (uint32_t)vid_gamma, 0, ' ');
+    str_append(hb, max, "\r\nregs");
+    for (unsigned i = 0; i < sizeof regs; i++) { str_append(hb, max, " R"); num_append(hb, max, regs[i], 0, ' '); str_append(hb, max, "="); hex_append(hb, max, M->vdp.reg[regs[i]], 2); }
+    str_append(hb, max, "  lines "); num_append(hb, max, (uint32_t)M->vdp.lines, 0, ' ');
+    str_append(hb, max, "  pal changes in frame "); num_append(hb, max, (uint32_t)M->vdp.pal_nsnap, 0, ' ');
+    str_append(hb, max, "\r\npalette (VDP rgb/shown rgb)"); diag_vdp_palette_line(hb, max, 0, 4);
+    str_append(hb, max, "\r\ncolour numbers  fb[0][0]="); hex_append(hb, max, M->vdp.fb[0][0], 2);
+    str_append(hb, max, " fb[100][256]="); hex_append(hb, max, M->vdp.fb[100][256], 2);
+    str_append(hb, max, " fb[200][500]="); hex_append(hb, max, M->vdp.fb[200][500], 2);
+    str_append(hb, max, "  vram[0..3]="); for (int i = 0; i < 4; i++) hex_append(hb, max, M->vdp.vram[i], 2);
+}
 static void diag_save_now(void)                      /* 4.0.37 → 5.2.26: LOG\DIAG.TXT = 공용 로그 규약 머리 + 영역 요약(SUM) + 영역별 줄 + 소리 코덱 + 멈춤 추적 */
 {
     static char hb[24000];
@@ -2221,6 +2201,7 @@ static void diag_save_now(void)                      /* 4.0.37 → 5.2.26: LOG\D
       for (int gq = 0; gq < GM_INST_MAX; gq++) if (gmi_mode(gq) != GM_OFF && gmi_level(gq)) { if (ml[0]) str_append(ml, sizeof ml, "  "); num_append(ml, sizeof ml, (uint32_t)gq, 0, ' '); str_append(ml, sizeof ml, ":"); str_append(ml, sizeof ml, gmn[gmi_mode(gq) & 7]); str_append(ml, sizeof ml, " "); num_append(ml, sizeof ml, (uint32_t)gmi_level(gq), 0, ' '); }
       if (ml[0]) { str_append(hb, sizeof hb, "midi rms "); str_append(hb, sizeof hb, ml); str_append(hb, sizeof hb, "\r\n"); } }
     str_append(hb, sizeof hb, "midi bytes "); num_append(hb, sizeof hb, msx_midi_int_bytes, 0, ' '); str_append(hb, sizeof hb, "  guard "); num_append(hb, sizeof hb, gm_guard_hits, 0, ' '); str_append(hb, sizeof hb, "  dropped "); num_append(hb, sizeof hb, (uint32_t)msx_midi_drop, 0, ' '); str_append(hb, sizeof hb, "\r\n");
+    str_append(hb, sizeof hb, "midi send x8 (USB MIDI device = real speed)  frame max bytes "); num_append(hb, sizeof hb, msx_midi_frame_max, 0, ' '); str_append(hb, sizeof hb, "  frames over 52 "); num_append(hb, sizeof hb, msx_midi_burst_frames, 0, ' '); str_append(hb, sizeof hb, "  busy polls "); num_append(hb, sizeof hb, (uint32_t)msx_midi_busy_polls, 0, ' '); str_append(hb, sizeof hb, "\r\n");
     { char mt[768]; mt[0] = 0;   /* 8.0.1 다른 코어 시험 결과 (8.0.25: 512 → 768) */
       if (P.mp_text) P.mp_text(mt, sizeof mt);
       str_append(hb, sizeof hb, "mp test "); str_append(hb, sizeof hb, mt[0] ? mt : "-"); str_append(hb, sizeof hb, "\r\n"); }
@@ -2233,11 +2214,13 @@ static void diag_save_now(void)                      /* 4.0.37 → 5.2.26: LOG\D
     str_append(hb, sizeof hb, "acpi mode "); str_append(hb, sizeof hb, acpi_mode ? (acpi_line[0] ? acpi_line : "requested") : "off (ini AcpiMode=1)"); str_append(hb, sizeof hb, "\r\n");   /* 5.2.162 */
     str_append(hb, sizeof hb, "video "); str_append(hb, sizeof hb, wc_status);
     str_append(hb, sizeof hb, "\r\nvsync "); str_append(hb, sizeof hb, vs_status[0] ? vs_status : "-");
+    diag_vdp_lines(hb, sizeof hb);                                              /* 8.0.195: 지금 MSX 화면 상태 (한 색 화면 같은 증상 점검용) */
     str_append(hb, sizeof hb, "\r\n== EMU ==\r\nmachine "); str_append(hb, sizeof hb, machine_name);
     str_append(hb, sizeof hb, "\r\nsound "); str_append(hb, sizeof hb, snd_status);
     str_append(hb, sizeof hb, "  volume "); num_append(hb, sizeof hb, (uint32_t)volume, 0, ' '); str_append(hb, sizeof hb, muted ? " % mute" : " %");
     str_append(hb, sizeof hb, "\r\nROM DB msxromdb "); str_append(hb, sizeof hb, romdb_len ? "OK" : "-");
     str_append(hb, sizeof hb, " msxsysromdb "); str_append(hb, sizeof hb, sysdb_len ? "OK" : "-");
+    str_append(hb, sizeof hb, "\r\nvhd nextor patch rdabs-fat16 "); num_append(hb, sizeof hb, (uint32_t)vhd_rdabs_patched, 0, ' ');   /* 8.0.168: 1 = FAT16 절대 섹터 읽기 허용 손질함 */
     str_append(hb, sizeof hb, "\r\ndiag draw ms: info "); num_append(hb, sizeof hb, dg_t_info, 0, ' ');
     str_append(hb, sizeof hb, "  sound_diag "); num_append(hb, sizeof hb, dg_t_snd, 0, ' ');
     str_append(hb, sizeof hb, "\r\n== SND codec ==\r\n");
@@ -2249,13 +2232,48 @@ static void diag_save_now(void)                      /* 4.0.37 → 5.2.26: LOG\D
         for (int i = 0; i < n; i++) { str_append(hb, sizeof hb, cl[i]); str_append(hb, sizeof hb, "\r\n"); }
         str_append(hb, sizeof hb, "(sound_diag "); num_append(hb, sizeof hb, dt, 0, ' '); str_append(hb, sizeof hb, " ms)\r\n");
     }
-    { static char tb[4096]; fe_hang_dump(tb, sizeof tb); str_append(hb, sizeof hb, "== TRACE ==\r\n"); str_append(hb, sizeof hb, tb); }
+    {   /* 8.0.95 V9968 카트리지 (두 번째 VDP) — 점검용. 이 줄들은 스위치 LogDiag(LOG\DIAG.TXT)가 켜져 있을 때만 파일에 들어간다 */
+        str_append(hb, sizeof hb, "== V9968 cart ==\r\nswitch LogDiag="); str_append(hb, sizeof hb, log_diag ? "1" : "0");
+        dg_sw_line(hb, sizeof hb);                                 /* 8.0.129: 스위치 표 그대로 (LogDiag 는 위 줄) */
+        {   /* 8.0.155: 마지막 영상의 프레임 시간 (끊김 점검용) */
+            static const char *nm[2] = { " MpTime_dec(n/avg/max/slow33ms)=", " MpTime_show(n/avg/max/slow33ms)=" };
+            const MmVidTimes *tt[2] = { &mmvid_t_dec, &mmvid_t_show };
+            for (int k = 0; k < 2; k++) {
+                str_append(hb, sizeof hb, nm[k]); num_append(hb, sizeof hb, tt[k]->n, 0, ' '); str_append(hb, sizeof hb, "/");
+                num_append(hb, sizeof hb, tt[k]->n ? tt[k]->sum / tt[k]->n : 0, 0, ' '); str_append(hb, sizeof hb, "/");
+                num_append(hb, sizeof hb, tt[k]->max, 0, ' '); str_append(hb, sizeof hb, "/"); num_append(hb, sizeof hb, tt[k]->slow, 0, ' ');
+            }
+        }
+        str_append(hb, sizeof hb, " Resume="); str_append(hb, sizeof hb, resume_on ? "1" : "0");
+        str_append(hb, sizeof hb, " Resume2="); str_append(hb, sizeof hb, resume2_on ? "1" : "0");
+        str_append(hb, sizeof hb, " ResumeBoot="); num_append(hb, sizeof hb, (uint32_t)resume_mode(), 0, ' ');   /* 8.0.194: 이번 부팅에서 정해진 저장 모드 (0 끔, 1, 2) — 진단 스위치 정보 */
+        str_append(hb, sizeof hb, "  VideoSource(ini)="); num_append(hb, sizeof hb, (uint32_t)(vsrc_pref + 1), 0, ' ');
+        str_append(hb, sizeof hb, "\r\ncart ");
+        if (!M || !M->v2) str_append(hb, sizeof hb, "none (ports 88h-8Bh/8Ch float FFh)\r\n");
+        else {
+            const VDP *v = M->v2;
+            str_append(hb, sizeof hb, "inserted  ports 88h-8Bh VDP, 8Ch lock  mem "); num_append(hb, sizeof hb, (uint32_t)(sizeof(VDP) >> 10), 0, ' ');
+            str_append(hb, sizeof hb, " KiB\r\nshown "); str_append(hb, sizeof hb, msx_vsrc[vsrc_cur].key);
+            str_append(hb, sizeof hb, "  display "); str_append(hb, sizeof hb, (v->reg[1] & 0x40) ? "on" : "off");
+            str_append(hb, sizeof hb, "  lines "); num_append(hb, sizeof hb, (uint32_t)v->lines, 0, ' ');
+            str_append(hb, sizeof hb, "  R0 "); hex_append(hb, sizeof hb, v->reg[0], 2);
+            str_append(hb, sizeof hb, " R1 "); hex_append(hb, sizeof hb, v->reg[1], 2);
+            str_append(hb, sizeof hb, " R20 "); hex_append(hb, sizeof hb, v->reg[20], 2);
+            str_append(hb, sizeof hb, " R21 "); hex_append(hb, sizeof hb, v->reg[21], 2);
+            str_append(hb, sizeof hb, "\r\nvram mask "); hex_append(hb, sizeof hb, v->vram_mask, 5);
+            str_append(hb, sizeof hb, "  EPAL "); str_append(hb, sizeof hb, vdp_epal(v) ? "on" : "off");
+            str_append(hb, sizeof hb, "  EVR "); str_append(hb, sizeof hb, vdp_evr(v) ? "on" : "off");
+            str_append(hb, sizeof hb, "  lock "); str_append(hb, sizeof hb, v->lock_ext ? "1" : "0");
+            str_append(hb, sizeof hb, "  frames "); num_append(hb, sizeof hb, (uint32_t)v->frame, 0, ' ');
+            str_append(hb, sizeof hb, "\r\n");
+        }
+    }
     P.diag_save(hb);
 }
 
 static void open_diag(int tab)
 {
-    fe_trace("open diag");
+   
     diag_save_now();
     diag_tab = tab;
     dg_key = -1; dg_key_n = 0;
@@ -2477,7 +2495,7 @@ static void dg_pc_dd_open(void)                          /* 시험 PC 풀다운 
     for (int i = 0; i < n; i++) dd_hd[i] = 0;
     dd_n = n; dd_sel = diag_pc_sel + 1; if (dd_sel < 0 || dd_sel >= n) dd_sel = 0;
     dd_top = dd_sel >= 10 ? dd_sel - 9 : 0; dd_cur = dd_sel; dd_id = 4000; dd_on = 1; menu_dirty = 1;
-    fe_trace("pc dd open");
+   
 }
 static void dg_pc_apply(int i)
 {
@@ -2493,31 +2511,66 @@ static void dg_pc_apply(int i)
         if (k >= 0) diag_pc_sel = k;
         toast(bad ? (lang == 1 ? "Could not add this PC (no SMBIOS / GPU id, or USB write failed)" : lang == 2 ? "このPCを追加できません" : "이 PC를 추가하지 못했습니다 (SMBIOS·영상칩 없음 또는 USB 쓰기 실패)")
                   : (lang == 1 ? "Added to USB TESTPC.TXT" : lang == 2 ? "USB TESTPC.TXT に追加しました" : "USB TESTPC.TXT 에 추가했습니다"), 0);
-        dg_refresh(1); menu_dirty = 1; settings_changed(); dg_save_due = P.ms() + 500; fe_trace("pc add");
+        dg_refresh(1); menu_dirty = 1; settings_changed(); dg_save_due = P.ms() + 500;
         return;
     }
     diag_pc_sel = i - 1;                                  /* 0 자동, 1.. 표, cnt+1 = 목록에 없음 */
-    dg_refresh(1); menu_dirty = 1; settings_changed(); dg_save_due = P.ms() + 1500; fe_trace("pc select");
+    dg_refresh(1); menu_dirty = 1; settings_changed(); dg_save_due = P.ms() + 1500;
 }
 static void hc_dgpc(const UiHit *h, int ev) { (void)h; if (ev == 1) dg_pc_dd_open(); }
 
 /* 8.0.30: 스위치 탭 — 진단용으로 USB 에 쓰는 파일마다 켜기/끄기. 새 진단 저장을 만들면 이 표에 한 줄 더하고 fe.c 의 log_* 와 ini(Log*) 도 같이 */
-typedef struct { int *flag; const char *file; const char *ko, *en; } DgSw;
+typedef struct { int *flag; const char *key; const char *file; const char *ko, *en; } DgSw;   /* 8.0.129: key = ini/X86MSX.SW 이름 */
+extern int mp_mwait_ini;
 static const DgSw dg_sw[] = {
-    { &log_diag,      "LOG\\DIAG.TXT",      "진단 요약 (시작 10초 뒤, 설정 바꾼 뒤, 1분마다 · 연주 중엔 미룸)", "Diagnostic summary (10 s after boot, on change, every minute; deferred while playing)" },
-    { &log_stall,     "LOG\\STALL.TXT",     "프레임이 1초 넘게 멈췄을 때 그 순간의 기록", "Trace when frames stop for over 1 s" },
-    { &log_sndlog,    "LOG\\SNDLOG.TXT",    "소리 이상(잡음·클리핑·무음) 감지 때 기록 (20초에 한 번)", "Sound anomaly log (noise, clipping, silence; at most every 20 s)" },
-    { &log_key,       "LOG\\KEY_X<ver>.TXT", "키를 누를 때 프레임 간격·처리 시간 (메뉴 열었을 때 씀)", "Key latency log (written while a menu is open)" },
-    { &log_sndglitch, "LOG\\SNDGLITCH.TXT", "소리 끊김 순간의 프레임 간격·구간별 시간 (메뉴 열었을 때 씀)", "Sound glitch log (written while a menu is open)" },
+    { &log_diag, "LogDiag", "LOG\\DIAG.TXT", "진단 화면 내용을 통째로 저장 (켠 10초 뒤·설정 바꾼 뒤·1분마다, 연주 중엔 미룸). 문제가 생기면 이것부터 보내 주세요", "Whole diagnostic screen saved (10 s after boot, after changes, every minute; deferred while playing). Send this first when something is wrong" },
+    { &log_area[LA_USB], "LogUsb", "LOG\\USB.TXT", "USB 장치가 인식·연결·끊김으로 바뀔 때만 한 줄 적음 (연주 중엔 안 씀)", "One line only when a USB device is found, connected or lost (not written while playing)" },
+    { &log_area[LA_KBD], "LogKey", "LOG\\KEY_X<판>.TXT", "키를 누르고 화면이 반응하기까지 걸린 시간 (키가 늦게 먹을 때 원인 찾기, 메뉴 열었을 때 씀)", "Time from key press to screen response (for slow keys; written while a menu is open)" },
+    { &log_area[LA_SND], "LogSnd", "LOG\\SNDLOG.TXT · SNDGLITCH.TXT · HDA_SEL.TXT", "소리 잡음·크기 넘침·무음, 소리가 끊긴 순간, 소리 출력 장치를 고른 과정 (소리 문제 원인 찾기)", "Sound noise, clipping, silence, the moment sound broke up, and how the output device was chosen" },
+    { &log_area[LA_MOUSE], "LogMouse", "LOG\\MOUSE.TXT", "마우스가 인식되는지·움직임이 들어오는지가 바뀔 때만 한 줄 적음", "One line only when mouse detection or movement input changes" },
+    { &log_area[LA_JOY], "LogJoy", "LOG\\JOY.TXT", "조이스틱·게임패드가 인식되는지·입력이 들어오는지가 바뀔 때만 한 줄 적음", "One line only when joystick/gamepad detection or input changes" },
+    { &log_area[LA_TP], "LogTouchpad", "LOG\\TOUCHPAD.TXT", "터치패드가 인식되는지·움직임이 들어오는지가 바뀔 때만 한 줄 적음", "One line only when touchpad detection or movement input changes" },
+    { &log_area[LA_VID], "LogVideo", "LOG\\STALL.TXT", "화면(프레임)이 1초 넘게 멈췄을 때 얼마나 멈췄는지 적음 (화면이 순간 멈출 때 원인 찾기)", "How long the screen froze when frames stopped for over 1 s" },
+    { &log_area[LA_WIFI], "LogWifi", "LOG\\WIFI.TXT · WIFI_X<판>.TXT · NET_X<판>.TXT", "무선랜 칩이 인식·시작·연결되는 과정과 상태 변화 (무선이 안 잡힐 때 원인 찾기)", "Wi-Fi chip detection, start-up, connection steps and state changes" },
+    { &log_area[LA_LAN], "LogLan", "LOG\\LAN.TXT · NET_X<판>.TXT", "유선랜 카드 인식·연결 상태가 바뀔 때 한 줄 + 네트워크 동작 기록", "Wired LAN card detection/link changes plus network activity" },
+    { &log_area[LA_COLOR], "LogColor", "LOG\\COLOR.TXT", "화면 색 깊이가 바뀔 때만 한 줄 적음 (색이 이상하게 보일 때 원인 찾기)", "One line only when the display colour depth changes" },
+    { &log_area[LA_BOOT], "LogBoot", "LOG\\BOOT_X<판>.TXT · DRV_X · *_HDMI · LASTHANG · HANG", "켤 때 PC 이름·장치, 영상 드라이버가 켜졌나, 지난번 멈춘 위치, 멈춘 순간 (부팅이 이상하거나 멈출 때)", "At boot: PC and devices, video driver state, last hang position, hang moment" },
+    { &log_crumb, "LogCmdTrail", "LOG\\CRUMB.TXT", "USB·영상·소리 명령을 한 줄씩 계속 이어 적음 (PC가 갑자기 꺼져도 마지막 명령이 남음). 위 USB·화면·소리 스위치도 켜야 함", "Every USB/video/sound command, line by line (last command survives a sudden power-off). The USB/video/sound switch above must also be on" },
+    { &mmusb_log_read, "LogUsbRead", "CRUMB.TXT (USB 읽기 줄)", "위 명령 기록에 USB 데이터 읽기 줄까지 적음. 끄면 영상 재생 중 약 3.3초 멈춤이 없어짐", "Adds USB data-read lines to the command trail. Off removes the ~3.3 s stall during video playback" },
+    { &log_vram_top, "LogVramTop", "CRUMB.TXT (VT 줄)", "VRAM 맨 앞(0000~03FF)에 글자·점을 쓰는 Z80 프로그램 위치를 적음 (영상 열 때 제목줄에 생기는 점줄 원인 찾기). 위 명령 기록도 켜야 함", "Logs the Z80 PC that writes VRAM 0000-03FF (finding the dotted line in the title bar). Needs the command trail on" },
+#define DG_LOGN 15                                  /* 8.0.157: 앞의 15개 = 파일을 쓰는 진단 스위치 (X86MSX.SW 에도 저장). 아래는 설정 스위치: x86msx.ini 에만 저장 */
+    /* ---- 8.0.157 설정 스위치: 스위치 탭에 없던 ini 키 전부. file = 쓰는 파일 대신 "설정" 표시 ---- */
+    { &mp4p_skip_nonref, "Mp4SkipNonRef", "설정 · 기본 끔", "화면에 나오지 않을 비참조 프레임은 해독하지 않고 건너뜁니다 (Main/High). 켜면 느린 PC에서 부담이 줄지만 기본은 끔", "Skips decoding non-reference frames that will not be shown (Main/High). Lightens slow PCs; off by default" },
+    { &mp4p_fast, "Mp4Fast", "설정 · 기본 끔", "MP4 빠른 화면 처리: 순서 디더를 쓰고 팔레트를 8프레임마다 갱신합니다. 끔 = 기존 방식(색이 더 정확)", "Fast MP4 picture handling: ordered dither, palette refreshed every 8 frames. Off = original method (more accurate colour)" },
+    { &mp_mwait_ini, "MpMwait", "설정 · 기본 켬", "노는 일꾼 코어를 MWAIT로 재웁니다 (CPU가 지원할 때). 끔 = pause로 돌며 기다림 (전기·열이 늘 수 있음). 켠 뒤 다시 시작하면 적용", "Idle worker cores sleep with MWAIT (when the CPU supports it). Off = spin with pause (more power/heat). Applies after restart" },
 };
 #define DG_SWN ((int)(sizeof dg_sw / sizeof dg_sw[0]))
-static int dg_sw_sel;
-static void dg_sw_toggle(int i) { if (i < 0 || i >= DG_SWN) return; *dg_sw[i].flag = !*dg_sw[i].flag; dg_sw_sel = i; settings_changed(); full_redraw(); }
+/* 8.0.157 설명을 폭 max_w 안에서 두 줄로: 첫 줄은 들어가는 데까지(되도록 공백에서) 자르고, 나머지는 둘째 줄에 (넘치면 ...) */
+static void small_wrap2(uint32_t x, uint32_t y, const char *s, uint8_t fg, uint32_t max_w)
+{
+    char t[200]; int n = 0, last_sp = -1; const char *q = s;
+    while (*q && n < (int)sizeof t - 8) {
+        const char *st = q; utf8_next(&q); int k = (int)(q - st);
+        if (n + k >= (int)sizeof t - 4) break;
+        for (int i = 0; i < k; i++) t[n + i] = st[i];
+        t[n + k] = 0;
+        if (text_f(SF, 1, 0, 0, t, 0, 0, 0, 0) > max_w) { q = st; break; }
+        if (st[0] == ' ') last_sp = n;
+        n += k;
+    }
+    if (*q && last_sp > 0) { q -= (n - last_sp - 1); n = last_sp; }   /* 공백에서 끊기 */
+    t[n] = 0;
+    small_ell(x, y, t, fg, 0xFF, max_w);
+    if (*q) small_ell(x, y + SLH + 2 * S, q, fg, 0xFF, max_w);
+}
+static void dg_sw_line(char *hb, int max) { for (int i = 1; i < DG_SWN; i++) { str_append(hb, max, " "); str_append(hb, max, dg_sw[i].key); str_append(hb, max, "="); str_append(hb, max, *dg_sw[i].flag ? "1" : "0"); } }
+static int dg_sw_sel, dg_sw_off;                    /* dg_sw_off: 스위치 탭 첫 줄 (8.0.95 스크롤) */
+static void dg_sw_toggle(int i) { if (i < 0 || i >= DG_SWN) return; *dg_sw[i].flag = !*dg_sw[i].flag; dg_sw_sel = i; settings_changed(); settings_flush(); dg_sw_file_save(); full_redraw(); }   /* 8.0.58: 별도 파일에도(X86MSX.SW). 8.0.52: 바꾸는 순간 바로 저장 (창이 열려 있는 동안·연주 중엔 저장을 미루므로, 닫기 전에 끄면 사라지던 것) */
 static void hc_dgsw(const UiHit *h, int ev) { if (ev == 1) dg_sw_toggle((int)h->a); }
 
 static void draw_diag(void)
 {
-    fe_trace("draw begin");
+   
     if (diag_tab == 8 && dg_col_page > 0) { dg_color_full(); return; }
     if (diag_tab == 8 && D.bpp == 1 && P.dac_set) {      /* 8비트 화면: 장식 색과 시험 색이 DAC 를 나눠 쓸 수 없어 화면 전체를 시험 화면으로 (Tab 다음 탭, Esc 닫기) */
         dg_pal_n = 0;
@@ -2529,13 +2582,13 @@ static void draw_diag(void)
     if (diag_tab != 8) dg_color_restore();
     UiRect o;
     UiRect b = ui_full_card(T(S_DIAG_TITLE), "X86MSX " MSXEMU_VERSION_FULL " (" MSXEMU_BUILD ")", machine_name, &o);
-    const char *tn[DG_TABS] = { T(S_DG_TAB_USB), T(S_DG_TAB_KBD), T(S_DG_TAB_SND), T(S_DG_TAB_MOUSE), T(S_DG_TAB_JOY), T(S_DG_TAB_TP), "Video", "WiFi", "Color", lang == 1 ? "Summary" : lang == 2 ? "要約" : "요약", lang == 1 ? "Switch" : lang == 2 ? "スイッチ" : "스위치" };
+    const char *tn[DG_TABS] = { T(S_DG_TAB_USB), T(S_DG_TAB_KBD), T(S_DG_TAB_SND), T(S_DG_TAB_MOUSE), T(S_DG_TAB_JOY), T(S_DG_TAB_TP), "Video", "WiFi", "Color", lang == 1 ? "Summary" : lang == 2 ? "要約" : "요약", lang == 1 ? "Switch" : lang == 2 ? "スイッチ" : "스위치", "LAN" };
     const char *tl[DG_TABS]; for (int i = 0; i < DG_TABS; i++) tl[i] = tn[dg_order[i]];
     ui_tabs(b.x, b.y + 4 * S, b.w, tl, DG_TABS, dg_pos(diag_tab), 1);
     uint32_t pad = 24 * S, x = b.x + pad, w = b.w - 2 * pad, y = b.y + 4 * S + ui_tabs_h() + 14 * S, bottom = dlg_cmd_y() - 8 * S;
     dg_small = diag_tab == 0 || diag_tab == 3 || diag_tab == 5;
     {   /* 탭의 영역 판정 한 줄 (요약 탭과 같은 판정) */
-        static const int8_t tab_area[DG_TABS] = { DA_USB, DA_KBD, DA_SND, DA_MOUSE, DA_PAD, DA_TP, DA_VID, DA_NET, -1, -1, -1 };
+        static const int8_t tab_area[DG_TABS] = { DA_USB, DA_KBD, DA_SND, DA_MOUSE, DA_PAD, DA_TP, DA_VID, DA_NET, -1, -1, -1, DA_NET };
         if (tab_area[diag_tab] >= 0) { dg_refresh(0); y += dg_verdict_row(x, y, w, tab_area[diag_tab]) + 4 * S; }
     }
     switch (diag_tab) {
@@ -2626,22 +2679,22 @@ static void draw_diag(void)
         }
         uint32_t sb = bottom - SLH - 12 * S;
         uint32_t t0 = P.ms();
-        fe_trace("snd info begin");
+       
         y = dg_lines(x, y, w, sb, 2, "HD Audio");
         uint32_t t1 = P.ms();
-        fe_trace("snd sound_diag begin");
+       
         static char lines[40][64];
         static int snd_n; static uint32_t snd_at;          /* 코덱 진단은 0.5초마다만 (매 프레임 코덱 명령 수십 개를 보내지 않게) */
         if (!snd_at || P.ms() - snd_at >= 500) { snd_n = P.sound_diag ? P.sound_diag(lines, 40) : 0; snd_at = P.ms() | 1; }
         int n = snd_n;
         uint32_t t2 = P.ms();
-        fe_trace("snd sound_diag end");
+       
         if (t1 - t0 > dg_t_info) dg_t_info = t1 - t0;
         if (t2 - t1 > dg_t_snd) dg_t_snd = t2 - t1;
         if (n) y += 6 * S + ui_section(x, y + 6 * S, w, "Codec");
         for (int i = 0; i < n && y + LH < sb; i++) y += info_line(x, y, w, 0, lines[i], C_TEXT);
         small_ell(x, bottom - SLH - 4 * S, T(S_SOUND_DIAG_NOTE), C_WARN, 0xFF, w);
-        fe_trace("snd draw end");
+       
         break;
     }
     case 3: {                                           /* 마우스: 연결·신호·시험 칸 */
@@ -2852,19 +2905,34 @@ static void draw_diag(void)
     }
     case 8: dg_color_overview(x, y, w, bottom); break;
     case DG_SW: {                                       /* 8.0.30 스위치: 진단용 USB 저장 켜기/끄기 (↑↓ 고르기, Enter·누르기 바꿈) */
-        y += ui_section(x, y, w, lang == 1 ? "Diagnostic files written to USB" : lang == 2 ? "USB に書く診断ファイル" : "진단용으로 USB 에 쓰는 파일");
-        uint32_t rh = LH * 2 + 22 * S;
-        for (int i = 0; i < DG_SWN && y + rh < bottom; i++) {
+        y += ui_section(x, y, w, lang == 1 ? "Switches: diagnostic files (top) and settings (below)" : lang == 2 ? "Switches: diagnostic files (top) and settings (below)" : "스위치 — 진단 파일을 쓰는 것(위)과 설정(아래)");
+        /* 8.0.95: 작은 글씨 + 스크롤 (↑↓ 로 고르면 고른 줄이 늘 보이게 위/아래로 밀림). 스위치가 많아져도 화면에 다 들어감 */
+        uint32_t rh = SLH * 3 + 14 * S, gap = 4 * S;      /* 8.0.157: 이름 한 줄 + 설명 두 줄 */
+        int vis = (int)((bottom > y ? bottom - y : 0) / (rh + gap));
+        if (vis < 1) vis = 1;
+        if (vis > DG_SWN) vis = DG_SWN;
+        if (dg_sw_sel < dg_sw_off) dg_sw_off = dg_sw_sel;
+        if (dg_sw_sel >= dg_sw_off + vis) dg_sw_off = dg_sw_sel - vis + 1;
+        if (dg_sw_off > DG_SWN - vis) dg_sw_off = DG_SWN - vis;
+        if (dg_sw_off < 0) dg_sw_off = 0;
+        for (int i = dg_sw_off; i < DG_SWN && i < dg_sw_off + vis; i++) {
             int on = *dg_sw[i].flag;
-            ui_rrect(x, y, w, rh, 8 * S, i == dg_sw_sel ? C_ACC2 : C_HEAD);
-            uint32_t cw = text_w("OFF") + 40 * S;
-            ui_rrect(x + 14 * S, y + (rh - LH - 12 * S) / 2, cw, LH + 12 * S, 6 * S, on ? C_OK : C_LINE);
-            text_clip(x + 14 * S + 20 * S, y + (rh - LH) / 2, on ? "ON" : "OFF", on ? 15 : C_MUTED, 0xFF, 0);
-            uint32_t tx = x + cw + 34 * S;
-            text_clip(tx, y + 8 * S, dg_sw[i].file, C_TEXT, 0xFF, x + w - tx - 8 * S);
-            text_clip(tx, y + 8 * S + LH + 2 * S, lang == 1 || lang == 2 ? dg_sw[i].en : dg_sw[i].ko, i == dg_sw_sel ? C_TEXT : C_MUTED, 0xFF, x + w - tx - 8 * S);
+            ui_rrect(x, y, w, rh, 6 * S, i == dg_sw_sel ? C_ACC2 : C_HEAD);
+            uint32_t cw = 44 * S, ch = SLH + 8 * S;
+            ui_rrect(x + 12 * S, y + (rh - ch) / 2, cw, ch, 5 * S, on ? C_OK : C_LINE);
+            small_ell(x + 12 * S + (cw - (on ? 14 * S : 22 * S)) / 2, y + (rh - SLH) / 2, on ? "ON" : "OFF", on ? 15 : C_MUTED, 0xFF, cw);
+            uint32_t tx = x + 12 * S + cw + 14 * S;
+            { char nm[200]; nm[0] = 0; num_append(nm, sizeof nm, (uint32_t)(i + 1), 0, ' '); str_append(nm, sizeof nm, ". "); str_append(nm, sizeof nm, dg_sw[i].key);   /* 8.0.197: 첫 줄부터 1, 2, 3… 순번 */ str_append(nm, sizeof nm, "   →  "); str_append(nm, sizeof nm, dg_sw[i].file); small_ell(tx, y + 5 * S, nm, C_TEXT, 0xFF, x + w - tx - 8 * S); }   /* 8.0.134: 스위치 이름 → 쓰는 파일 */
+            small_wrap2(tx, y + 5 * S + SLH + 2 * S, lang == 1 || lang == 2 ? dg_sw[i].en : dg_sw[i].ko, i == dg_sw_sel ? C_TEXT : C_MUTED, x + w - tx - 8 * S);
             hit_add(hc_dgsw, i, 0, 0, 0, x, y, w, rh);
-            y += rh + 8 * S;
+            y += rh + gap;
+        }
+        if (DG_SWN > vis) {                             /* 스크롤 표시: 위/아래에 더 있음 + 쪽 위치 */
+            char sc[40]; sc[0] = 0;
+            str_append(sc, sizeof sc, dg_sw_off > 0 ? "^ " : "  ");
+            num_append(sc, sizeof sc, (uint32_t)(dg_sw_sel + 1), 0, ' '); str_append(sc, sizeof sc, " / "); num_append(sc, sizeof sc, DG_SWN, 0, ' ');
+            str_append(sc, sizeof sc, dg_sw_off + vis < DG_SWN ? " v" : "");
+            small_ell(x + w - 120 * S, y, sc, C_MUTED, 0xFF, 120 * S);
         }
         break;
     }
@@ -2895,6 +2963,23 @@ static void draw_diag(void)
         small_ell(x, bottom - SLH, lang == 1 ? "Everything is saved to USB LOG\\DIAG.TXT (10 s after start, on tab change)" : lang == 2 ? "すべて USB LOG\\DIAG.TXT に保存 (起動10秒後・タブ切替時)" : "모든 내용은 USB LOG\\DIAG.TXT 에 저장 (켠 뒤 10초·탭을 바꿀 때)", C_MUTED, 0xFF, w);
         break;
     }
+    case DG_LAN: {                                      /* 8.0.130: 유선 네트워크 (읽기 전용) — 네트워크 줄 중 유선·이더넷·USB 랜 줄만. WiFi 탭은 그대로 */
+        y += ui_section(x, y, w, "LAN");
+        static char ll[80][64];
+        int ln = P.info ? P.info(ll, 80) : 0, shown = 0;
+        for (int i = 0; i < ln && y + SLH < bottom; i++) {
+            if (!ll[i][0] || dg_kind(ll[i]) != 7) continue;
+            const char *c = ll[i]; int hit = 0;
+            for (; *c && !hit; c++) {
+                if ((c[0] == 'w' && c[1] == 'i' && c[2] == 'r' && c[3] == 'e' && c[4] == 'd') || (c[0] == 'e' && c[1] == 't' && c[2] == 'h' && c[3] == 'e' && c[4] == 'r') ||
+                    (c[0] == 'l' && c[1] == 'a' && c[2] == 'n' && (c[3] == ' ' || c[3] == '=' || !c[3])) || (c[0] == 'r' && c[1] == '8' && c[2] == '1' && c[3] == '5') || (c[0] == 'a' && c[1] == 's' && c[2] == 'i' && c[3] == 'x')) hit = 1;
+            }
+            if (!hit) continue;
+            small_ell(x + 4 * S, y, ll[i], C_TEXT, 0xFF, w - 8 * S); y += SLH + 6 * S; shown++;
+        }
+        if (!shown) small_ell(x + 4 * S, y, lang == 1 ? "No wired network adapter found" : lang == 2 ? "有線ネットワークが見つかりません" : "유선 네트워크 장치를 찾지 못했습니다", C_MUTED, 0xFF, w - 8 * S);
+        break;
+    }
     case 7: {                                           /* 4.0.34: 무선랜 (PCI 정보, 읽기 전용) */
         y += ui_section(x, y, w, "WiFi");
         static char wl[80][64];
@@ -2904,8 +2989,8 @@ static void draw_diag(void)
     }
     }
     if (dd_on && dd_id == 4000) dd_draw_at(dg_pc_dd_x, dg_pc_dd_y, dg_pc_dd_w, bottom);   /* 5.2.26 시험 PC 풀다운 */
-    static const StrId dk[DG_TABS] = { S_DG_KEYS_U, S_DG_KEYS_K, S_DG_KEYS, S_DG_KEYS_M, S_DG_KEYS_J, S_DG_KEYS_T, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U };
-    ui_cmdbar(o.x + S, dlg_cmd_y(), o.w - 2 * S, diag_tab == DG_SW ? (lang == 1 ? "Up/Down Select   Enter On/Off   Tab Tab   1~0 - Tab   Esc Close" : lang == 2 ? "↑↓ 選ぶ   Enter オン/オフ   Tab タブ   1~0 - タブ   Esc 閉じる" : "↑↓ 고르기   Enter 켬/끔   Tab 탭   1~0 - 탭   Esc 닫기") : diag_tab == DG_SUM ? (lang == 1 ? "Tab Tab   1~0 Tab   Enter Choose test PC   Esc Close" : lang == 2 ? "Tab タブ   1~0 タブ   Enter テストPCを選ぶ   Esc 閉じる" : "Tab 탭   1~0 탭   Enter 시험 PC 고르기   Esc 닫기") : T(dk[diag_tab]));
+    static const StrId dk[DG_TABS] = { S_DG_KEYS_U, S_DG_KEYS_K, S_DG_KEYS, S_DG_KEYS_M, S_DG_KEYS_J, S_DG_KEYS_T, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U, S_DG_KEYS_U };
+    ui_cmdbar(o.x + S, dlg_cmd_y(), o.w - 2 * S, diag_tab == DG_SW ? (lang == 1 ? "Up/Down Select   Enter On/Off   Tab Tab   1~= - Tab   Esc Close" : lang == 2 ? "↑↓ 選ぶ   Enter オン/オフ   Tab タブ   1~0 - タブ   Esc 閉じる" : "↑↓ 고르기   Enter 켬/끔   Tab 탭   1~0 - 탭   Esc 닫기") : diag_tab == DG_SUM ? (lang == 1 ? "Tab Tab   1~0 Tab   Enter Choose test PC   Esc Close" : lang == 2 ? "Tab タブ   1~0 タブ   Enter テストPCを選ぶ   Esc 閉じる" : "Tab 탭   1~0 탭   Enter 시험 PC 고르기   Esc 닫기") : T(dk[diag_tab]));
 }
 
 static void diag_key(int key)
@@ -2918,11 +3003,13 @@ static void diag_key(int key)
         full_redraw(); return;
     }
     if (key == 0x01) { dialog_back(); return; }
-    if (key == 0x0F) { diag_tab = dg_order[(dg_pos(diag_tab) + ((mods & 0x03) ? DG_TABS - 1 : 1)) % DG_TABS]; full_redraw(); dg_save_due = P.ms() + 1500; fe_trace("tab key"); return; }
-    if (key >= 0x02 && key <= 0x0C && (diag_tab != 1 || ui_pressing)) { diag_tab = dg_order[key - 0x02]; dg_col_page = 0; full_redraw(); dg_save_due = P.ms() + 1500; fe_trace("tab key"); return; }
+    if (key == 0x0F) { diag_tab = dg_order[(dg_pos(diag_tab) + ((mods & 0x03) ? DG_TABS - 1 : 1)) % DG_TABS]; full_redraw(); dg_save_due = P.ms() + 1500; return; }
+    if (key >= 0x02 && key <= 0x0D && (diag_tab != 1 || ui_pressing)) { diag_tab = dg_order[key - 0x02]; dg_col_page = 0; full_redraw(); dg_save_due = P.ms() + 1500; return; }
     if (diag_tab == DG_SW) {
         if (key == 0xC8 && dg_sw_sel > 0) { dg_sw_sel--; full_redraw(); }
         else if (key == 0xD0 && dg_sw_sel < DG_SWN - 1) { dg_sw_sel++; full_redraw(); }
+        else if (key == 0xC9) { dg_sw_sel = dg_sw_sel > 4 ? dg_sw_sel - 5 : 0; full_redraw(); }                    /* PgUp */
+        else if (key == 0xD1) { dg_sw_sel = dg_sw_sel + 5 < DG_SWN ? dg_sw_sel + 5 : DG_SWN - 1; full_redraw(); }   /* PgDn */
         else if (key == 0x1C || key == 0x9C || key == 0x39) dg_sw_toggle(dg_sw_sel);
         return;
     }

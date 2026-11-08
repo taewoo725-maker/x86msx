@@ -81,10 +81,9 @@ static int me_opts(int id)
     case 30:
         for (int i = 0; i < 6; i++) { opt_add(me_board_names[i], i, 0); if (!strcmp(me_boards[i], me.board[0] ? me.board : "MSX")) cur = i; }
         break;
-    case 14: case 15: case 16: case 17: case 18: case 103: {
+    case 103: {
         int ps[16], ss[16], n = me_slot_opts(ps, ss), base = 0;
-        int wp = id == 103 ? me_ed.ps : me.ext_ps[id - 14], ws = id == 103 ? me_ed.ss : me.ext_ss[id - 14];
-        if (id >= 16 && id <= 18) { opt_add(T(S_NONE), -1, 0); base = 1; if (wp < 0) cur = 0; }   /* 3.3.1: C·D는 없음 가능 */
+        int wp = me_ed.ps, ws = me_ed.ss;
         for (int i = 0; i < n; i++) {
             me_slot_text(ps[i], ss[i], t, sizeof t, 1);
             opt_add(t, ps[i] * 4 + ss[i], 0);
@@ -92,7 +91,8 @@ static int me_opts(int id)
         }
         break;
     }
-    case 20: for (int i = 0; i < 4; i++) { opt_add(me_vdps[i], i, 0); if (!strcmp(me_vdps[i], me.vdp)) cur = i; } break;
+    case 20: { int nv = (M && M->v2) || !strcmp(me.vdp, "V9968") ? 5 : 4;   /* 8.0.99: V9968 은 카트리지를 꽂았을 때만 고름 */
+        for (int i = 0; i < nv; i++) { opt_add(me_vdps[i], i, 0); if (!strcmp(me_vdps[i], me.vdp)) cur = i; } break; }
     case 21:
         for (int i = 0; i < 4; i++) { t[0] = 0; num_append(t, sizeof t, (uint32_t)me_vrams[i], 0, ' '); str_append(t, sizeof t, " kB"); opt_add(t, me_vrams[i], 0); if (me_vrams[i] == me.vram) cur = i; }
         break;
@@ -143,9 +143,6 @@ static void me_combo_val(int id, char *out, int max)
         copy_str(out, max, bn);
         break;
     }
-    case 14: case 15: case 16: case 17: case 18:
-        if (me.ext_ps[id - 14] < 0) { copy_str(out, max, T(S_NONE)); break; }
-        me_slot_text(me.ext_ps[id - 14], me.subslotted[me.ext_ps[id - 14] & 3] ? me.ext_ss[id - 14] : 0, out, max, 1); break;
     case 103: me_slot_text(me_ed.ps, me_ed.ss, out, max, 1); break;
     case 20: copy_str(out, max, me.vdp); break;
     case 21: num_append(out, max, (uint32_t)me.vram, 0, ' '); str_append(out, max, " kB"); break;
@@ -180,7 +177,6 @@ static void me_opt_apply(int id, int i)
         { char nm[72]; copy_str(nm, sizeof nm, me_opt[i]); me_load(nm); }
         return;
     case 30: copy_str(me.board, sizeof me.board, me_boards[v]); break;
-    case 14: case 15: case 16: case 17: case 18: if (v < 0) { me.ext_ps[id - 14] = -1; me.ext_ss[id - 14] = 0; } else { me.ext_ps[id - 14] = v / 4; me.ext_ss[id - 14] = v % 4; } break;
     case 20: copy_str(me.vdp, sizeof me.vdp, me_vdps[v]); break;
     case 21: me.vram = v; break;
     case 5: me.z80hz = me_freqs[v]; break;
@@ -253,14 +249,9 @@ static void me_layout_main(void)
             copy_str(sl[p], sizeof sl[p], T(S_ME_SLOTN)); str_append(sl[p], sizeof sl[p], " "); num_append(sl[p], sizeof sl[p], (uint32_t)p, 0, ' ');
             ROW(10 + p, sl[p], 1, me.subslotted[p], UV_SEG2);
         }
-        y += 6 * S; SEC(T(S_ME_EXTSLOTS));
-        ROW(14, T(S_ME_CART1), 1, 0, UV_CHOICE);
-        ROW(15, T(S_ME_CART2), 1, 0, UV_CHOICE);
-        ROW(16, T(S_ME_CART3), 1, 0, UV_CHOICE);           /* 3.3.1 MENU3-07 */
-        ROW(17, T(S_ME_CART4), 1, 0, UV_CHOICE);
-        ROW(18, T(S_ME_CART5), 1, 0, UV_CHOICE);           /* 3.6.7 */
-        uint32_t mh = 2 * (SLH + 10 * S);               /* 슬롯 그림 (편집 중인 값 그대로) */
-        if (y + 12 * S + sh + mh <= bottom) mw_add(a, n, MW_MAP, 0, X, bottom - mh - sh, W, mh + sh, T(S_SLOT_MAP), 1, 0, 0);
+        uint32_t mh = slot_map_height();                /* 슬롯 그림 (편집 중인 값 그대로) */
+        y += 6 * S;
+        mw_add(a, n, MW_MAP, 0, X, y, W, mh + sh, T(S_SLOT_MAP), 1, 0, 0);   /* 8.0.185: 줄 바로 아래 (빈 여백 없음), 8.0.186: 자리가 모자라도 숨기지 않음 */
         break;
     }
     case 1:
@@ -269,6 +260,7 @@ static void me_layout_main(void)
     case 2:
         SEC(T(S_ME_VIDEOG));
         ROW(20, T(S_ME_VDP), 1, 0, UV_CHOICE);
+        mw_add(a, n, MW_NOTE, 0, X, y, W, rh / 2, T(S_ME_VDP_NOTE), 1, 0, 0); y += rh / 2;   /* 8.0.99 */
         ROW(21, T(S_ME_VRAM), 1, 0, UV_CHOICE);
         break;
     case 3: {
@@ -416,43 +408,43 @@ static void me_draw_list(const MeW *q, int focused)
     ui_sbar(q->x + q->w - 5 * S, y, (uint32_t)vis * rh, &me_btop, &me_bsel, vis, me_bn);
 }
 
-/* 편집 중인 슬롯 배치 그림 (속성 창의 슬롯 구성과 같은 모양) */
+/* 편집 중인 슬롯 배치 그림. 그리는 코드는 에뮬레이션 창과 같은 draw_slot_map 이고,
+ * 값은 지금 켜진 기종(M)이 아니라 편집 중인 값(me)에서 읽음 (8.0.192) */
+static int me_slot_subslotted(int ps) { return me.subslotted[ps]; }
+
+/* 편집 중 기종의 칸 내용. 반환 값 뜻은 slot_label 과 같음 (0 비어 있음, 1 장치, 2 카트리지 자리, 4 모름) */
+static int me_slot_cell(int ps, int ss, char *out, int max, int *cart_n)
+{
+    int sub = me.subslotted[ps];
+    out[0] = 0;
+    *cart_n = -1;
+    for (int x = 0; x < 5; x++)
+        if (me.ext_ps[x] == ps && (!sub || me.ext_ss[x] == ss)) { *cart_n = x; copy_str(out, max, "Blank"); return 2; }
+    int found = 0, unknown = 0;
+    for (int i = 0; i < me.nslot; i++) {
+        const MeSlot *e = &me.slot[i];
+        if (e->ps != ps || (sub && e->ss != ss)) continue;
+        const MeTypeInfo *ti = me_type_info(e->type);
+        const char *name;
+        if (ti && (ti->kind == ME_K_RAM || ti->kind == ME_K_RAMFIX || ti->kind == ME_K_MAPRAM)) name = "RAM";
+        else if (e->file[0]) name = path_base(e->file);
+        else if (ti) name = ti->name;
+        else { name = "?"; unknown = 1; }
+        if (found && strstr_ci(out, name)) continue;            /* 같은 이름은 한 번만 */
+        if (found) str_append(out, max, " + ");
+        str_append(out, max, name);
+        found = 1;
+    }
+    if (found) return unknown ? 4 : 1;
+    copy_str(out, max, "Blank");
+    return 0;
+}
+static const SlotMapSource me_slot_source = { me_slot_subslotted, me_slot_cell };
+
 static void me_draw_map(const MeW *q)
 {
     ui_section(q->x + 6 * S, q->y, q->w - 12 * S, q->text);
-    uint32_t y = q->y + SLH + 12 * S, rh = SLH + 10 * S, units = 0;
-    for (int ps = 0; ps < 4; ps++) units += me.subslotted[ps] ? 4 : 2;
-    uint32_t unit = q->w / units, px = q->x;
-    for (int ps = 0; ps < 4; ps++) {
-        int sub = me.subslotted[ps], nc = sub ? 4 : 1;
-        uint32_t sw = sub ? unit : 2 * unit;
-        for (int ss = 0; ss < nc; ss++) {
-            uint32_t cx = px + (uint32_t)ss * sw;
-            char head[24], lab[160] = "";
-            head[0] = (char)('0' + ps); head[1] = 0;
-            if (sub) { head[1] = '-'; head[2] = (char)('0' + ss); head[3] = 0; }
-            int kind = 0;
-            for (int xs = 0; xs < 5; xs++)
-                if (me.ext_ps[xs] == ps && (!sub || me.ext_ss[xs] == ss)) { static const char *const sn[5] = { " SLOT1", " SLOT2", " SLOT3", " SLOT4", " SLOT5" }; str_append(head, sizeof head, sn[xs]); copy_str(lab, sizeof lab, "Blank"); kind = 2; }
-            for (int i = 0; i < me.nslot && kind != 2; i++) {
-                const MeSlot *s = &me.slot[i];
-                if (!me_window(s->type, s->count) || s->ps != ps || (sub && s->ss != ss)) continue;
-                const MeTypeInfo *ti = me_type_info(s->type);
-                const char *nm = ti && (ti->kind == ME_K_RAM || ti->kind == ME_K_MAPRAM || ti->kind == ME_K_RAMFIX) ? "RAM" : s->file[0] ? path_base(s->file) : ti ? ti->name : "ROM";
-                if (kind && strstr_ci(lab, nm)) continue;
-                if (kind) str_append(lab, sizeof lab, " + ");
-                str_append(lab, sizeof lab, nm);
-                kind = 1;
-            }
-            if (!kind) copy_str(lab, sizeof lab, "Blank");
-            uint8_t bg = kind == 2 ? C_FIELD : kind == 1 ? C_ROWSEL : C_HEAD;
-            if (kind == 2) ui_rframe(cx + 2 * S, y, sw - 4 * S, 2 * rh, 5 * S, C_WARN, C_FIELD);
-            else ui_rrect(cx + 2 * S, y, sw - 4 * S, 2 * rh, 5 * S, bg);
-            small_ell(cx + 8 * S, ui_sty(y, rh) + 2 * S, head, C_MUTED, 0xFF, sw - 14 * S);
-            small_ell(cx + 8 * S, ui_sty(y + rh, rh) - 2 * S, lab, kind == 2 ? C_WARN : kind ? C_TEXT : C_FAINT, 0xFF, sw - 14 * S);
-        }
-        px += (uint32_t)nc * sw;
-    }
+    draw_slot_map(&me_slot_source, q->x, q->y + SLH + 12 * S, q->w);
 }
 
 static void mw_draw(const MeW *a, int n, int focus, int *fv)
@@ -632,15 +624,6 @@ static void me_open_drop(int id)
     int cur = me_opts(id);
     if (me_nopt <= 0) return;
     me_drop = id; me_dsel = cur; me_dtop = cur > 5 ? cur - 5 : 0;
-}
-static void me_step_combo(int id, int dir)
-{
-    int cur = me_opts(id);
-    if (me_nopt <= 1) return;
-    int i = cur + dir;
-    if (i < 0) i = 0;
-    if (i >= me_nopt) i = me_nopt - 1;
-    if (i != cur) me_opt_apply(id, i);
 }
 
 static void me_tab_step(int dir) { me_tab = (me_tab + (dir > 0 ? 1 : 3)) % 4; }

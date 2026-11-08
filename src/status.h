@@ -13,7 +13,7 @@
 #define STATUS_H
 #include "msx.h"
 
-enum { MS_CAPS, MS_KANA, MS_FDD1, MS_FDD2, MS_CAS, MS_HD, MS_SLOT1, MS_SLOT2, MS_SLOT3, MS_SLOT4, MS_SLOT5, MS_CPU, MS_V9990, MS_NET, MS_N };
+enum { MS_CAPS, MS_KANA, MS_FDD1, MS_FDD2, MS_CAS, MS_HD, MS_SLOT1, MS_SLOT2, MS_SLOT3, MS_SLOT4, MS_SLOT5, MS_SLOT6, MS_SLOT7, MS_SLOT8, MS_CPU, MS_V9990, MS_NET, MS_N };
 
 /* 상태 값 (예전 LED 값과 같음) */
 enum { SS_OFF = 0, SS_ON = 2, SS_BUSY = 3, SS_NONE = 4 };   /* 꺼짐 / 켜짐·꽂힘(노랑) / 일하는 중(깜박임은 프런트엔드) / 이 기종에 없음(회색·안 보임) */

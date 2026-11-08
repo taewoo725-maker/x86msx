@@ -237,7 +237,7 @@ static void mt_dd_apply(int i)
 /* (mt_edit 선언은 fe.c 앞쪽) 5.2.179: 1 = 소리·좌우 칸을 ←/→ 로 조절 중 (Esc/Enter 로 나옴) */
 static int mt_col;                                      /* 기계 줄 안 칸: 0 롬·파일 풀다운, 1 받는 채널 풀다운 */
 static uint32_t mt_ch_x, mt_ch_y, mt_ch_w, mt_in_x, mt_plug_x, mt_plug_w;   /* 풀다운이 열릴 자리 */
-static void hc_fx(const UiHit *h, int ev)               /* a = 160 켜기, 161~163 막대 (c = 막대 너비), 164 기본값으로, 165 시험음 */
+static void hc_fx(const UiHit *h, int ev)               /* a = 160 켜기, 161~163 막대 (c = 막대 너비), 164 기본값으로, 165 시험음, 166 MT-32 실기 소리, 167 MT-32 리버브 */
 {
     int id = (int)h->a;
     mt_fx = h->b; menu_dirty = 1;
@@ -254,6 +254,8 @@ static void hc_fx(const UiHit *h, int ev)               /* a = 160 켜기, 161~1
     if (id == 160) { fx_on = !fx_on; fx_apply(); settings_changed(); }
     else if (id == 164) { fx_rev = fx_cho = fx_len = 100; fx_apply(); settings_changed(); }
     else if (id == 165) mt_test(-1);
+    else if (id == 166) { mt_real = !mt_real; fx_apply(); settings_changed(); }
+    else if (id == 167) { mt_rev = (mt_rev + 1) % 5; fx_apply(); settings_changed(); }
 }
 static void mt_set_sub(int s) { mt_edit = 0; mt_sub = s; mt_fx = s ? 0 : -1; if (s) mt_zone = 1; dd_on = 0; menu_dirty = 1; }
 static void mt_open_sel(int k)                          /* k 번째 보이는 기계의 롬·SoundFont 풀다운 */
@@ -317,14 +319,6 @@ static void hc_mt(const UiHit *h, int ev)
 }
 
 /* ---- 그리기 (디자인: MIDI 탭 새 디자인 — 기계 / 공간 음향) ---- */
-static uint32_t mt_pill(uint32_t x, uint32_t y, uint32_t h, const char *t, const char *sub, int cur, uint32_t subcol)   /* 하위 탭 알약: 고른 것은 파랑 가득, 아니면 테두리 */
-{
-    uint32_t w = ui_sw(t) + 40 * S + (sub ? ui_sw(sub) : 0);
-    ui_rframe(x, y, w, h, h / 2, cur ? C_ACC : C_LINE, cur ? C_ACC : C_HEAD);
-    text_f(SF, 1, x + 20 * S, ui_sty(y, h), t, cur ? C_BACK : C_MUTED, 0xFF, w, 1);
-    if (sub) text_f(SF, 1, x + 20 * S + ui_sw(t), ui_sty(y, h), sub, subcol, 0xFF, w, 1);
-    return w;
-}
 static const char *mt_kind_name(const MidiDev *d, int di)
 {
     return d->kind == MDK_MT32 ? "Roland MT-32" : d->kind == MDK_GM ? nt("GM 음원", "GM module", "GM音源") : d->kind == MDK_GS ? "Roland SC-55" : d->kind == MDK_USB ? nt("USB MIDI 장치", "USB MIDI device", "USB MIDI機器") : nt(".mid 녹음기", ".mid recorder", ".mid録音");
@@ -395,15 +389,6 @@ static void mt_ring(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t r, 
 {
     ui_rrect(x, y, w, h, r, C_ACC); ui_rrect(x + 2 * S, y + 2 * S, w - 4 * S, h - 4 * S, r > 2 * S ? r - 2 * S : r, fill);
 }
-static void mt_bar(uint32_t x, uint32_t y, uint32_t w, int pct, int pan, int mute)   /* 시안: 두께 5 막대 + 지름 14 흰 동그라미. 소리는 왼쪽부터, 좌우는 가운데 기준 */
-{
-    uint32_t h = 5 * S, kd = 14 * S;
-    ui_rrect(x, y, w, h, h / 2, C_TRACK);
-    uint32_t k;
-    if (pan) { uint32_t c = x + w / 2; k = x + w * (uint32_t)(pct + 100) / 200; if (k > c) fe_fill(c, y, k - c, h, C_ACC); else fe_fill(k, y, c - k, h, C_ACC); }
-    else { uint32_t f = w * (uint32_t)pct / 100; k = x + f; ui_rrect(x, y, f > h ? f : h, h, h / 2, mute ? C_FAINT : C_ACC); }
-    ui_rrect(k - kd / 2, y - 5 * S, kd, kd, kd / 2, C_TEXT);
-}
 static void mt_fx_card(uint32_t cx, uint32_t py, uint32_t cw, uint32_t fh, uint32_t rowh)   /* 공간 음향 이펙트 카드 (큰 쪽) */
 {
     int on = fx_on;
@@ -443,8 +428,20 @@ static void mt_fx_card(uint32_t cx, uint32_t py, uint32_t cw, uint32_t fh, uint3
         ui_rframe(x, by2, w1, bh, 8 * S, mt_fx == 4 ? C_ACC : C_LINE, C_HEAD); text_f(SF, 1, x + 18 * S, ui_sty(by2, bh), t1, C_TEXT, 0xFF, w1, 1); text_f(SF, 1, x + 26 * S + ui_sw(t1), ui_sty(by2, bh), kc, C_FAINT, 0xFF, w1, 1); hit_add(hc_fx, 164, 4, 0, 0, x, by2, w1, bh);
         x += w1 + 12 * S;
         ui_rframe(x, by2, w2, bh, 8 * S, mt_fx == 5 ? C_ACC : C_LINE, C_HEAD); text_f(SF, 1, x + 18 * S, ui_sty(by2, bh), t2, C_TEXT, 0xFF, w2, 1); hit_add(hc_fx, 165, 5, 0, 0, x, by2, w2, bh);
-        uint32_t hx = x + w2 + 16 * S;
-        text_f(SF, 1, hx, ui_sty(by2, bh), nt("슬라이더: 위·아래로 고르고 +/- 로 바꿉니다 (마우스로 끌어도 됩니다)", "Sliders: pick with Up/Down, change with +/- (or drag)", "スライダー: ↑/↓ で選び +/- で変更 (ドラッグも可)"), C_MUTED, 0xFF, cx + cw - 24 * S - hx, 1);
+        x += w2 + 12 * S;
+        {   /* 8.0.68: MT-32 실기 DAC 소리, 시작 리버브 (MT-32/CM-32L 엔진에만 영향) */
+            static const char *const rvk[5] = { "곡대로", "룸", "홀", "플레이트", "탭딜레이" }, *const rve[5] = { "Song", "Room", "Hall", "Plate", "Tap" };
+            char t3[48], t4[48];
+            copy_str(t3, sizeof t3, nt("MT-32 실기 소리: ", "MT-32 real DAC: ", "MT-32実機音: ")); str_append(t3, sizeof t3, mt_real ? nt("켬", "On", "オン") : nt("끔", "Off", "オフ"));
+            copy_str(t4, sizeof t4, nt("MT-32 리버브: ", "MT-32 reverb: ", "MT-32リバーブ: ")); str_append(t4, sizeof t4, nt(rvk[mt_rev], rve[mt_rev], rve[mt_rev]));
+            uint32_t w3 = ui_sw(t3) + 36 * S, w4 = ui_sw(t4) + 36 * S;
+            ui_rframe(x, by2, w3, bh, 8 * S, mt_fx == 6 ? C_ACC : C_LINE, C_HEAD); text_f(SF, 1, x + 18 * S, ui_sty(by2, bh), t3, C_TEXT, 0xFF, w3, 1); hit_add(hc_fx, 166, 6, 0, 0, x, by2, w3, bh);
+            x += w3 + 12 * S;
+            ui_rframe(x, by2, w4, bh, 8 * S, mt_fx == 7 ? C_ACC : C_LINE, C_HEAD); text_f(SF, 1, x + 18 * S, ui_sty(by2, bh), t4, C_TEXT, 0xFF, w4, 1); hit_add(hc_fx, 167, 7, 0, 0, x, by2, w4, bh);
+            x += w4;
+        }
+        uint32_t hx = x + 16 * S;
+        if (cx + cw > hx + 120 * S) text_f(SF, 1, hx, ui_sty(by2, bh), nt("슬라이더: 위·아래로 고르고 +/- 로 바꿉니다 (마우스로 끌어도 됩니다)", "Sliders: pick with Up/Down, change with +/- (or drag)", "スライダー: ↑/↓ で選び +/- で変更 (ドラッグも可)"), C_MUTED, 0xFF, cx + cw - 24 * S - hx, 1);
     }
 }
 
@@ -483,12 +480,6 @@ static void mt_led(uint32_t cx, uint32_t cy, uint8_t col)
     ui_rrect(cx - d / 2 - S, cy - d / 2 - S, d + 2 * S, d + 2 * S, d / 2 + S, C_RACKIN);
     ui_rrect(cx - d / 2, cy - d / 2, d, d, d / 2, col);
     ui_rrect(cx - 4 * S, cy - 4 * S, 4 * S, 4 * S, 2 * S, 15);
-}
-static void mt_metal(uint32_t x, uint32_t y, uint32_t w, uint32_t h, int hot)   /* 금속 단추 */
-{
-    ui_rrect(x, y + 2 * S, w, h, 6 * S, C_RACKIN);
-    ui_rrect(x, y, w, h, 6 * S, hot ? C_ACC : C_SCREW);
-    ui_rrect(x + S, y + S, w - 2 * S, h - 2 * S, 5 * S, C_RACKBTN);
 }
 static void draw_miditab(uint32_t X, uint32_t W, uint32_t top, uint32_t bottom)
 {
@@ -788,16 +779,18 @@ static void miditab_key(int key)
     if (mt_sub == 1) {                                  /* 공간 음향 */
         switch (key) {
         case 0xC8: if (mt_fx > 0) mt_fx--; return;
-        case 0xD0: if (mt_fx < 5) mt_fx++; return;
+        case 0xD0: if (mt_fx < 7) mt_fx++; return;
         case 0xCB: case 0xCD: case 0x0D: case 0x4E: case 0x0C: case 0x4A: {
             int up = key == 0xCD || key == 0x0D || key == 0x4E;
             if (mt_fx >= 1 && mt_fx <= 3) { int id = mt_fx == 1 ? 161 : mt_fx == 2 ? 163 : 162; slide_change(id, up ? 1 : -1); if (!fx_on) { fx_on = 1; fx_apply(); } }
-            else if (key == 0xCB || key == 0xCD) { if (mt_fx == 4 || mt_fx == 5) mt_fx = mt_fx == 4 ? 5 : 4; }
+            else if (key == 0xCB || key == 0xCD) { if (mt_fx >= 4) { int d = key == 0xCD ? 1 : -1; mt_fx += d; if (mt_fx < 4) mt_fx = 7; if (mt_fx > 7) mt_fx = 4; } }
             return; }
         case 0x1C: case 0x9C: case 0x39:
             if (mt_fx == 0) { fx_on = !fx_on; fx_apply(); settings_changed(); }
             else if (mt_fx == 4) { fx_rev = fx_cho = fx_len = 100; fx_apply(); settings_changed(); }
             else if (mt_fx == 5) mt_test(-1);
+            else if (mt_fx == 6) { mt_real = !mt_real; fx_apply(); settings_changed(); }
+            else if (mt_fx == 7) { mt_rev = (mt_rev + 1) % 5; fx_apply(); settings_changed(); }
             else if (mt_fx >= 1 && mt_fx <= 3) slide_change(mt_fx == 1 ? 161 : mt_fx == 2 ? 163 : 162, 0);   /* Enter = 100 % */
             return;
         case 0x14: mt_test(-1); return;                 /* T */

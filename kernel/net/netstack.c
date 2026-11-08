@@ -266,15 +266,9 @@ void net_poll(uint32_t ms)
         b[n] = 0; net_log(b);
     }
 }
-#ifndef FE_UEFI
-extern void nic_bcm57785_halt(void);
-#endif
 void net_halt(void)                       /* 재부팅·전원 끄기 직전 (카드를 이미 뺀 뒤에도 칩이 켜져 있으면 끈다) */
 {
     if (nic) net_stop();
-#ifndef FE_UEFI
-    nic_bcm57785_halt();
-#endif
 }
 int net_has_nic(void) { return nic != 0; }
 int net_hw_present(void)                  /* 랜카드가 PCI에 있는지만 (읽기만 한다. 드라이버·lwIP는 건드리지 않음) → 옵션 창에 유선 항목을 보이기 위해 */

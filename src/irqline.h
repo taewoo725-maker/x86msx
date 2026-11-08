@@ -19,6 +19,7 @@ enum IrqLine {             /* 새 장치는 끝에 더함 */
     IRQ_RS232,             /* RS-232C 카트리지 (8251 RxRDY·8253 타이머) */
     IRQ_SFGMIDI,           /* SFG 의 YM2148 MIDI UART (벡터 = 3FF3h 에 쓴 값) */
     IRQ_MMMIDI,            /* Music Module 의 MC6850 MIDI UART */
+    IRQ_V9968,             /* V9968 카트리지 (두 번째 VDP): RTL 도 int_n 을 슬롯 INT 로 냄 (8.0.98) */
     IRQ_COUNT
 };
 #endif

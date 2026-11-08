@@ -46,16 +46,36 @@ static const uint8_t pal_tms[16][3] = {
     {221,112,89},{254,146,124},{204,204,92},{221,216,134},{55,175,64},{185,112,181},{202,211,201},{249,255,248},
 };
 
+/* V9968 기본 팔레트 (HRA! vdp_color_palette.v, 각 5비트 R,G,B) */
+static const uint8_t pal_9968[16][3] = {
+    {0,0,0},{0,0,0},{4,27,4},{13,31,13},{4,4,31},{9,13,31},{22,4,4},{9,27,31},
+    {31,4,4},{31,13,13},{27,27,4},{27,27,13},{4,18,4},{27,9,22},{22,22,22},{31,31,31},
+};
+static void set_pal5(VDP *v, int i, int r5, int g5, int b5)     /* 5비트 RGB → 8비트 (V9958 곡선) */
+{
+    v->pal256[i][0] = g31_tab[r5 & 31]; v->pal256[i][1] = g31_tab[g5 & 31]; v->pal256[i][2] = g31_tab[b5 & 31];
+    if (i < 16) { memcpy(v->palette[i], v->pal256[i], 3); v->pal_changed = 1; }
+    v->pal_dirty = 1;
+}
+static void v9968_default_palette(VDP *v)
+{
+    for (int i = 0; i < 256; i++) set_pal5(v, i, pal_9968[i & 15][0], pal_9968[i & 15][1], pal_9968[i & 15][2]);
+}
+
 void vdp_default_palette(VDP *v)                    /* 4.0.34: MSX1(TMS9918A)은 칩 고유 색 */
 {
     if (!v->v9938) { memcpy(v->palette, pal_tms, sizeof v->palette); return; }
+    if (v->v9968) { v9968_default_palette(v); return; }
     for (int i = 0; i < 16; i++)
         for (int c = 0; c < 3; c++)
             v->palette[i][c] = dac3(v, pal_9938[i][c]);
 }
 
+int vdp_epal(const VDP *v) { return v->v9968 && (v->reg[20] & 0x10); }
+
 void vdp_g7_rgb(const VDP *v, uint8_t c, uint8_t *r, uint8_t *g, uint8_t *b)
 {
+    if (vdp_epal(v)) { *r = v->pal256[c][0]; *g = v->pal256[c][1]; *b = v->pal256[c][2]; return; }   /* 8.0.69: 확장 팔레트 (SCREEN 8도 256색 팔레트 번호) */
     *g = dac3(v, (c >> 5) & 7);
     *r = dac3(v, (c >> 2) & 7);
     *b = dac3(v, (c & 3) == 3 ? 7 : (c & 3) * 2);       /* openMSX: 파랑 2비트 → 0,2,4,7 */
@@ -66,6 +86,7 @@ static void set_pal_entry(VDP *v, int i, int r, int g, int b)
     v->palette[i][0] = dac3(v, r);
     v->palette[i][1] = dac3(v, g);
     v->palette[i][2] = dac3(v, b);
+    if (v->v9968) memcpy(v->pal256[i], v->palette[i], 3);
     v->pal_dirty = 1;
     v->pal_changed = 1;
 }
@@ -74,21 +95,28 @@ void vdp_init(VDP *v, int kind)
 {
     memset(v, 0, sizeof *v);
     v->v9938 = kind >= 1;
-    v->v9958 = kind == 2;
+    v->v9958 = kind >= 2;
+    v->v9968 = kind == 3;
     v->pal_58 = v->v9958;
     v->pal_nsnap = 1;
-    v->vram_mask = v->v9938 ? VDP_VRAM - 1 : 0x3FFF;
+    v->vram_mask = v->v9968 ? 0x3FFFF : v->v9938 ? VDP_VRAM - 1 : 0x3FFF;
     vdp_default_palette(v);
 }
 
 static void vdp_check_il(VDP *v);
+static void il_convert(VDP *v, int to_logical);
 void vdp_reset(VDP *v)
 {
     int k = v->v9938, k58 = v->v9958;
-    uint32_t mask = v->vram_mask;
+    if (v->il) { il_convert(v, 0); v->il = 0; }          /* 8.0.71: 마스크를 바꾸기 전에 끼워 넣기를 풂 */
+    uint32_t mask = v->v9968 ? 0x3FFFF : v->vram_mask;   /* 8.0.100: 리셋하면 R#20 = 0 → EVR 꺼짐 → 128 KB */
+    v->lock_ext = 0; v->pal_ptr = 0;
     memset(v->reg, 0, sizeof v->reg);
     memset(v->stat, 0, sizeof v->stat);
     v->vram_mask = mask;
+    if (v->v9968) { v->reg[21] = 0x01; v->reg[55] = 0xFF; v->reg[56] = 1; v->reg[57] = 0xFF; v->reg[58] = 7; }   /* 8.0.72: 규격대로 R#21 = 3Bh(V58=1) → 128 KB·V9958 호환으로 시작, 명령 창 기본값 */
+    v->fg4 = 0;
+    v->vram_mask = v->v9968 ? 0x1FFFF : mask;
     v->v9938 = k;
     v->v9958 = k58;
     v->pal_58 = k58;
@@ -100,7 +128,8 @@ void vdp_reset(VDP *v)
     v->lines = 192;
     vdp_check_il(v);                                    /* 3.4.2: 끼워 넣기 순서였으면 되돌림 */
     if (k) {
-        for (int i = 0; i < 16; i++) set_pal_entry(v, i, pal_9938[i][0], pal_9938[i][1], pal_9938[i][2]);
+        if (v->v9968) v9968_default_palette(v);
+        else for (int i = 0; i < 16; i++) set_pal_entry(v, i, pal_9938[i][0], pal_9938[i][1], pal_9938[i][2]);
         v->stat[2] = 0x0C;                  /* 쓰이지 않는 비트 */
     } else vdp_default_palette(v);
     memset(v->fb, 0, sizeof v->fb);
@@ -113,7 +142,8 @@ void vdp_reset(VDP *v)
 enum { M_TEXT1, M_TEXT2, M_MC, M_G1, M_G2, M_G3, M_G4, M_G5, M_G6, M_G7, M_UNKNOWN };
 
 /* VRAM 주소 (논리 배치 그대로. 실제 칩의 SCREEN 7·8 두 뱅크 교차 배치는 흉내 내지 않음 — 저장 상태 호환) */
-static inline uint32_t vpa(const VDP *v, uint32_t a) { return a & v->vram_mask; }
+int vdp_evr(const VDP *v) { return v->v9968 && (v->reg[20] & 0x40); }                 /* 8.0.71: V9968 의 256 KB VRAM·확장 주소 (NEW 판: R#21 비트 0 = 0 이 V9968 방식) */
+static inline uint8_t *vpp(VDP *v, uint32_t a) { a &= v->vram_mask; return a < VDP_VRAM ? &v->vram[a] : &v->vram_x[a - VDP_VRAM]; }   /* 위쪽 128 KB 는 vram_x */
 
 static int mode(const VDP *v)
 {
@@ -162,13 +192,13 @@ static void addr_inc(VDP *v)
         return;
     }
     v->addr = (v->addr + 1) & v->vram_mask;
-    if (v->v9938) v->reg[14] = (uint8_t)((v->addr >> 14) & 7);
+    if (v->v9938) v->reg[14] = (uint8_t)((v->addr >> 14) & (vdp_evr(v) ? 15 : 7));
 }
 
 uint8_t vdp_read_data(VDP *v)
 {
     uint8_t r = v->read_buf;
-    v->read_buf = v->vram[vpa(v, v->addr)];
+    v->read_buf = *vpp(v, v->addr);
     addr_inc(v);
     v->latch_full = 0;
     return r;
@@ -187,7 +217,7 @@ uint8_t vdp_read_status(VDP *v)
         v->stat[0] &= 0x1F;                 /* F, 5S, C 해제 */
         return r;
     case 1:
-        r = (uint8_t)((v->stat[1] & 0x01) | (v->v9958 ? 0x04 : 0x00));   /* FH, 칩 번호 (V9938 0, V9958 2) */
+        r = (uint8_t)((v->stat[1] & 0x01) | (v->v9968 ? ((v->reg[21] & 1) ? 0x04 : 0x06) : v->v9958 ? 0x04 : 0x00));   /* FH, 칩 번호 (V9938 0, V9958 2, V9968 3 — R#21 비트 0이 1이면 V9958 흉내) */
         v->stat[1] &= ~0x01;
         return r;
     case 2:
@@ -204,9 +234,11 @@ uint8_t vdp_read_status(VDP *v)
     }
 }
 
+void (*vdp_vram_trace)(uint32_t addr, uint8_t val);   /* 8.0.175 진단(LogVramTop): VRAM 맨 앞 1 KB 에 쓸 때 부름 (꺼져 있으면 NULL) */
 void vdp_write_data(VDP *v, uint8_t val)
 {
-    v->vram[vpa(v, v->addr)] = val;
+    if (vdp_vram_trace && v->addr < 0x400) vdp_vram_trace(v->addr, val);
+    *vpp(v, v->addr) = val;
     v->read_buf = val;
     addr_inc(v);
     v->latch_full = 0;
@@ -214,18 +246,62 @@ void vdp_write_data(VDP *v, uint8_t val)
 
 static void cmd_start(VDP *v);
 static void cmd_cpu_byte(VDP *v, uint8_t val);
+static void cmd_lfmc_byte(VDP *v, uint8_t val);
 
 /* 3.4.2 VID-06: G6·G7(SCREEN 7·8, YJK)은 VRAM을 두 뱅크에 끼워 넣는다: 논리 주소 L → 실제 (L >> 1) | ((L & 1) << 16).
  * 배열은 늘 지금 모드의 논리 주소로 두고, 끼워 넣는 모드와 아닌 모드 사이를 오갈 때 128 KB를 다시 배치한다 */
+/* 논리 주소 l → 실제 칩 주소. 128 KB: (l >> 1) | ((l & 1) << 16). 256 KB(EVR): 위·아래 128 KB 가 따로 끼워짐 (포크 VDP::executeCpuVramAccess) */
+static inline uint32_t il_phys(uint32_t l, int big) { return big ? ((l & 0x20000) | ((l << 16) & 0x10000) | ((l >> 1) & 0xFFFF)) & 0x3FFFF : ((l >> 1) | ((l & 1) << 16)); }
+static inline uint8_t *vraw(VDP *v, uint32_t i) { return i < VDP_VRAM ? &v->vram[i] : &v->vram_x[i - VDP_VRAM]; }
+static void il_convert(VDP *v, int to_logical)
+{
+    /* 8.0.71: 임시 버퍼 없이 제자리 변환 (BSS 를 아끼려고). 128 KB 한 덩어리마다 하위 17비트를 오른쪽으로 한 칸 돌리는 순열이라
+     * 순환마다 맨 앞(가장 작은 주소)에서 시작해 한 바퀴 돌며 옮긴다. 256 KB 는 위·아래 덩어리를 따로 */
+    uint32_t n = v->vram_mask + 1;
+    for (uint32_t base = 0; base < n; base += VDP_VRAM) {
+        for (uint32_t l0 = 0; l0 < VDP_VRAM; l0++) {
+            uint32_t o = l0; int lead = 1;
+            for (int k = 0; k < 17 && lead; k++) { o = ((o >> 1) | ((o & 1) << 16)); if (o < l0) lead = 0; if (o == l0) break; }
+            if (!lead) continue;
+            uint8_t tmp = *vraw(v, base + l0); uint32_t l = l0;
+            for (;;) {
+                uint32_t nl = to_logical ? ((l >> 1) | ((l & 1) << 16))                   /* 새[l] = 옛[rr(l)] */
+                                         : (((l << 1) & 0x1FFFF) | (l >> 16));            /* 새[rr(l)] = 옛[l] → 새[l] = 옛[rl(l)] */
+                if (nl == l0) break;
+                *vraw(v, base + l) = *vraw(v, base + nl);
+                l = nl;
+            }
+            *vraw(v, base + l) = tmp;
+        }
+    }
+}
 static void vdp_check_il(VDP *v)
 {
-    int m = mode(v), il = v->v9938 && v->vram_mask == VDP_VRAM - 1 && (m == M_G6 || m == M_G7);
+    int m = mode(v), il = v->v9938 && v->vram_mask >= VDP_VRAM - 1 && (m == M_G6 || m == M_G7) && !(v->v9968 && (v->reg[20] & 8));   /* 8.0.72: SP3 가 켜지면 끼워 넣지 않음 (포크 isPlanar = 모드 && !SP3) */
     if (il == v->il) return;
-    static uint8_t t[VDP_VRAM];
-    memcpy(t, v->vram, VDP_VRAM);
-    if (il) for (uint32_t l = 0; l < VDP_VRAM; l++) v->vram[l] = t[(l >> 1) | ((l & 1) << 16)];   /* 실제 → G7 논리 */
-    else for (uint32_t l = 0; l < VDP_VRAM; l++) v->vram[(l >> 1) | ((l & 1) << 16)] = t[l];      /* G7 논리 → 실제 */
+    il_convert(v, il);
     v->il = (uint8_t)il;
+}
+/* 8.0.71: R#21 비트 0 이 바뀌면 (V9968: 256 KB ↔ 128 KB) 끼워 넣기를 풀고 → 마스크를 바꾸고 → 다시 끼움 */
+static void vdp_remask(VDP *v)
+{
+    if (!v->v9968) return;
+    uint32_t nm = vdp_evr(v) ? 0x3FFFF : 0x1FFFF;
+    if (nm == v->vram_mask) return;
+    if (v->il) { il_convert(v, 0); v->il = 0; }
+    v->vram_mask = nm;
+    v->addr &= nm;
+    vdp_check_il(v);
+}
+
+size_t vdp_vram_physical(const VDP *v, uint8_t *out)
+{
+    uint32_t n = v->v9968 ? 2 * VDP_VRAM : VDP_VRAM; int big = v->vram_mask > VDP_VRAM - 1;
+    for (uint32_t l = 0; l < n; l++) {
+        uint32_t ph = v->il ? il_phys(l, big) : l;
+        out[ph] = l < VDP_VRAM ? v->vram[l] : v->vram_x[l - VDP_VRAM];
+    }
+    return n;
 }
 
 /* 5.3.43 줄 중간 동기화 (5.3.45부터 항상 켬 - 옵션 없음).
@@ -243,7 +319,7 @@ static void write_reg(VDP *v, int r, uint8_t val)
         v->reg[r] = val & mask[r];
         return;
     }
-    if (r >= 47) return;
+    if (r >= 47 && !(v->v9968 && r <= 58)) return;   /* 8.0.72: V9968 은 R#47~58 (LRMM 이동량·창) */
 #ifdef VDP_TRACE
     if (r < 28 || r == 46) { extern unsigned long long vdp_trace_frame; fprintf(stderr, "R%d=%02X f%llu l%d\n", r, val, vdp_trace_frame, vdp_trace_line); }
 #endif
@@ -258,10 +334,23 @@ static void write_reg(VDP *v, int r, uint8_t val)
         int x = (v->line_t * 6 - 270) / 4;
         ml_pos = x < 0 ? 0 : x > 256 ? 256 : x;
     }
+    if (v->v9968 && (r == 20 || r == 21)) {            /* 8.0.69: V9968 확장 레지스터 (포트 9Ch 비트 7이 1이면 쓰기 무시) */
+        if (v->lock_ext) return;
+        if (r == 21) val &= 0xC1;                      /* FID(비트 0), FIL(6), CEIE(7) */
+    }
+    if (v->v9968 && r == 20 && ((val ^ v->reg[20]) & 0x10)) v->pal_dirty = 1;   /* 확장 팔레트 켬/끔 → 화면 색표 다시 */
+    uint8_t old20 = v->reg[20];
     v->reg[r] = val;
-    if (r == 14) v->addr = (v->addr & 0x3FFF) | ((uint32_t)(val & 7) << 14);
-    if (r == 16) v->pal_latch_full = 0;
+    if (r == 14 && v->v9968 && !vdp_evr(v)) v->reg[14] = val &= 7;     /* 8.0.71: R#14 상위 비트는 256 KB 일 때만 */
+    if (r == 14) v->addr = (v->addr & 0x3FFF) | ((uint32_t)(val & (vdp_evr(v) ? 15 : 7)) << 14);
+    if (r == 20 && v->v9968 && ((val ^ old20) & 0x40)) {                /* 8.0.100: 256 KB ↔ 128 KB 전환 (EVR = R#20 비트 6) */
+        vdp_remask(v);
+        if (!vdp_evr(v)) { v->reg[14] &= 7; v->addr &= v->vram_mask; }
+    }
+    if (r == 20 && v->v9968) vdp_check_il(v);                           /* 8.0.72: SP3 비트가 바뀌면 끼워 넣기 여부가 바뀜 */
+    if (r == 16) { v->pal_latch_full = 0; v->pal_ptr = 0; }
     if (r == 44 && (v->cmd == 0xF0 || v->cmd == 0xB0)) cmd_cpu_byte(v, val);
+    if (r == 44 && v->cmd == 0x20) cmd_lfmc_byte(v, val);
     if (r == 46) cmd_start(v);
     if (r <= 1) vdp_check_il(v);                       /* 3.4.2 VID-06 */
 }
@@ -273,23 +362,48 @@ void vdp_write_ctrl(VDP *v, uint8_t val)
     if (val & 0x80) {
         write_reg(v, val & (v->v9938 ? 0x3F : 0x07), v->latch);
     } else {
-        uint32_t hi = v->v9938 ? ((uint32_t)(v->reg[14] & 7) << 14) : 0;
+        uint32_t hi = v->v9938 ? ((uint32_t)(v->reg[14] & (vdp_evr(v) ? 15 : 7)) << 14) : 0;
         v->addr = (hi | ((uint32_t)(val & 0x3F) << 8) | v->latch) & v->vram_mask;
         if (!(val & 0x40)) {                /* 읽기 준비 */
-            v->read_buf = v->vram[vpa(v, v->addr)];
+            v->read_buf = *vpp(v, v->addr);
             addr_inc(v);
         }
     }
 }
 
+void vdp_set_reg(VDP *v, int r, uint8_t val) { write_reg(v, r, val); }              /* 8.0.75: 카트리지가 직접 레지스터를 정함 (Z80 의 R#14 래치 등은 안 건드림) */
+void vdp_set_pal3(VDP *v, int i, int r, int g, int b) { if (v->v9938) set_pal_entry(v, i & 15, r & 7, g & 7, b & 7); }   /* 8.0.75: 3비트 RGB 로 팔레트 한 칸 */
+
 void vdp_write_palette(VDP *v, uint8_t val)
 {
     if (!v->v9938) return;
+    if (vdp_epal(v)) {                                  /* 8.0.69 EPAL: R, G, B 각 5비트 세 번 쓰기, R#16 은 8비트 */
+        if (v->pal_ptr == 0) v->pal_r = val & 31;
+        else if (v->pal_ptr == 1) v->pal_g = val & 31;
+        if (++v->pal_ptr >= 3) {
+            v->pal_ptr = 0;
+            set_pal5(v, v->reg[16], v->pal_r, v->pal_g, val & 31);
+            v->reg[16]++;
+        }
+        return;
+    }
     if (!v->pal_latch_full) { v->pal_latch = val; v->pal_latch_full = 1; return; }
     v->pal_latch_full = 0;
     int i = v->reg[16] & 15;
+    v->pal_ptr = 0;
     set_pal_entry(v, i, (v->pal_latch >> 4) & 7, val & 7, v->pal_latch & 7);
     v->reg[16] = (uint8_t)((i + 1) & 15);
+}
+
+uint8_t vdp_read_9c(VDP *v)                              /* 8.0.69 포트 9Ch: 비트 7 = 잠금, 0 = F, 1 = FH */
+{
+    return (uint8_t)((v->lock_ext ? 0x80 : 0) | ((v->stat[0] & 0x80) ? 0x01 : 0) | ((v->stat[1] & 0x01) ? 0x02 : 0));
+}
+void vdp_write_9c(VDP *v, uint8_t val)
+{
+    v->lock_ext = (val & 0x80) != 0;
+    if (val & 0x01) v->stat[0] &= 0x7F;
+    if (val & 0x02) v->stat[1] &= ~0x01;
 }
 
 void vdp_write_indirect(VDP *v, uint8_t val)
@@ -308,6 +422,7 @@ void vdp_frame_start(VDP *v)
     v->stat[2] &= ~0x40;                    /* VR 해제 */
     v->lines = (v->v9938 && (v->reg[9] & 0x80)) ? 212 : 192;
     v->frame++;
+    if (v->v9968) v->sps_top = (uint8_t)((v->sps_top + 5) & 63);   /* 8.0.73 SPS: 프레임마다 맨 앞 스프라이트가 +5 */
 }
 
 void vdp_frame_end(VDP *v)
@@ -339,13 +454,14 @@ void vdp_line_start(VDP *v, int line)
 void vdp_line_end(VDP *v, int line)
 {
     if (!v->v9938) return;
-    if ((v->reg[0] & 0x10) && line == ((v->reg[19] - v->reg[23]) & 0xFF)) v->stat[1] |= 0x01;
+    int vs = (v->v9968 && (v->reg[20] & 0x04)) ? 0 : v->reg[23];        /* 8.0.70 ILNS: 줄 인터럽트 비교에서 세로 스크롤(R#23)을 빼지 않음 */
+    if ((v->reg[0] & 0x10) && line == ((v->reg[19] - vs) & 0xFF)) v->stat[1] |= 0x01;
 }
 
 /* ------------------------------------------------------------------ */
 /* 그리기                                                               */
 /* ------------------------------------------------------------------ */
-#define VR(a) v->vram[vpa(v, (uint32_t)(a))]
+#define VR(a) (*vpp(v, (uint32_t)(a)))
 
 static inline uint8_t col0b(const VDP *v, uint8_t bd, uint8_t c)   /* 줄 시작에 한 번 구한 테두리 색을 받음 (점마다 모드를 다시 판별하지 않음) */
 {
@@ -357,18 +473,21 @@ static inline uint8_t col0b(const VDP *v, uint8_t bd, uint8_t c)   /* 줄 시작
 /* 스프라이트 (256폭 기준 좌표). line은 256폭 색 번호, direct면 G7 색 */
 static void render_sprites(VDP *v, int y, uint8_t *line, int mode2, int g7)
 {
+    if (v->v9968 && (v->reg[20] & 8)) return;       /* 8.0.73 SP3: 스프라이트 모드 3 이 따로 그림 (render_into 끝) */
+    if (g7 && vdp_epal(v)) g7 = 0;                  /* 8.0.69: 확장 팔레트면 SCREEN 8 스프라이트도 팔레트 번호(0~15) 그대로 */
     int big = (v->reg[1] & 0x02) != 0, mag = (v->reg[1] & 0x01) != 0;
     int size = (big ? 16 : 8) << mag;
     uint32_t sat, spg = (uint32_t)v->reg[6] << 11;
     if (!v->v9938) { sat = (uint32_t)(v->reg[5] & 0x7F) << 7; spg &= 0x3800; }
-    else if (mode2) sat = ((uint32_t)(v->reg[11] & 3) << 15) | ((uint32_t)(v->reg[5] & 0xFC) << 7);
-    else sat = ((uint32_t)(v->reg[11] & 3) << 15) | ((uint32_t)v->reg[5] << 7);
+    else if (mode2) sat = ((uint32_t)(v->reg[11] & (vdp_evr(v) ? 7 : 3)) << 15) | ((uint32_t)(v->reg[5] & 0xFC) << 7);
+    else sat = ((uint32_t)(v->reg[11] & (vdp_evr(v) ? 7 : 3)) << 15) | ((uint32_t)v->reg[5] << 7);
     if (v->v9938 && (v->reg[8] & 0x02)) return;     /* SPD: 스프라이트 끔 */
     uint8_t hide_line[512];
     if (v->spr_hide) line = hide_line;              /* 3.2.0: 설정으로 숨김. 5.2.73: 그리기만 버리고 충돌·5번째 스프라이트 상태는 실제대로 (GT 부팅 로고가 충돌 비트를 기다림) */
     uint32_t sct = sat - 512;
-    int max_per_line = mode2 ? 8 : 4, end_y = mode2 ? 216 : 208;
-    int sy_line = v->v9938 ? (y + v->reg[23]) & 0xFF : y;   /* 4.0.29: V9938 스프라이트는 R#23 세로 스크롤을 따라감 (openMSX SpriteChecker와 같음). 4.0에서 잘못 뺐다가 되돌림 — MSX2 세로 스크롤 게임에서 스프라이트가 어긋남 */
+    int max_per_line = (v->v9968 && (v->reg[20] & 0x80)) ? 16 : mode2 ? 8 : 4, end_y = mode2 ? 216 : 208;
+    int sy_line = v->v9938 ? (y + ((v->v9968 && (v->reg[20] & 0x02)) ? 0 : v->reg[23])) & 0xFF : y;   /* 8.0.70 SVNS: 스프라이트가 세로 스크롤을 따라가지 않음 */
+      /* 4.0.29: V9938 스프라이트는 R#23 세로 스크롤을 따라감 (openMSX SpriteChecker와 같음). 4.0에서 잘못 뺐다가 되돌림 — MSX2 세로 스크롤 게임에서 스프라이트가 어긋남 */
     int list[32], n = 0, over = 0;
     for (int i = 0; i < 32; i++) {
         int sy = VR(sat + i * 4);
@@ -469,7 +588,7 @@ static void hscroll_sp2(const VDP *v, uint8_t *line, const uint8_t *other, int w
     if (v->hs25 & 0x02) memset(line, border, (size_t)(w == 512 ? 16 : 8));
 }
 
-static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
+static void render_into0(VDP *v, int y, uint8_t *out, uint8_t *dflag)
 {
     uint8_t l[256];
     uint8_t bd = vdp_backdrop(v);
@@ -567,9 +686,9 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
         return;
     }
     case M_G4: {                                    /* 256 x 212, 4비트 */
-        uint32_t base = ((uint32_t)(v->reg[2] & 0x60) << 10) + (uint32_t)sy * 128;
+        uint32_t base = ((uint32_t)(v->reg[2] & (vdp_evr(v) ? 0xE0 : 0x60)) << 10) + (uint32_t)sy * 128;
         uint8_t cm[16]; colmap16(v, bd, cm);
-        vdpk->nib16(l, &v->vram[vpa(v, base)], 128, cm);     /* 줄은 128 바이트 경계라 마스크 안에서 이어짐 */
+        vdpk->nib16(l, vpp(v, base), 128, cm);     /* 줄은 128 바이트 경계라 마스크 안에서 이어짐 */
         if (sp2_on(v)) {
             uint8_t o[256];
             for (int x = 0; x < 128; x++) { uint8_t b = VR((base ^ 0x8000) + x); o[2 * x] = col0b(v, bd, b >> 4); o[2 * x + 1] = col0b(v, bd, b & 15); }
@@ -581,9 +700,9 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
         return;
     }
     case M_G5: {                                    /* 512 x 212, 2비트 */
-        uint32_t base = ((uint32_t)(v->reg[2] & 0x60) << 10) + (uint32_t)sy * 128;
+        uint32_t base = ((uint32_t)(v->reg[2] & (vdp_evr(v) ? 0xE0 : 0x60)) << 10) + (uint32_t)sy * 128;
         uint8_t cm4[4] = { col0b(v, bd, 0), col0b(v, bd, 1), col0b(v, bd, 2), col0b(v, bd, 3) };
-        vdpk->crumb4(out, &v->vram[vpa(v, base)], 128, cm4);
+        vdpk->crumb4(out, vpp(v, base), 128, cm4);
         if (sp2_on(v)) {
             uint8_t o[512];
             for (int x = 0; x < 128; x++) { uint8_t b = VR((base ^ 0x8000) + x); for (int k = 0; k < 4; k++) o[4 * x + k] = col0b(v, bd, (b >> (6 - 2 * k)) & 3); }
@@ -599,9 +718,9 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
         return;
     }
     case M_G6: {                                    /* 512 x 212, 4비트 */
-        uint32_t base = ((uint32_t)(v->reg[2] & 0x20) << 11) + (uint32_t)sy * 256;
+        uint32_t base = ((uint32_t)(v->reg[2] & (vdp_evr(v) ? 0x60 : 0x20)) << 11) + (uint32_t)sy * 256;
         uint8_t cm[16]; colmap16(v, bd, cm);
-        vdpk->nib16(out, &v->vram[vpa(v, base)], 256, cm);   /* 줄은 256 바이트 경계 */
+        vdpk->nib16(out, vpp(v, base), 256, cm);   /* 줄은 256 바이트 경계 */
         if (sp2_on(v)) {
             uint8_t o[512];
             for (int x = 0; x < 256; x++) { uint8_t b = VR((base ^ 0x10000) + x); o[2 * x] = col0b(v, bd, b >> 4); o[2 * x + 1] = col0b(v, bd, b & 15); }
@@ -614,7 +733,7 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
         return;
     }
     case M_G7: {                                    /* 256 x 212, 직접 색 */
-        uint32_t base = ((uint32_t)(v->reg[2] & 0x20) << 11) + (uint32_t)sy * 256;
+        uint32_t base = ((uint32_t)(v->reg[2] & (vdp_evr(v) ? 0x60 : 0x20)) << 11) + (uint32_t)sy * 256;
         int yjk = v->v9958 && (v->reg[25] & 0x08);
         *dflag = (uint8_t)(yjk ? ((v->reg[25] & 0x10) ? 3 : 2) : 1);
         for (int x = 0; x < 256; x++) l[x] = VR(base + x);
@@ -638,10 +757,132 @@ static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
     }
 }
 
+
+/* ---- 8.0.73 스프라이트 모드 3 (R#20 비트 3, 확장 팔레트 필요) — openMSX 포크 SpriteChecker::checkSprites3 · SpriteConverter::drawMode3 와 같은 규칙 ----
+ * 속성표 64개 × 8바이트 (R#11·R#5 로 정한 512바이트 구역):
+ *  +0 Y 하위 · +1 비트0~1 Y 상위 비트6~7 크기(16<<n 줄) · +2 세로 배율(0=256) · +3 비트0~3 팔레트 묶음, 4 세로 뒤집기·5 가로 뒤집기·6~7 투명도
+ *  +4 X 하위 · +5 비트0~1 X 상위 비트4~6 패턴 묶음 · +6 가로 배율(0=256) · +7 비트0~3 패턴 X(16점 단위) 비트4~7 패턴 Y(16줄 단위)
+ * 패턴은 256×256 점 4비트 그림 (R#6<<11 부터 줄당 128바이트, 끼워 넣지 않음). 색 0 = 투명, 색 = pal256[(묶음<<4)|색].
+ * 한 줄 16개까지 (17번째는 상태 S#0 의 5번째 스프라이트 표시), 앞 번호가 위. 투명도 0/25/50/75% 는 바탕색과 섞음 */
+static void render_sprites3(VDP *v, int y, uint8_t *out, uint8_t *dflag, int w512)
+{
+    if (v->reg[8] & 0x02) return;                   /* SPD */
+    uint32_t sat = (((uint32_t)(v->reg[11] & 7) << 15) | ((uint32_t)v->reg[5] << 7)) & 0x3FE00;
+    uint32_t spg = (uint32_t)v->reg[6] << 11;
+    int line = y + ((v->reg[20] & 0x02) ? 0 : v->reg[23]);
+    int sps = (v->reg[25] & 0x80) != 0;
+    int maxvis = 16, nvis = 0, fifth = -1, spr, over = 0;
+    struct { int x, mgx; uint64_t pat; uint8_t ps, tp; } vis[64];
+    spr = sps ? (v->sps_top & 63) : 0;
+    for (int cnt = 0; cnt < 64; cnt++, spr = sps ? ((spr + 19) & 63) : spr + 1) {
+        const uint32_t a = sat + (uint32_t)spr * 8;
+        int sy = VR(a) | ((VR(a + 1) & 3) << 8); if (sy & 0x200) sy -= 0x400;
+        if (sy == 216 && !sps) break;
+        int mgy = VR(a + 2); if (!mgy) mgy = 256;
+        int sl = line - sy;
+        if (sl < 0 || sl >= mgy) continue;
+        if (nvis == maxvis) {
+            if (fifth < 0) fifth = spr;
+            over = 1;
+            if (!v->spr_nolimit) continue;
+        }
+        if (nvis >= 64) continue;
+        int x = VR(a + 4) | ((VR(a + 5) & 3) << 8); if (x & 0x200) x -= 0x400;
+        int mgx = VR(a + 6); if (!mgx) mgx = 256;
+        int sz = (VR(a + 1) >> 6) & 3, pts = (VR(a + 5) >> 4) & 7, px = VR(a + 7) & 15, py = (VR(a + 7) >> 4) & 15;
+        uint8_t at = VR(a + 3);
+        if (at & 0x20) sl = mgy - sl - 1;
+        unsigned srcY = (unsigned)(16 << sz) * (unsigned)sl / (unsigned)mgy;
+        uint32_t row = (((uint32_t)pts << 8) | ((uint32_t)py << 4)) + srcY;
+        uint32_t off = (spg + ((row << 7) | ((uint32_t)px << 3))) & 0x3FFFF;
+        uint64_t pat = 0;
+        if (at & 0x10) for (int i = 0; i < 8; i++) { uint8_t b = VR(off + (uint32_t)i); pat |= (uint64_t)(uint8_t)((b << 4) | (b >> 4)) << (8 * i); }   /* 가로 뒤집기: 바이트 순서·낱 4비트 뒤바꿈 */
+        else for (int i = 0; i < 8; i++) pat |= (uint64_t)VR(off + (uint32_t)i) << (56 - 8 * i);
+        vis[nvis].x = x; vis[nvis].mgx = mgx; vis[nvis].pat = pat; vis[nvis].ps = at & 15; vis[nvis].tp = (at >> 6) & 3;
+        nvis++;
+    }
+    /* 상태 S#0: 17번째 스프라이트 / 마지막으로 본 번호 */
+    {
+        uint8_t st = v->stat[0];
+        if (fifth >= 0 && (st & 0xC0) == 0) st = (uint8_t)(0x40 | (st & 0x20) | (fifth & 0x1F));
+        if (!(st & 0x40)) st = (uint8_t)((st & 0x20) | ((spr < 63 ? spr : 63) & 0x1F));
+        v->stat[0] = st;
+    }
+    (void)over;
+    if (!nvis) return;
+    int count = nvis < maxvis ? nvis : maxvis;
+    /* 충돌: 색이 있는 점끼리 겹침 */
+    if (!(v->stat[0] & 0x20)) {
+        uint8_t col[256]; memset(col, 0, sizeof col);
+        for (int i = 0; i < count && !(v->stat[0] & 0x20); i++) {
+            int dx = vis[i].x, wd = vis[i].mgx, ox = 0;
+            if (dx >= 256 || dx + wd <= 0) continue;
+            if (dx < 0) { wd += dx; ox += dx; dx = 0; }
+            while (ox < wd) {
+                int pxn = ox * 16 / vis[i].mgx; if (ox < 0) pxn = 0;
+                int pxx = (int)((vis[i].pat >> (60 - pxn * 4)) & 15);
+                if (pxx) { if (col[dx]) { v->stat[0] |= 0x20; break; } col[dx] = 1; }
+                if (++dx >= 256) break;
+                ox++;
+            }
+        }
+    }
+    if (v->spr_hide || !vdp_epal(v)) return;        /* 그림은 확장 팔레트가 있을 때만 (팔레트 번호 0~255) */
+    /* 그리기: 앞 번호가 위, 색이 있는 점 하나가 그려지면 뒤 스프라이트는 그 점에 못 그림 */
+    uint8_t prio[256]; memset(prio, 0, sizeof prio);
+    uint8_t *ov = (*dflag >= 2) ? v->spr_ov[y] : NULL;   /* YJK 줄은 스프라이트를 따로 둠 */
+    int drew = 0;
+    for (int i = 0; i < count; i++) {
+        if (!vis[i].pat) continue;
+        int sx = 0, dx = vis[i].x, nx = vis[i].mgx;
+        if (dx < 0) { sx = -dx; nx -= sx; dx = 0; }
+        if (nx <= 0) continue;
+        if (dx + nx > 256) nx = 256 - dx;
+        if (nx <= 0) continue;
+        for (; nx > 0; nx--, dx++, sx++) {
+            if (prio[dx]) continue;
+            int c = (int)((vis[i].pat >> (60 - (16 * sx / vis[i].mgx) * 4)) & 15);
+            if (!c) continue;
+            int idx = (vis[i].ps << 4) | c;
+            prio[dx] = 1;
+            if (ov) { if (idx != 0xFF) { ov[dx] = (uint8_t)idx; drew = 1; } continue; }
+            if (!drew && *dflag == 0) *dflag = 1;           /* 팔레트 줄 → pal256 번호 줄 (0~15 는 같은 색) */
+            drew = 1;
+            if (vis[i].tp) {                                /* 투명도: 5비트 값으로 섞은 뒤 가장 가까운 팔레트 칸 */
+                int dsti = out[w512 ? dx * 2 : dx * 2], sr = v->pal256[idx][0], sg = v->pal256[idx][1], sb = v->pal256[idx][2];
+                int dr = v->pal256[dsti][0], dg = v->pal256[dsti][1], db = v->pal256[dsti][2];
+                int sc[3] = { sr >> 3, sg >> 3, sb >> 3 }, dc[3] = { dr >> 3, dg >> 3, db >> 3 }, rc[3];
+                for (int k = 0; k < 3; k++) {
+                    int dd = dc[k], ss = sc[k];
+                    switch (vis[i].tp) { case 1: dd = (ss * 3 + dd) >> 2; break; case 2: dd = (ss + dd) >> 1; break; default: dd = (dd * 3 + ss) >> 2; break; }
+                    rc[k] = (dd << 3) | (dd >> 2);
+                }
+                int best = 0, bd2 = 1 << 30;
+                for (int e = 0; e < 256; e++) {
+                    int a0 = v->pal256[e][0] - rc[0], a1 = v->pal256[e][1] - rc[1], a2 = v->pal256[e][2] - rc[2], dd2 = a0 * a0 + a1 * a1 + a2 * a2;
+                    if (dd2 < bd2) { bd2 = dd2; best = e; }
+                }
+                idx = best;
+            }
+            out[dx * 2] = out[dx * 2 + 1] = (uint8_t)idx;
+        }
+    }
+    (void)w512;
+}
+
+static void render_into(VDP *v, int y, uint8_t *out, uint8_t *dflag)
+{
+    render_into0(v, y, out, dflag);
+    if (v->v9968 && (v->reg[20] & 8) && (v->reg[1] & 0x40) && y < v->lines) {
+        int m = mode(v);
+        if (m == M_TEXT1 || m == M_TEXT2) return;
+        if (*dflag >= 2) memset(v->spr_ov[y], 0xFF, 256);
+        render_sprites3(v, y, out, dflag, m == M_G5 || m == M_G6);
+    }
+}
+
 void vdp_render_line(VDP *v, int y)
 {
-    static int vdpk_seen;
-    if (vdpk_seen != vdpk_asm_on + 1) { vdpk_seen = vdpk_asm_on + 1; vdpk_apply(); }   /* ini VdpAsm 이 바뀌면 표를 바꿈 */
     if (y >= VDP_H) return;
     if (y == 0) { v->pal_nsnap = 1; v->pal_cur = 0; memcpy(v->pal_snap[0], v->palette, sizeof v->pal_snap[0]); v->pal_changed = 0; }
     else if (v->pal_changed) {                            /* 4.0.30: 이 줄부터 새 팔레트 */
@@ -708,6 +949,7 @@ void vdp_render_line(VDP *v, int y)
  * 비트맵이 아니면 G7처럼 다룬다. */
 static int cmd_mode(const VDP *v)
 {
+    if (v->fg4) return M_G4;                        /* 8.0.72 FG4: 어떤 화면에서도 4비트 256폭 점으로 */
     int m = mode(v);
     return (m == M_G4 || m == M_G5 || m == M_G6) ? m : M_G7;
 }
@@ -715,19 +957,29 @@ static int cmd_mode(const VDP *v)
 /* 4.0.4: 지금 화면 모드의 가로 점 수 (SCREEN 6·7 = 512, 그 밖 = 256) — 마우스 이동량을 가로·세로 같은 길이로 맞추는 데 씀 */
 int vdp_hres(const VDP *v) { int m = mode(v); return (m == M_G5 || m == M_G6) ? 512 : 256; }
 
-static uint32_t pix_addr(int m, int x, int y)
+/* 실제 칩 주소 → 논리 주소 (끼워 넣은 배열일 때). FG4·LFMM 글꼴 주소는 실제 배치 기준이라 필요 */
+static inline uint32_t pa2l(const VDP *v, uint32_t a) { return v->il ? ((a & ~0x1FFFFu) | ((a << 1) & 0x1FFFF) | ((a >> 16) & 1)) : a; }
+static uint32_t pix_addr_l(const VDP *v, int m, int x, int y);
+static inline uint32_t pa2l_raw(const VDP *v, uint32_t a) { return pa2l(v, a & v->vram_mask); }
+static uint32_t pix_addr(const VDP *v, int m, int x, int y)
 {
+    uint32_t a = pix_addr_l(v, m, x, y);
+    return v->fg4 ? pa2l(v, a) : a;
+}
+static uint32_t pix_addr_l(const VDP *v, int m, int x, int y)
+{
+    int e = vdp_evr(v);                             /* 8.0.71 EVR: 세로 두 배 (G4·G5 2048줄, G6·G7 1024줄) */
     switch (m) {
-    case M_G4: return (uint32_t)(y & 1023) * 128 + (uint32_t)((x & 255) >> 1);
-    case M_G5: return (uint32_t)(y & 1023) * 128 + (uint32_t)((x & 511) >> 2);
-    case M_G6: return ((uint32_t)(y & 511) * 256 + (uint32_t)((x & 511) >> 1));
-    default:   return ((uint32_t)(y & 511) * 256 + (uint32_t)(x & 255));
+    case M_G4: return (uint32_t)(y & (e ? 2047 : 1023)) * 128 + (uint32_t)((x & 255) >> 1);
+    case M_G5: return (uint32_t)(y & (e ? 2047 : 1023)) * 128 + (uint32_t)((x & 511) >> 2);
+    case M_G6: return ((uint32_t)(y & (e ? 1023 : 511)) * 256 + (uint32_t)((x & 511) >> 1));
+    default:   return ((uint32_t)(y & (e ? 1023 : 511)) * 256 + (uint32_t)(x & 255));
     }
 }
 
 static uint8_t pget(VDP *v, int m, int x, int y)
 {
-    uint8_t b = VR(pix_addr(m, x, y));
+    uint8_t b = VR(pix_addr(v, m, x, y));
     switch (m) {
     case M_G4: case M_G6: return (x & 1) ? (b & 15) : (b >> 4);
     case M_G5: return (uint8_t)((b >> (6 - 2 * (x & 3))) & 3);
@@ -737,8 +989,8 @@ static uint8_t pget(VDP *v, int m, int x, int y)
 
 static void pset(VDP *v, int m, int x, int y, uint8_t c, int op)
 {
-    uint32_t a = vpa(v, pix_addr(m, x, y));
-    uint8_t b = v->vram[a], mask, sh;
+    uint8_t *pa = vpp(v, pix_addr(v, m, x, y));
+    uint8_t b = *pa, mask, sh;
     switch (m) {
     case M_G4: case M_G6: sh = (x & 1) ? 0 : 4; mask = (uint8_t)(15 << sh); c &= 15; break;
     case M_G5: sh = (uint8_t)(6 - 2 * (x & 3)); mask = (uint8_t)(3 << sh); c &= 3; break;
@@ -755,7 +1007,7 @@ static void pset(VDP *v, int m, int x, int y, uint8_t c, int op)
     case 4: r = (uint8_t)~c; break;                 /* NOT */
     default: r = c; break;
     }
-    v->vram[a] = (uint8_t)((b & ~mask) | ((r << sh) & mask));
+    *pa = (uint8_t)((b & ~mask) | ((r << sh) & mask));
 }
 
 static int ppb(int m) { return m == M_G5 ? 4 : (m == M_G4 || m == M_G6) ? 2 : 1; }
@@ -785,8 +1037,8 @@ static void cmd_cpu_byte(VDP *v, uint8_t val)
 {
     int m = cmd_mode(v);
     if (v->cmd == 0xF0) {                           /* 바이트 단위 */
-        uint32_t a = vpa(v, pix_addr(m, v->c_x, v->c_y));
-        v->vram[a] = val;
+        uint8_t *pa = vpp(v, pix_addr(v, m, v->c_x, v->c_y));
+        *pa = val;
         v->c_x += v->c_dx * ppb(m);
     } else {
         pset(v, m, v->c_x, v->c_y, val, v->reg[46] & 15);
@@ -848,16 +1100,16 @@ static void job_row(VDP *v, int j)
 {
     int *q = v->job_p, m = q[0], op = q[2], clr = q[3], sx = q[4], sy = q[5], dx = q[6], dy = q[7], dix = q[8], diy = q[9], bn = q[10], p = q[11];
     switch (v->job_kind) {
-    case 0xC0: { int bx = (dx & 511) / p; for (int i = 0; i < bn; i++) v->vram[vpa(v, pix_addr(m, (bx + i * dix) * p, dy + j * diy))] = (uint8_t)clr; break; }
+    case 0xC0: { int bx = (dx & 511) / p; for (int i = 0; i < bn; i++) *vpp(v, pix_addr(v, m, (bx + i * dix) * p, dy + j * diy)) = (uint8_t)clr; break; }
     case 0xD0:
         for (int i = 0; i < bn; i++) {
-            uint8_t b = VR(pix_addr(m, sx + i * dix * p, sy + j * diy));
-            v->vram[vpa(v, pix_addr(m, dx + i * dix * p, dy + j * diy))] = b;
+            uint8_t b = VR(pix_addr(v, m, sx + i * dix * p, sy + j * diy));
+            *vpp(v, pix_addr(v, m, dx + i * dix * p, dy + j * diy)) = b;
         }
         break;
     case 0xE0:
         for (int k = 0, x = dx; k < bn; k++, x += dix * p)
-            v->vram[vpa(v, pix_addr(m, x, dy + j * diy))] = VR(pix_addr(m, x, sy + j * diy));
+            *vpp(v, pix_addr(v, m, x, dy + j * diy)) = VR(pix_addr(v, m, x, sy + j * diy));
         break;
     case 0x80: for (int i = 0; i < bn; i++) pset(v, m, dx + i * dix, dy + j * diy, (uint8_t)clr, op); break;
     case 0x90: for (int i = 0; i < bn; i++) pset(v, m, dx + i * dix, dy + j * diy, pget(v, m, sx + i * dix, sy + j * diy), op); break;
@@ -878,23 +1130,107 @@ static void job_set(VDP *v, int kind, int m, int W, int op, int clr, int sx, int
     if (!v->progressive) vdp_job_run(v, tny);
 }
 
+
+/* ---- 8.0.72 V9968 새 명령 (openMSX 포크 VDPCmdEngine 의 LRMM·LFMM·LFMC 와 같은 순서) ---- */
+static int sext(int x, int bits) { return (x & (1 << (bits - 1))) ? x - (1 << bits) : x; }
+
+/* LRMM (0x30): 회전·확대·축소 복사. 목적지 한 점마다 원본 좌표(12.8 고정소수)를 (R#47~48, R#49~50) 만큼 옮기며 읽음.
+ * 줄이 끝나면 시작 좌표를 (-VY, +VX) 만큼 옮김 (XHR 이면 세로 해상도 2배: Y 는 <<9, 줄 이동은 2배) */
+static void cmd_lrmm(VDP *v, int m, int W, int op)
+{
+    int ym = 2047;
+    int sx = R16(32) & 0xFFF, sy = R16(34) & 0x1FFF, dx = R16(36) & 0x1FF, dy = R16(38) & 0x7FF, nx = R16(40) & 0x7FF, ny = R16(42) & ym;
+    int arg = v->reg[45], xhr = (arg & 0x40) != 0;
+    int dix = (arg & 4) ? -1 : 1, diy = (arg & 8) ? -1 : 1;
+    int vx = (int16_t)(v->reg[47] | (v->reg[48] << 8)), vy = (int16_t)(v->reg[49] | (v->reg[50] << 8));
+    int wsx = v->reg[51] | ((v->reg[52] & 1) << 8), wsy = v->reg[53] | ((v->reg[54] & 7) << 8);
+    int wex = v->reg[55] | ((v->reg[56] & 1) << 8), wey = v->reg[57] | ((v->reg[58] & 7) << 8);
+    int tnx = clipn1_px(dx, nx, W, dix);
+    int ny0 = ny ? ny : 2048;
+    int tny = (diy < 0 && ny0 > dy + 1) ? dy + 1 : ny0;
+    int32_t sx0 = sext(sx, 12) * 256, sy0 = sext(sy, 13) * (xhr ? 512 : 256);
+    uint8_t col = v->reg[44];
+    for (int row = 0; row < tny; row++) {
+        int32_t ax = sx0, ay = sy0; int x = dx;
+        for (int i = 0; i < tnx; i++) {
+            int X = ax / 256, Y = xhr ? ay / 512 : ay / 256;
+            uint8_t src = (wsx <= X && X <= wex && wsy <= Y && Y <= wey) ? pget(v, m, X, Y) : col;
+            pset(v, m, x, dy, src, op);
+            ax += vx; ay += vy; x += dix;
+        }
+        if (xhr) { sx0 -= vy * 2; sy0 += vx * 2; } else { sx0 -= vy; sy0 += vx; }
+        dy += diy;
+    }
+}
+
+/* LFMM (0x10): VRAM 의 글꼴 비트(1바이트 = 가로 8점)를 그림. 원본 주소 = R#32·33(바이트)·R#34 하위 2비트 (실제 칩 주소) */
+static void cmd_lfmm(VDP *v, int m, int W, int op)
+{
+    int nx = R16(40) & 0x1FF, ny = R16(42) & 2047, dx = R16(36) & 0x1FF, dy = R16(38) & 0x7FF;
+    int arg = v->reg[45], tx = (arg & 4) ? -1 : 1, ty = (arg & 8) ? -1 : 1;
+    uint32_t asa = (uint32_t)(v->reg[32] | (v->reg[33] << 8) | ((v->reg[34] & 3) << 16));
+    int tnx = clipn1_px(dx, nx * 8, W, tx), rows = ny ? ny : 2048;
+    int adx = dx, ady = dy, anx = tnx, any = rows, fwc = 0; uint8_t src = 0, bg = v->reg[12];
+    for (;;) {
+        if (fwc <= 0) { src = VR(pa2l_raw(v, asa++)); fwc = 8; }
+        pset(v, m, adx, ady, (src & 0x80) ? v->reg[44] : bg, op);
+        src = (uint8_t)(src << 1); fwc--; adx += tx;
+        if (--anx == 0 || fwc == 0) {
+            fwc = 0;
+            if (--any == 0) { any = rows; ady = dy; dx += tx * 8; tnx = tnx < 8 ? 0 : tnx - 8; }
+            else ady += ty;
+            adx = dx; anx = tnx;
+            if (tnx <= 0) break;
+        }
+    }
+}
+
+/* LFMC (0x20): CPU 가 R#44 로 보내는 글꼴 바이트를 그림 (한 줄이 끝나면 그 바이트의 남은 비트는 버림) */
+static void cmd_lfmc_byte(VDP *v, uint8_t val)
+{
+    int m = cmd_mode(v), op = v->reg[46] & 15;
+    v->fsrc = val; v->fwc = 8;
+    while (v->fwc > 0) {
+        pset(v, m, v->c_x, v->c_y, (v->fsrc & 0x80) ? v->fcol : v->reg[12], op);
+        v->fsrc = (uint8_t)(v->fsrc << 1); v->fwc--; v->c_x += v->c_dx;
+        if (--v->c_left <= 0) {
+            v->fwc = 0; v->c_y += v->c_dy; v->c_x = v->c_x0; v->c_left = v->c_nx;
+            if (--v->c_ny <= 0) { cmd_done(v); return; }
+        }
+    }
+}
+static void cmd_lfmc_start(VDP *v, int m, int W)
+{
+    int nx = R16(40) & 0x1FF, ny = R16(42) & 2047, dx = R16(36) & 0x1FF, dy = R16(38) & 0x7FF;
+    int arg = v->reg[45], tx = (arg & 4) ? -1 : 1, ty = (arg & 8) ? -1 : 1;
+    (void)m;
+    v->cmd = 0x20; v->c_x = v->c_x0 = dx; v->c_y = dy; v->c_dx = tx; v->c_dy = ty;
+    v->c_nx = v->c_left = clipn1_px(dx, nx, W, tx);
+    int ny0 = ny ? ny : 2048;
+    v->c_ny = (ty < 0 && ny0 > dy + 1) ? dy + 1 : ny0;
+    v->fcol = v->reg[44]; v->fwc = 0;
+}
+
 static void cmd_start(VDP *v)
 {
     if (v->job_active) { if ((v->reg[46] & 0xF0) == 0) { v->job_active = 0; cmd_done(v); } else vdp_job_run(v, v->job_tny); }
     int cmd = v->reg[46] & 0xF0, op = v->reg[46] & 15;
+    int ecom = v->v9968 && (v->reg[20] & 0x20);       /* 8.0.100: 확장 명령 (R#20 비트 5 = ECOM, 실제 칩 RTL 기준) */
+    v->fg4 = (uint8_t)(ecom && (v->reg[45] & 0x80));
 #ifdef VDP_TRACE
     { static int seen; extern unsigned long long vdp_trace_frame; if (!seen && vdp_trace_frame > 2500 && (v->vram[40 * 128 + 7] == 0xFF || v->vram[32768 + 40 * 128 + 7] == 0xFF)) { seen = 1; fprintf(stderr, "FIRSTFF f%llu p0=%02X p1=%02X\n", vdp_trace_frame, v->vram[40 * 128 + 7], v->vram[32768 + 40 * 128 + 7]); } }
     { extern unsigned long long vdp_trace_frame; fprintf(stderr, "f%llu ", vdp_trace_frame); } fprintf(stderr, "cmd %02X op %X mode %d sx %d sy %d dx %d dy %d nx %d ny %d clr %02X arg %02X\n", cmd, op, mode(v),
             R16(32) & 511, R16(34) & 1023, R16(36) & 511, R16(38) & 1023, R16(40) & 1023, R16(42) & 1023, v->reg[44], v->reg[45]);
 #endif
     int m = cmd_mode(v), W = width_of(m);
-    int sx = R16(32) & 511, sy = R16(34) & 1023, dx = R16(36) & 511, dy = R16(38) & 1023;
-    int nx = R16(40) & 1023, ny = R16(42) & 1023, raw_nx = nx;
+    int ym = vdp_evr(v) ? 2047 : 1023;               /* 8.0.71 EVR: 세로 11비트 */
+    int sx = R16(32) & 511, sy = R16(34) & ym, dx = R16(36) & 511, dy = R16(38) & ym;
+    int nx = R16(40) & (ecom ? 511 : 1023), ny = R16(42) & ym, raw_nx = nx;
     int arg = v->reg[45];
     int dix = (arg & 4) ? -1 : 1, diy = (arg & 8) ? -1 : 1;
     int line_nx = nx, line_ny = ny;                 /* 3.0.10: LINE의 NX=0은 점 하나 (0 → 너비로 바꾸면 한 줄 전체를 그어 Maison Ikkoku 그림이 깨졌음) */
     if (!nx) nx = W;
-    if (!ny) ny = 1024;
+    if (!ny) ny = ym + 1;
     v->stat[2] |= 0x01;                             /* CE */
     /* 명령 시간 (2.8.1, 3.4.2 ACC-03): 결과는 바로 만들지만 실제 VDP처럼 CE를 그 시간 동안 켜 둔다(msx.c).
      * openMSX가 잰 VRAM 접근 간격(VDP 클럭)을 명령마다 더함: 시작 지연 + 점·바이트마다 읽기·쓰기 + 줄 끝.
@@ -920,8 +1256,21 @@ static void cmd_start(VDP *v)
         }
         case 0x60: cc = 88 + (uint32_t)(W - (sx & 511)) * ACC(88) / 2; break;                                 /* SRCH: 평균 반 줄 */
         case 0x50: cc = 88 + ACC(24) + ACC(24); break;                                                         /* PSET */
+        case 0x10: case 0x30: cc = 64 + (uint32_t)dots * 3; break;                                             /* 8.0.72 LFMM·LRMM: 고속 엔진 점당 3클럭 (HS 타이밍은 8.0.73) */
         case 0x40: cc = 63 + ACC(24); break;                                                                   /* POINT */
         default: cc = 0; break;
+        }
+        if (v->v9968 && (v->reg[20] & 1)) {             /* 8.0.102 HS (R#20 비트 0): 호환 모드의 대기(c_wait*4+3 클럭)를 건너뜀 → VRAM 슬롯과 상관없이 고속 엔진, 점·바이트당 3클럭 (LFMM·LRMM 과 같은 기준) */
+            switch (cmd) {
+            case 0xC0: case 0xD0: cc = 64 + (uint32_t)(bpl * ny) * 3; break;                                                  /* HMMV·HMMM */
+            case 0xE0: cc = 64 + (uint32_t)(((W - (dx & 511)) / p + 1) * ny) * 3; break;                                      /* YMMM */
+            case 0x80: case 0x90: cc = 64 + (uint32_t)dots * 3; break;                                                        /* LMMV·LMMM */
+            case 0x70: cc = 64 + (uint32_t)(line_nx + 1) * 3; break;                                                          /* LINE */
+            case 0x60: cc = 64 + (uint32_t)(W - (sx & 511)) * 3 / 2; break;                                                    /* SRCH: 평균 반 줄 */
+            case 0x50: cc = 64 + 6; break;                                                                                     /* PSET */
+            case 0x40: cc = 64 + 3; break;                                                                                     /* POINT */
+            default: break;
+            }
         }
         if (pass) v->cmd_cost_off = cc; else v->cmd_cost = cc;
         }
@@ -929,6 +1278,9 @@ static void cmd_start(VDP *v)
     }
     switch (cmd) {
     case 0x00: cmd_done(v); return;                 /* STOP */
+    case 0x10: if (ecom) { cmd_lfmm(v, m, W, op); cmd_done(v); } else cmd_done(v); return;     /* 8.0.72 LFMM */
+    case 0x20: if (ecom) cmd_lfmc_start(v, m, W); else cmd_done(v); return;                    /* LFMC */
+    case 0x30: if (ecom) { cmd_lrmm(v, m, W, op); cmd_done(v); } else cmd_done(v); return;     /* LRMM */
     case 0x40: v->stat[7] = pget(v, m, sx, sy); cmd_done(v); return;      /* POINT */
     case 0x50: pset(v, m, dx, dy, v->reg[44], op); cmd_done(v); return;   /* PSET */
     case 0x60: {                                    /* SRCH */
@@ -949,7 +1301,7 @@ static void cmd_start(VDP *v)
         uint32_t asx = (uint32_t)((line_nx - 1) >> 1);
         int anx = 0;
         for (;;) {
-            pset(v, m, x & (W - 1), y & 1023, v->reg[44], op);
+            pset(v, m, x & (W - 1), y & ym, v->reg[44], op);
             if (!maj) {
                 x += dix;
                 if (anx++ == line_nx || (x & W)) break;

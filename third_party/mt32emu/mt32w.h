@@ -13,6 +13,8 @@ int  mt32w_ready(int slot);
 const char *mt32w_name(int slot);                           /* 롬 이름 (예: ctrl_mt32_1_07) */
 void mt32w_midi(int slot, uint8_t b);
 void mt32w_reset(int slot);
+void mt32w_real(int on);                                    /* 8.0.68: 1 = 실기 DAC 방식 (롬 종류로 세대 선택), 0 = 깨끗하게 */
+void mt32w_reverb(int rv);                                /* 8.0.68: 0 롬 기본, 1 룸 2 홀 3 플레이트 4 탭딜레이 를 시작·리셋 때 깔기 */
 void mt32w_fx(int rev_pct);                             /* 5.2.159: 리버브 출력 이득 (%, 100 = 그대로) — 모든 슬롯 */
 void mt32w_render(int slot, int32_t *l, int32_t *r, int n); /* 48 kHz 스테레오 n표본 (±32767 안팎) */
 uint32_t mt32w_peak(int slot);

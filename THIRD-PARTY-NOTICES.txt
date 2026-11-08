@@ -19,12 +19,18 @@ user-supplied content.
   * emu2413 (YM2413 / VRC7)        MIT        third_party/emu2413/LICENSE
   * emu8950 (Y8950 / MSX-AUDIO)    MIT        third_party/emu8950/LICENSE
   * tinf (inflate)                 zlib       third_party/tinf/LICENSE
+  * minimp3 (MP3 decoder, X86 Multimedia cartridge, 8.0.55~), lieff
+                                   CC0-1.0    third_party/minimp3/LICENSE
   * lwIP (TCP/IP stack, legacy-BIOS network, 5.0.94~)
                                    BSD-3      third_party/lwip/COPYING
   * Galmuri fonts (Lee Minseo)     OFL 1.1    third_party/galmuri/LICENSE.txt
   * DejaVu Sans                    Bitstream Vera / public domain parts
                                               third_party/dejavu/LICENSE.txt
   * C-BIOS (MSX compatible BIOS)   BSD        Machines/MSX - C-BIOS/LICENSE-C-BIOS.txt
+  * OpenH264 decoder (Main/High H.264 in X86 Multimedia MP4 player, 8.0.96~),
+    Cisco Systems / OpenH264 contributors
+                                   BSD-2      third_party/openh264/LICENSE
+    (decoder only; no encoder, no assembly, single-thread, modified for freestanding use)
   * TimGM6mb SoundFont             GPL-2.0    third_party/timgm6mb/ (data)
   * Munt mt32emu (MT-32 / CM-32L, UEFI build, 5.0.180~)
                                    LGPL-2.1+  third_party/mt32emu/COPYING.LESSER.txt

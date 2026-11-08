@@ -179,24 +179,28 @@ static const char *mdp_fname(const char *n, char *o, int max)
     o[m] = 0;
     return o;
 }
-/* 이름을 폭 max_w 안에 쓰기 — 넘치면 끝을 잘라 ... (UTF-8 글자 단위) */
-static void mdp_label(uint32_t x, uint32_t y, const char *str, uint32_t max_w, uint8_t fg, int center)
-{
-    /* 작은 글씨: 작은 글꼴(높이 16)을 3/4 로 줄여 그림 (원래 획이 끊기지 않게 겹치는 점은 합침) */
-    const UiFont *f = &font_small;
+/* 이름을 폭 max_w 안에 쓰기 — 8.0.188: 먼저 글자를 줄여 맞추고(3/4 → 5/8 → 1/2), 그래도 넘치면 끝을 잘라 ... (UTF-8 글자 단위) */
+enum { MDP_LABEL_SCALE_BIG = 6, MDP_LABEL_SCALE_MIN = 4 };           /* 글자 크기 = 작은 글꼴 × n/8 (6 = 3/4, 4 = 1/2) */
+static void mdp_label(uint32_t x, uint32_t y, const char *str, uint32_t max_w, uint32_t max_h, uint8_t fg, int center)
+{   /* max_h > 0 이면 글자 높이도 그 안에 맞추고(안 가려지게) 세로로 가운데에 씀, 0 이면 맨 위에 (예전 모양) */
+    const UiFont *f = &font_small;      /* 작은 글꼴(높이 16)을 줄여 그림 (원래 획이 끊기지 않게 겹치는 점은 합침) */
     char b[72]; int n = 0;
     while (str[n] && n < 64) { b[n] = str[n]; n++; }
     b[n] = 0;
-    if (text_f(f, 1, 0, 0, b, 0, 0, 0, 0) * 3 / 4 > max_w) {
+    uint32_t fullW = text_f(f, 1, 0, 0, b, 0, 0, 0, 0);
+    uint32_t sc = MDP_LABEL_SCALE_BIG;
+    while (sc > MDP_LABEL_SCALE_MIN && (fullW * sc / 8 > max_w || (max_h && (uint32_t)f->height * sc / 8 > max_h))) sc--;
+    if (fullW * sc / 8 > max_w) {
         for (;;) {
             if (n > 0) { n--; while (n > 0 && ((uint8_t)b[n] & 0xC0) == 0x80) n--; }
             b[n] = '.'; b[n + 1] = '.'; b[n + 2] = '.'; b[n + 3] = 0;
-            if (n == 0 || text_f(f, 1, 0, 0, b, 0, 0, 0, 0) * 3 / 4 <= max_w) break;
+            if (n == 0 || text_f(f, 1, 0, 0, b, 0, 0, 0, 0) * sc / 8 <= max_w) break;
         }
     }
-    uint32_t tw = text_f(f, 1, 0, 0, b, 0, 0, 0, 0) * 3 / 4;
+    uint32_t tw = text_f(f, 1, 0, 0, b, 0, 0, 0, 0) * sc / 8;
     if (center && tw < max_w) x += (max_w - tw) / 2;
-    uint32_t th = (uint32_t)f->height * 3 / 4;
+    uint32_t th = (uint32_t)f->height * sc / 8;
+    if (max_h > th) y += (max_h - th) / 2;
     if (x + tw > D.w || y + th + 1 > D.h) return;
     mark_dirty_rect(x, y, tw + 1, th + 1);
     uint32_t gc = 0;
@@ -207,17 +211,28 @@ static void mdp_label(uint32_t x, uint32_t y, const char *str, uint32_t max_w, u
         if (!g) continue;
         const uint8_t *bits = f->bits + g->off;
         for (int c = 0; c < g->adv; c++, gc++) {
-            uint32_t px = x + gc * 3 / 4;
+            uint32_t px = x + gc * sc / 8;
             for (int r = 0; r < f->height; r++) {
                 int a = glyph_a(f, g, bits, r, c);
                 if (!a) continue;
-                put_aa(D.fb + (uintptr_t)(y + (uint32_t)r * 3 / 4) * D.pitch, px, a, fg, 0xFF);
+                put_aa(D.fb + (uintptr_t)(y + (uint32_t)r * sc / 8) * D.pitch, px, a, fg, 0xFF);
             }
         }
     }
 }
 /* 라벨 글자 줄 높이 (설계 단위) — 화면 글꼴이 들어가도록 */
-static int mdp_tl(uint32_t iw) { int t = (int)((font_small.height * 3 / 4 + 4) * 2800 / (iw ? iw : 1)); return t < 200 ? 200 : t > 280 ? 280 : t; }
+enum { MDP_STICKER_TEXT_H = 280 };                      /* 8.0.188: 카트리지 이름표 글자 칸 높이 (설계 단위). 글자는 이 안에 들어가게 줄임 */
+/* 8.0.171: 카트리지 자리의 실제 슬롯 번호 — 나뉜 슬롯은 "1-2", 안 나뉜 슬롯은 "2" (슬롯 구성 표와 같은 번호) */
+static void mdp_slot_name(int k, char *out, int max)
+{
+    int ps = M->cart_slot[k], ss = M->cart_ss[k];
+    out[0] = 0;
+    if (ps < 0 || ps > 3) { str_append(out, max, "?"); return; }
+    char d[2] = { (char)('0' + ps), 0 };
+    str_append(out, max, d);
+    if (M->prof.subslotted[ps]) { str_append(out, max, "-"); d[0] = (char)('0' + ss); str_append(out, max, d); }
+}
+static uint32_t mdp_num_w(void);
 static void mdp_slot(uint32_t sx, uint32_t sy, int cw, int k, int st)
 {
     mdp_begin(cw, 640);
@@ -234,23 +249,23 @@ static void mdp_slot(uint32_t sx, uint32_t sy, int cw, int k, int st)
         mdp_rr(980, 50, 1480, 30, 0, 0x6B7787, 255);
         static const int gx[6] = { 1040, 1080, 1120, 2320, 2360, 2400 };
         for (int i = 0; i < 6; i++) mdp_line(gx[i], 140, gx[i], 400, 20, 0x2B313A, 0, 0, 255);
-        int tl = mdp_tl((uint32_t)mdp_cw / 2);
-        mdp_rr(1200, 120, 1040, 60 + tl, 0, 0xECE6D3, 255);
+        mdp_rr(1130, 120, 1180, 60 + MDP_STICKER_TEXT_H, 0, 0xECE6D3, 255);
         int m = M->cart[k].mapper;
         uint32_t band = cart_special[k] ? 0x2F7FC2 : (m == MAPPER_KONAMI_SCC || m == MAPPER_SCCPLUS || m == MAPPER_YAMANOOTO || m == MAPPER_MFRSCC || m == MAPPER_MFRSCCP) ? 0x2F7FC2 : 0xC2362F;
-        mdp_rr(1200, 120, 1040, 60, 0, band, 255);
+        mdp_rr(1130, 120, 1180, 60, 0, band, 255);
     }
     mdp_rr(810, 420, 1820, 140, 0, 0x1D2228, 255);
     mdp_line(800, 420, 2640, 420, 10, 0x39414C, 0, 0, 255);
     mdp_flush(sx, sy, st == SS_NONE ? 55 : 0, MDP_BG);
     /* 글자 (화면 글꼴) */
-    char num[2] = { (char)('1' + k), 0 };
-    uint32_t ih = (uint32_t)(mdp_ch / 2);
-    text_f(SF, 1, mdp_sx(sx, 140), sy + (ih > SLH ? (ih - SLH) / 2 : 0), num, st == SS_NONE ? C_FAINT : C_TEXT, 0xFF, 0, 1);
+    char num[16];
+    mdp_slot_name(k, num, sizeof num);
+    uint32_t ih = (uint32_t)(mdp_ch / 2), nx = sx + (uint32_t)cw / 2 + 2 * S;   /* 8.0.181: 번호는 카트리지 그림 오른쪽 끝 (그림은 mdp_num_w 만큼 줄어 있음). 세로는 카트리지 몸통 가운데 (그림 높이의 9/16) */
+    small_ell(nx, sy + (ih * 9 / 16 > SLH / 2 ? ih * 9 / 16 - SLH / 2 : 0), num, st == SS_NONE ? C_FAINT : C_TEXT, 0xFF, mdp_num_w());
     if (on) {
         char lb[64];
         mdp_fname(cart_name[k][0] ? cart_name[k] : cart_mapper_name(M->cart[k].mapper), lb, sizeof lb);
-        mdp_label(mdp_sx(sx, 1200) + 3 * S, mdp_sx(sy, 180) + 4 - 2 * S, lb, (uint32_t)(mdp_p(1040) / 2) - 6 * S, C_BACK, 1);
+        mdp_label(mdp_sx(sx, 1130) + 3 * S, mdp_sx(sy, 180), lb, (uint32_t)(mdp_p(1180) / 2) - 6 * S, (uint32_t)(mdp_p(MDP_STICKER_TEXT_H) / 2), C_BACK, 1);
     }
 }
 
@@ -285,7 +300,7 @@ static void mdp_fdd(uint32_t sx, uint32_t sy, int cw, int d, int st, int lit)
     text_f(SF, 1, mdp_sx(sx, 140), sy + (ih > SLH ? (ih - SLH) / 2 : 0), nm, C_BACK, 0xFF, 0, 1);
     if (in && d < 2 && disk_name[d][0]) {
         char db[64]; mdp_fname(disk_name[d], db, sizeof db);
-        mdp_label(mdp_sx(sx, 780) + 3 * S, mdp_sx(sy, 260) + 5 - 2 * S, db, (uint32_t)(mdp_p(1040) / 2) - 6 * S, C_BACK, 1);
+        mdp_label(mdp_sx(sx, 780) + 3 * S, mdp_sx(sy, 260) + 5 - 2 * S, db, (uint32_t)(mdp_p(1040) / 2) - 6 * S, 0, C_BACK, 1);
     }
 }
 
@@ -334,19 +349,22 @@ static void mdp_hd(uint32_t sx, uint32_t sy, int cw, int st, int phase)
     if (mdp_p(380) / 2 >= (int)SLH * 2) text_f(SF, 1, tx, ty + SLH, "IDE \xC2\xB7 SCSI", C_MUTED, 0xFF, 0, 1);
 }
 
-/* 판에 넣을 항목 (k: 0~4 슬롯, 5·6 디스크, 8 하드) — 상태 아이콘 기준(상태아이콘표 2절)을 그대로 따름:
+/* 판에 넣을 항목 (k: MP_ 번호 — 슬롯 0~7, 디스크 A·B, 하드) — 상태 아이콘 기준(상태아이콘표 2절)을 그대로 따름:
  *   이 기종에 없음(SS_NONE)은 안 보임, 넣은 것만(빈 칸 안 보임), 넣음·읽고 쓰기 뒤 3초(md_vis_now), 메뉴·멈춤·계속 보이기면 넣은 것 모두, F6 숨김 */
 static int mdp_items(int *it)
 {
     int n = 0;
     if (icons_off) return 0;
-    for (int k = 0; k < 5; k++)                         /* 슬롯: 예전처럼 메뉴·멈춤·계속 보이기일 때 꽂힌 것만 */
+    for (int k = 0; k < MSX_CART_SLOTS; k++)            /* 슬롯: 예전처럼 메뉴·멈춤·계속 보이기일 때 꽂힌 것만 */
         if (ms_st[MS_SLOT1 + k] != SS_NONE && M->cart[k].present && status_show_all()) it[n++] = k;
-    for (int k = 5; k <= 6; k++) if (led_now[LED_FDD1 + k - 5] != 4 && (md_vis_now >> k & 1)) it[n++] = k;
-    if (ms_st[MS_HD] != SS_NONE && (md_vis_now >> 8 & 1)) it[n++] = 8;
+    for (int k = MP_DISKA; k <= MP_DISKB; k++) if (led_now[LED_FDD1 + k - MP_DISKA] != 4 && (md_vis_now >> k & 1)) it[n++] = k;
+    if (ms_st[MS_HD] != SS_NONE && (md_vis_now >> MP_HD & 1)) it[n++] = MP_HD;
     return n;
 }
-static uint32_t mdp_item_h(int k, uint32_t iw) { return iw * (uint32_t)(k <= 4 ? 64 : k <= 6 ? 84 : 92) / 280; }
+/* 8.0.171: 슬롯 줄은 판 안쪽 여백(ip)을 반만 남기고 가장자리까지 꽉 채움 (번호는 그림 안쪽 왼쪽 빈 자리에 그림) */
+static uint32_t mdp_num_w(void) { return ui_sw("3-3") + 4 * S; }   /* 8.0.181: 슬롯 번호 ("3-1") 자리 */
+static uint32_t mdp_slot_art_w(uint32_t iw, uint32_t ip) { return iw + ip - mdp_num_w(); }
+static uint32_t mdp_item_h(int k, uint32_t iw, uint32_t ip) { return (k <= MP_CART_LAST ? mdp_slot_art_w(iw, ip) : iw) * (uint32_t)(k <= MP_CART_LAST ? 64 : k <= MP_DISKB ? 84 : 92) / 280; }
 /* 판 높이 (그리지 않음) */
 static uint32_t mdp_height(const int *it, int n, uint32_t iw, uint32_t ip)
 {
@@ -354,10 +372,10 @@ static uint32_t mdp_height(const int *it, int n, uint32_t iw, uint32_t ip)
     uint32_t h = ip + SLH + 8 * S, g5 = 3 * S, g14 = 7 * S;
     int grp = -1;
     for (int i = 0; i < n; i++) {
-        int gk = it[i] <= 4 ? 0 : it[i] <= 6 ? 1 : 2;
-        if (gk != grp) { if (grp >= 0) h += g14; h += SLH + g5; grp = gk; }
+        int gk = it[i] <= MP_CART_LAST ? 0 : it[i] <= MP_DISKB ? 1 : 2;
+        if (gk != grp) { if (grp >= 0) h += g14; h += (gk ? SLH : 0) + g5; grp = gk; }   /* 8.0.181: 카트리지 묶음은 제목 글자 없음 */
         else h += g5;
-        h += mdp_item_h(it[i], iw);
+        h += mdp_item_h(it[i], iw, ip);
     }
     return h + ip;
 }
@@ -374,24 +392,24 @@ static void mdp_draw(uint32_t x, uint32_t y, uint32_t pw, const int *it, int n, 
     static const char *const gname[3] = { "CARTRIDGE", "DISK", "HARD DISK" };
     int grp = -1, blink = (int)((M->frame >> 2) & 1), phase = (int)((M->frame >> 3) & 3);
     for (int i = 0; i < n; i++) {
-        int k = it[i], gk = k <= 4 ? 0 : k <= 6 ? 1 : 2;
-        if (gk != grp) { if (grp >= 0) cy += 7 * S; text_f(SF, 1, x + ip, cy, gname[gk], C_MUTED, 0xFF, 0, 1);
+        int k = it[i], gk = k <= MP_CART_LAST ? 0 : k <= MP_DISKB ? 1 : 2;
+        if (gk != grp) { if (grp >= 0) cy += 7 * S; if (gk) text_f(SF, 1, x + ip, cy, gname[gk], C_MUTED, 0xFF, 0, 1);
             if (gk == 2 && (hd_secs || hd2_secs) && (hd_secs ? hd_name : hd2_name)[0]) {   /* 하드디스크는 제목 줄 오른쪽에 이름 */
                 char hb[64]; (void)0; uint32_t gw = text_f(SF, 1, 0, 0, gname[gk], 0, 0, 0, 0) + 10 * S;
                 mdp_fname(hd_secs ? hd_name : hd2_name, hb, sizeof hb);
-                if (iw > gw + 20 * S) mdp_label(x + ip + gw, cy, hb, iw - gw, C_TEXT, 0);
+                if (iw > gw + 20 * S) mdp_label(x + ip + gw, cy, hb, iw - gw, 0, C_TEXT, 0);
             }
-            cy += SLH + 3 * S; grp = gk; }
+            cy += (gk ? SLH : 0) + 3 * S; grp = gk; }
         else cy += 3 * S;
         int cw = (int)iw * 2;
-        if (k <= 4) mdp_slot(x + ip, cy, cw, k, ms_st[MS_SLOT1 + k] == SS_NONE ? SS_NONE : M->cart[k].present ? SS_ON : SS_OFF);
-        else if (k <= 6) {
-            int d = k - 5, st = d >= disk_drives() ? SS_NONE : !disk_size[d] ? SS_OFF : (ms_st[MS_FDD1 + d] == SS_BUSY && M->fdc.motor) ? SS_BUSY : SS_ON;
+        if (k <= MP_CART_LAST) mdp_slot(x + ip / 2, cy, (int)mdp_slot_art_w(iw, ip) * 2, k, ms_st[MS_SLOT1 + k] == SS_NONE ? SS_NONE : M->cart[k].present ? SS_ON : SS_OFF);
+        else if (k <= MP_DISKB) {
+            int d = k - MP_DISKA, st = d >= disk_drives() ? SS_NONE : !disk_size[d] ? SS_OFF : (ms_st[MS_FDD1 + d] == SS_BUSY && M->fdc.motor) ? SS_BUSY : SS_ON;
             mdp_fdd(x + ip, cy, cw, d, st, blink);
         } else {
             int st = (hd_secs || hd2_secs) ? (P.ms() - hd_last_ms < 200 ? SS_BUSY : SS_ON) : ms_st[MS_HD] == SS_NONE ? SS_NONE : SS_OFF;
             mdp_hd(x + ip, cy, cw, st, phase);
         }
-        cy += mdp_item_h(k, iw);
+        cy += mdp_item_h(k, iw, ip);
     }
 }

@@ -22,7 +22,7 @@ static void sel_set_asp(int v) { aspect_mode = v ? 2 : 0; sel_after_asp(); setti
 static void set_expand(int want);
 static const char *sel_lab_vsync(int i) { return i == 0 ? T(S_VSYNC_AUTO) : i == 1 ? "60 Hz" : "50 Hz"; }
 static const char *sel_lab_vsrc(int i) { return i == 0 ? T(S_VSRC_AUTO) : i <= VSRC_N ? msx_vsrc[i - 1].name : i == VSRC_N + 1 ? T(S_VSRC_BLEND) : T(S_VSRC_SIDE); }   /* 겹치기·나란히 (V9990 이 꽂혀 있을 때) */
-static int sel_n_vsrc(void) { return VSRC_N + 1 + (M && M->v9 ? 2 : 0); }   /* 화면 소스: 자동 + src/vsrc.h 의 소스들 */
+static int sel_n_vsrc(void) { return VSRC_N + 1 + (M && (M->v9 || M->v2) ? 2 : 0); }   /* 화면 소스: 자동 + src/vsrc.h 의 소스들 */
 static int sel_get_vsrc(void) { return vsrc_pref + 1; }
 static void sel_set_vsrc(int v) { vsrc_pref = v - 1; force_redraw = 1; margin_bd = -1; settings_changed(); }
 static int sel_get_vsync(void) { return M->vsync_force % 3; }
@@ -42,7 +42,7 @@ static const FeSel fe_sel[] = {
     FESEL(97,  &mouse_lock,    S_MOUSE_LOCK, 2, 0,             S_MOUSE_LOCK_AUTO, S_MOUSE_LOCK_MANUAL),
     FESEL(20,  &joy_mode[0],   S_PORT1,      4, 0,             S_JOY_NONE, S_JOY_KEYS, S_JOY_PAD1, S_JOY_PAD2),
     FESEL(21,  &joy_mode[1],   S_PORT2,      4, 0,             S_JOY_NONE, S_JOY_KEYS, S_JOY_PAD1, S_JOY_PAD2),
-    { .id = 8,  .var = &slot_expand, .set = set_expand, .name = S_SLOT_EXPANDER, .n = 3, .lab = { S_NONE, S_CART1, S_CART2 } },      /* 카트리지 슬롯 확장 (꽂힌 카트를 빼고 다시 구성) */
+    { .id = 8,  .var = &slot_expand, .set = set_expand, .name = S_SLOT_EXPANDER, .n = 4, .lab = { S_NONE, S_CART1, S_CART2, S_SLOT_BOTH } },      /* 카트리지 슬롯 확장 (꽂힌 카트를 빼고 다시 구성) */
     { .id = 160, .get = sel_get_vsrc, .set = sel_set_vsrc, .name = S_VSRC, .n = VSRC_N + 3, .count = sel_n_vsrc, .label = sel_lab_vsrc },               /* 화면 소스 (vsrc_pref, -1 = 자동). 줄은 V9990 이 꽂혀야 켜짐 */
     { .id = 50, .get = sel_get_vsync, .set = sel_set_vsync, .name = S_VSYNC, .n = 3, .label = sel_lab_vsync },                    /* 주사 주파수 (M->vsync_force) */
 };
@@ -185,7 +185,7 @@ static const FeSlide *slide_find(int id)
     for (unsigned i = 0; i < sizeof fe_slide / sizeof fe_slide[0]; i++) if (fe_slide[i].id == id) return &fe_slide[i];
     return 0;
 }
-static void fx_apply(void) { gm_fx_set(fx_on ? fx_rev : 100, fx_on ? fx_cho : 100, fx_on ? fx_len : 100); }
+static void fx_apply(void) { static int lr = -1, lv = -1; if (lr != mt_real) { lr = mt_real; gm_mt32_real(mt_real); } if (lv != mt_rev) { lv = mt_rev; gm_mt32_reverb(mt_rev); } gm_fx_set(fx_on ? fx_rev : 100, fx_on ? fx_cho : 100, fx_on ? fx_len : 100); }
 static void fx_slide_set(int id, int v) { v = v < 0 ? 0 : v > 200 ? 200 : v; if (id == 161) fx_rev = v; else if (id == 162) fx_cho = v; else fx_len = v; fx_apply(); settings_changed(); }   /* 5.2.159 공간 음향 막대 (161 리버브, 162 코러스) */
 static int slide_change(int id, int dir)
 {

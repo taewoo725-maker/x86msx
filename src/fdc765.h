@@ -23,6 +23,5 @@ void fdc765_reset(FDC765 *c);
 uint8_t fdc765_msr(FDC765 *c);                          /* 주 상태 레지스터 */
 uint8_t fdc765_read_data(FDC765 *c, FDC *f);
 void fdc765_write_data(FDC765 *c, FDC *f, uint8_t v);
-void fdc765_tc(FDC765 *c);
 void fdc765_poll(FDC765 *c, uint64_t now);             /* 3.3.1: 시간 흉내 (now = T-state) */
 #endif

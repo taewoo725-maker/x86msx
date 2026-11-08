@@ -63,6 +63,28 @@ using namespace MT32Emu;
 
 struct Eng { uint8_t *arena; size_t size, used, peak; Synth *syn; DefaultMidiStreamParser *par; ArrayFile *cf, *pf; const ROMImage *ci, *pi; char name[40]; };
 static Eng eng[MT32W_N];
+static int g_real;                                          /* 8.0.68: 1 = 실기의 DAC 입력 방식 (구형 MT-32·BlueRidge = GENERATION1, 신형 MT-32 v2.x·CM-32L = GENERATION2), 0 = 깨끗하게 (NICE, 기본) */
+static int g_rev;                                           /* 8.0.68: 0 = 롬 기본(룸 5/3), 1 룸 2 홀 3 플레이트 4 탭딜레이 를 시작·리셋 때 깔기 (시간 5, 레벨 6) */
+static void rev_apply(Eng *e)
+{
+	if (!e || !e->syn || !e->par) return;
+	if (!g_rev) return;
+	uint8_t m[] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x10, 0x00, 0x01, (uint8_t)(g_rev - 1), 5, 6, 0, 0xF7 };
+	int sum = 0x10 + 0x00 + 0x01 + m[8] + m[9] + m[10]; m[11] = (uint8_t)((128 - (sum % 128)) % 128);
+	e->par->parseStream(m, sizeof m);                         // 시작·리셋 때의 리버브 (곡이 SysEx 로 바꾸면 그대로 따라감 — 실기와 같음)
+}
+static void dac_apply(Eng *e)
+{
+	if (!e || !e->syn) return;
+	DACInputMode m = DACInputMode_NICE;
+	if (g_real) {
+		const char *n = e->name;      /* 롬 짧은 이름: ctrl_mt32_1_07, ctrl_mt32_bluer, ctrl_mt32_2_04, ctrl_cm32l_1_02 ... */
+		int gen1 = 0;
+		for (const char *q = n; *q; q++) if ((q[0] == 'm' && q[1] == 't' && q[2] == '3' && q[3] == '2' && q[4] == '_' && ((q[5] == '1' && q[6] == '_') || (q[5] == 'b' && q[6] == 'l')))) gen1 = 1;
+		m = gen1 ? DACInputMode_GENERATION1 : DACInputMode_GENERATION2;
+	}
+	e->syn->setDACInputMode(m);
+}
 static void sel(int slot) { if (E) { E->used = g_used; E->peak = g_peak; } E = &eng[slot < 0 || slot >= MT32W_N ? 0 : slot]; g_arena = E->arena; g_size = E->size; g_used = E->used; g_peak = E->peak; }
 static void sync(void) { E->used = g_used; E->peak = g_peak; }
 #define g_syn (E->syn)
@@ -97,6 +119,7 @@ int mt32w_open(int slot, const uint8_t *ctl, uint32_t ctl_n, const uint8_t *pcm,
 	const char *d = ci->shortName; int k = 0;
 	while (*d && k < 38) g_name[k++] = *d++;
 	g_name[k] = 0;
+	dac_apply(E); rev_apply(E);
 	} while (0);
 	sync();
 	return rc;
@@ -107,8 +130,10 @@ const char *mt32w_name(int slot) { sel(slot); return g_name; }
 void mt32w_midi(int slot, uint8_t b) { sel(slot); if (g_par) g_par->parseStream(&b, 1); sync(); }
 void mt32w_reset(int slot) {
 	static const uint8_t rst[] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x7F, 0x00, 0x00, 0x00, 0x01, 0xF7 };   /* 모든 값 초기화 (모든 음 끔) */
-	sel(slot); if (g_par) g_par->parseStream(rst, sizeof rst); sync();
+	sel(slot); if (g_par) { g_par->parseStream(rst, sizeof rst); rev_apply(E); } sync();
 }
+void mt32w_reverb(int rv) { g_rev = rv < 0 || rv > 4 ? 0 : rv; for (int q = 0; q < MT32W_N; q++) { sel(q); rev_apply(E); sync(); } }
+void mt32w_real(int on) { g_real = on != 0; for (int q = 0; q < MT32W_N; q++) { sel(q); dac_apply(E); sync(); } }
 void mt32w_fx(int pct) { for (int q = 0; q < MT32W_N; q++) { sel(q); if (g_syn) g_syn->setReverbOutputGain((float)pct / 100.0f); sync(); } }
 void mt32w_render(int slot, int32_t *l, int32_t *r, int n) {
 	int16_t buf[2 * 256];

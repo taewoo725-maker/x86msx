@@ -48,6 +48,7 @@ const char *cart_mapper_name(MapperType m)
     case MAPPER_NET: return "Network";
     case MAPPER_HBI55: return "HBI-55";
     case MAPPER_RS232: return "RS-232C";
+    case MAPPER_MMEDIA: return "X86 Multimedia";
     case MAPPER_FRSCC: return "Flash-ROM SCC";
     case MAPPER_MFRSCCP: return "MegaFlashROM SCC+";
     case MAPPER_GIDE: return "GIDE";
@@ -76,6 +77,7 @@ int cart_plain_base(const uint8_t *d, uint32_t size)
     if (pages > 4) pages = 4;
     /* 3.0.9: 예약 칸(10~15)이 0인 깨끗한 머리를 먼저, 없으면 아무 머리나 (Leonard: 0쪽 "AB"는 데이터) */
     for (int pass = 0; pass < 2; pass++)
+    for (int fitsBetween4000AndBFFF = 1; fitsBetween4000AndBFFF >= 0; fitsBetween4000AndBFFF--)   /* 8.0.233: 같은 조건이면 롬 전체가 0x4000~0xBFFF 안에 들어가는 배치를 먼저 (머리가 둘인 Courageous Perseus) */
     for (uint32_t p = 0; p < pages; p++) {
         if (!has_ab(d, size, p * 0x4000) || p * 0x4000 + 16 > size) continue;
         if (!pass) { const uint8_t *r = d + p * 0x4000 + 10; if (r[0] | r[1] | r[2] | r[3] | r[4] | r[5]) continue; }
@@ -89,6 +91,7 @@ int cart_plain_base(const uint8_t *d, uint32_t size)
         if (t < 0) t = 1;
         int base = t - (int)p;
         if (base < 0 || base + (int)pages > 4) continue;        /* 맞지 않으면 다음 머리 */
+        if (fitsBetween4000AndBFFF && !(base >= 1 && base + (int)pages <= 3)) continue;   /* 이번 차례는 0x4000~0xBFFF 에 들어가는 것만 */
         if (size <= 0x2000) return base * 2 == 0 ? 2 : base * 2;   /* 8 KiB: 0x4000(반복) 또는 0x8000 */
         return base * 2;
     }
@@ -98,6 +101,17 @@ int cart_plain_base(const uint8_t *d, uint32_t size)
 }
 
 int cart_flash_auto = 3;   /* 자동 인식 사용 스위치 — 1 = Yamanooto, 2 = ASCII16-X (기본 둘 다 켜짐) */
+
+/* 8.0.231: Al Alamiah 30-in-1 합본(Group A/B/C, 1 MiB). 세 롬은 첫 16 KiB 메뉴 코드가 똑같고 6개 기종 모두 코나미 SCC 로 메뉴가 뜬다.
+ * 메뉴가 뱅크를 'LD (nn),A' 로 쓰지 않아 아래의 쓰기 주소 세기가 못 가려서(A=SCC 로 맞고 B=ASCII16·C=Konami 로 틀림) 메뉴 머리 글자로 직접 가린다.
+ * 머리: 파일 0 = B0 90 70 50 14 80 44 80 76 80 94 80 74 7C 8A 7C, 파일 0x4000 = "AB" + INIT 0x407E */
+static int is_alamiah_30in1_menu(const uint8_t *d, uint32_t len, uint32_t size)
+{
+    static const uint8_t k_menuHead[16] = { 0xB0, 0x90, 0x70, 0x50, 0x14, 0x80, 0x44, 0x80, 0x76, 0x80, 0x94, 0x80, 0x74, 0x7C, 0x8A, 0x7C };
+    if (size != (1u << 20) || len < 0x4004) return 0;
+    if (memcmp(d, k_menuHead, sizeof k_menuHead)) return 0;
+    return d[0x4000] == 'A' && d[0x4001] == 'B' && d[0x4002] == 0x7E && d[0x4003] == 0x40;
+}
 
 MapperType cart_guess_mapper(const uint8_t *d, uint32_t size)
 {
@@ -127,6 +141,8 @@ MapperType cart_guess_mapper_partial(const uint8_t *d, uint32_t len, uint32_t si
     if (size <= 0x8000) return MAPPER_PLAIN;
     if (size <= 0xC000 && (has_ab(d, len, 0x4000) || !has_ab(d, len, 0))) return MAPPER_PLAIN;
     if (size == 0x10000 && has_ab(d, len, 0x4000) && !has_ab(d, len, 0)) return MAPPER_PLAIN;
+
+    if (is_alamiah_30in1_menu(d, len, size)) return MAPPER_KONAMI_SCC;   /* 8.0.231: 쓰기 주소 세기로는 못 가리는 메뉴식 합본 */
 
     int k = 0, ks = 0, a8 = 0, a16 = 0, k8 = 0, kA = 0, s9 = 0, sB = 0, s5 = 0, s7 = 0;
     for (uint32_t i = 0; i + 2 < len; i++) {

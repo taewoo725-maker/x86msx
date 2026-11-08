@@ -3,6 +3,7 @@
 /* X86MSX - Copyright (C) 2026 Kim Taewoo. SPDX-License-Identifier: GPL-3.0-or-later (see LICENSE) */
 /* zipx.c - 3.2.0 zip 안의 파일 꺼내기 (요구사항 MED-05). 설명은 zipx.h */
 #include "zipx.h"
+#include "arcx.h"
 #include "../third_party/tinf/tinf.h"
 #include <string.h>
 
@@ -33,6 +34,7 @@ static int ext_match(const uint8_t *name, uint32_t nl, const char *exts)
 
 int zip_extract(const uint8_t *zip, uint32_t zlen, const char *exts, uint8_t *out, uint32_t max, uint32_t *size, char *name, int namemax)
 {
+    if (arc_kind(zip, zlen)) return arc_extract(zip, zlen, exts, out, max, size, name, namemax);      /* 8.0.44: .ARJ·.PMA 는 arcx.c 로 */
     if (zlen < 22) return ZIPX_BAD;
     /* 끝 쪽 중앙 디렉터리 끝 기록 (PK 5 6) */
     int64_t e = (int64_t)zlen - 22, stop = e - 65536;
@@ -89,6 +91,7 @@ static int slash(int c) { return c == '/' || c == '\\'; }
 
 int zip_list(const uint8_t *zip, uint32_t zlen, const char *dir, ZipListCb cb, void *ctx)
 {
+    if (arc_kind(zip, zlen)) return arc_list(zip, zlen, dir, cb, ctx);      /* 8.0.44: .ARJ·.PMA 는 arcx.c 로 */
     uint32_t count, cd;
     if (cd_find(zip, zlen, &count, &cd)) return ZIPX_BAD;
     uint32_t pl = 0;
@@ -127,6 +130,7 @@ int zip_list(const uint8_t *zip, uint32_t zlen, const char *dir, ZipListCb cb, v
 
 int zip_read(const uint8_t *zip, uint32_t zlen, const char *path, uint8_t *out, uint32_t max, uint32_t *size)
 {
+    if (arc_kind(zip, zlen)) return arc_read(zip, zlen, path, out, max, size);      /* 8.0.44: .ARJ·.PMA 는 arcx.c 로 */
     uint32_t count, cd;
     if (cd_find(zip, zlen, &count, &cd)) return ZIPX_BAD;
     uint32_t pl = 0;
@@ -158,33 +162,6 @@ int zip_read(const uint8_t *zip, uint32_t zlen, const char *path, uint8_t *out, 
     return ZIPX_NONE;
 }
 
-/* 4.0.34: 꺼내지 않고 첫 맞는 파일의 이름·풀린 크기만 (목록 표시용). 0 = 있음 */
-int zip_peek(const uint8_t *zip, uint32_t zlen, const char *exts, char *name, int namemax, uint32_t *usize_out)
-{
-    if (zlen < 22) return ZIPX_BAD;
-    int64_t e = (int64_t)zlen - 22, stop = e - 65536;
-    if (stop < 0) stop = 0;
-    while (e >= stop && !(zip[e] == 'P' && zip[e + 1] == 'K' && zip[e + 2] == 5 && zip[e + 3] == 6)) e--;
-    if (e < stop) return ZIPX_BAD;
-    uint32_t count = rd16(zip + e + 10), cd = rd32(zip + e + 16);
-    for (uint32_t i = 0; i < count; i++) {
-        if (cd + 46 > zlen || rd32(zip + cd) != 0x02014B50u) return ZIPX_BAD;
-        uint32_t usize = rd32(zip + cd + 24);
-        uint32_t nl = rd16(zip + cd + 28), xl = rd16(zip + cd + 30), cl = rd16(zip + cd + 32);
-        const uint8_t *nm = zip + cd + 46;
-        cd += 46 + nl + xl + cl;
-        if (nl && nm[nl - 1] == '/') continue;
-        if (!ext_match(nm, nl, exts)) continue;
-        uint32_t b = nl;
-        while (b > 0 && nm[b - 1] != '/') b--;
-        int k = 0;
-        for (uint32_t j = b; j < nl && k < namemax - 1; j++) name[k++] = (char)nm[j];
-        name[k] = 0;
-        *usize_out = usize;
-        return 0;
-    }
-    return ZIPX_NONE;
-}
 
 /* 4.0.34: 맞는 파일이 여러 개면 이름순(대소문자 무시)으로 정렬해 nth번째(총 개수로 나눈 나머지)를 꺼냄. total = 맞는 파일 개수 */
 static int ci_cmp(const uint8_t *a, uint32_t al, const uint8_t *b, uint32_t bl)
@@ -195,6 +172,7 @@ static int ci_cmp(const uint8_t *a, uint32_t al, const uint8_t *b, uint32_t bl)
 }
 int zip_extract_nth(const uint8_t *zip, uint32_t zlen, const char *exts, int nth, uint8_t *out, uint32_t max, uint32_t *size, char *name, int namemax, int *total)
 {
+    if (arc_kind(zip, zlen)) return arc_extract_nth(zip, zlen, exts, nth, out, max, size, name, namemax, total);      /* 8.0.44: .ARJ·.PMA 는 arcx.c 로 */
     uint32_t count, cd;
     if (cd_find(zip, zlen, &count, &cd)) return ZIPX_BAD;
     uint32_t pos[64]; int n = 0;
@@ -246,6 +224,7 @@ int zip_extract_nth(const uint8_t *zip, uint32_t zlen, const char *exts, int nth
  * 4.0.136: usize/dos(날짜 16비트 << 16 | 시간 16비트)가 있으면 풀었을 때 크기와 수정 시각도 돌려줌 */
 int zip_names_ex(const uint8_t *zip, uint32_t zlen, const char *exts, char (*names)[48], uint32_t *usize, uint32_t *dos, int max)
 {
+    if (arc_kind(zip, zlen)) return arc_names_ex(zip, zlen, exts, names, usize, dos, max);      /* 8.0.44: .ARJ·.PMA 는 arcx.c 로 */
     uint32_t count, cd;
     if (cd_find(zip, zlen, &count, &cd)) return ZIPX_BAD;
     uint32_t pos[64]; int n = 0;
@@ -281,8 +260,4 @@ int zip_names_ex(const uint8_t *zip, uint32_t zlen, const char *exts, char (*nam
         if (dos) dos[i] = ((uint32_t)rd16(zip + pos[i] + 14) << 16) | rd16(zip + pos[i] + 12);
     }
     return n < max ? n : max;
-}
-int zip_names(const uint8_t *zip, uint32_t zlen, const char *exts, char (*names)[48], int max)
-{
-    return zip_names_ex(zip, zlen, exts, names, 0, 0, max);
 }

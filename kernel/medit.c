@@ -328,7 +328,7 @@ int me_check(const MeMachine *m, int (*exists)(const char *path), char (*msgs)[M
         }
     }
     if (!ram) msg(msgs, max, &n, "NORAM", -1, 0);
-    if (strcmp(m->vdp, "TMS99x8A") && strcmp(m->vdp, "TMS9929A") && strcmp(m->vdp, "TMS9918A") && strcmp(m->vdp, "V9938") && strcmp(m->vdp, "V9958"))
+    if (strcmp(m->vdp, "TMS99x8A") && strcmp(m->vdp, "TMS9929A") && strcmp(m->vdp, "TMS9918A") && strcmp(m->vdp, "V9938") && strcmp(m->vdp, "V9958") && strcmp(m->vdp, "V9968"))
         msg(msgs, max, &n, "VDP", -1, 0);
     for (int x = 0; x < 5; x++) if ((x < 2 || m->ext_ps[x] != -1) && (m->ext_ps[x] < 0 || m->ext_ps[x] > 3)) msg(msgs, max, &n, "EXTSLOT", -1, 0);
     return n;

@@ -22,6 +22,7 @@ static const CartMapFn cart_map_fn[MAPPER_COUNT] = {
     [MAPPER_MEGARAM] = cm_megaram,
     [MAPPER_PLAIN] = cm_plain,
     [MAPPER_HBI55] = cm_plain,
+    [MAPPER_MMEDIA] = cm_plain,      /* 8.0.75 X86 Multimedia — 메모리 창 없음, I/O 2Ch~2Fh 소리 + 24h~27h 영상 (msx.c) */
     [MAPPER_RS232] = cm_plain,       /* 메모리 창 없음 — I/O 만 (msx.c ior_rs232/iow_rs232) */       /* 메모리 창 없음 (0xFF 자리) — I/O 만 (msx.c ior_hbi55/iow_hbi55) */
     [MAPPER_ASCII8_SRAM] = cm_ascii8_sram,
     [MAPPER_ASCII16_SRAM] = cm_ascii8_sram,

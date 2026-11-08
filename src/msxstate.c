@@ -11,9 +11,9 @@
 
 #define DEV(t, f, v) { t, (uint32_t)offsetof(MSX, f), (uint32_t)sizeof(((MSX *)0)->f), v }
 const MsxStDev msx_st_devs[] = {
-    DEV("CPU ", cpu, 1),        DEV("VDP ", vdp, 2),       DEV("PROF", prof, 1),     DEV("FW  ", fw, 1),
+    DEV("CPU ", cpu, 1),        DEV("VDP ", vdp, 6),       DEV("PROF", prof, 1),     DEV("FW  ", fw, 1),
     DEV("FDC ", fdc, 1),        DEV("IDE0", ide, 1),       DEV("IDE1", ide_slave, 1), DEV("SPC ", spc, 1),
-    DEV("SCSI", scsi, 1),       DEV("F765", fdc765, 1),    DEV("OPM ", opm, 1),      DEV("OPL4", opl4, 1),
+    DEV("SCSI", scsi, 1),       DEV("F765", fdc765, 1),    DEV("OPM ", opm, 1),      DEV("OPL4", opl4, 2),
     DEV("CART", cart, 3),       DEV("PSG0", psg, 1),       DEV("PSG1", psg2, 1),     DEV("NET ", net, 1),
     DEV("SCHD", sched, 1),
 };
@@ -38,7 +38,7 @@ const MsxStField msx_st_core[] = {
     CF(pcm_n), CF(pcm_t), CF(pcm_v), CF(frame_start), CF(ms_on), CF(ds_head),
     CF(ds_pending), CF(ds_click), CF(ds_motor), CF(ds_rng), CF(ds_phase), CF(sfg_on),
     CF(opm_t), CF(opm_acc), CF(opm_l), CF(opm_r), CF(opm_pl), CF(opm_pr), CF(sfg_kbd), CF(sfg_vec),
-    CF(ms_pos), CF(ms_buf), CF(pcm_last), CF(tape), CF(tape_size), CF(tape_cap),
+    CF(ms_pos), CF(ms_buf), CF(ms_buf_l), CF(ms_buf_r), CF(pcm_last), CF(tape), CF(tape_size), CF(tape_cap),
     CF(tape_pos), CF(tape_dirty), CF(tape_motor), CF(joy), CF(mouse_port), CF(mouse_btn),
     CF(mouse_phase), CF(mouse_pin), CF(mouse_cx), CF(mouse_cy), CF(mouse_lx), CF(mouse_ly),
     CF(mouse_t), CF(cur_line), CF(line_start), CF(rom), CF(slot_rd), CF(slot_wr),
@@ -48,7 +48,7 @@ const MsxStField msx_st_core[] = {
     CF(prn_n), CF(prn_q), CF(stereo), CF(pan), CF(out_l), CF(out_r),
     CF(lvl), CF(midi_cmd), CF(midi_mode_next), CF(midi_n), CF(midi_q), CF(midi_t),
     CF(midi_rx_q), CF(midi_rx_r), CF(midi_rx_w), CF(midi_rx_data), CF(midi_rxrdy), CF(midi_tflag),
-    CF(midi_rx_next), CF(pit), CF(joyrex), CF(v9), CF(chip_act), CF(vdp_busy_until),
+    CF(midi_rx_next), CF(midi_tx_done), CF(midi_tx_rdy), CF(pit), CF(joyrex), CF(v9), CF(v2), CF(chip_act), CF(vdp_busy_until),
     CF(r800_acc), CF(r800_ref), CF(vdp_io_last), CF(io_stall), CF(vhd_hide_fdc), CF(vhd_on),
     CF(vhd_io), CF(vhd_ctx), CF(ide_cart_io), CF(ide_compat), CF(chput_n), CF(chput_ret),
     CF(chput_sp), CF(chput_ix), CF(chput_iy), CF(frame), CF(line_budget), CF(irq_lines),
@@ -206,6 +206,7 @@ uint32_t msx_st_save(MSX *m, uint8_t *out, uint32_t max)
         len += k;
     }
     if (m->v9) { if (!(k = st_put(out + len, max - len, "V9K ", 1, m->v9, (uint32_t)offsetof(V9990, fb)))) return 0; len += k; }   /* 화면 버퍼 fb 앞까지 */
+    if (m->v2) { if (!(k = st_put(out + len, max - len, "V2D ", 1, m->v2, (uint32_t)sizeof(VDP)))) return 0; len += k; }   /* 8.0.94 V9968 카트리지 (두 번째 VDP) 통째 */
     return len;
 }
 
@@ -270,10 +271,11 @@ int msx_st_load(MSX *m, const uint8_t *buf, uint32_t len, char *skipped, int ski
         int r800_pct, vsync_force;
         int ch_vol[MSX_CH_N];
         V9990 *v9;
+        VDP *v2;
         uint8_t *xram;
         struct __OPLL *opll; struct __OPL *y8950;   /* 5.2.40 */
     } L;
-    L.cpu = m->cpu; L.v9 = m->v9; L.xram = m->xram; L.opll = m->opll; L.y8950 = m->y8950;
+    L.cpu = m->cpu; L.v9 = m->v9; L.v2 = m->v2; L.xram = m->xram; L.opll = m->opll; L.y8950 = m->y8950;
     L.kanji = m->kanji; L.dos2 = m->dos2;
     memcpy(L.rom, m->rom, sizeof m->rom);
     memcpy(L.slot_rd, m->slot_rd, sizeof m->slot_rd);
@@ -291,6 +293,20 @@ int msx_st_load(MSX *m, const uint8_t *buf, uint32_t len, char *skipped, int ski
         const MsxStDev *d = &msx_st_devs[i];
         const uint8_t *p = st_find(buf, len, d->tag, &v, &s);
         if (p && v == d->ver && s == d->size) memcpy((uint8_t *)m + d->off, p, d->size);
+        else if (p && !memcmp(d->tag, "VDP ", 4) && v == 5 && s == VDP_ST_V5_SIZE) {   /* 8.0.73: 판 5 = 스프라이트 모드 3 필드가 없던 VDP */
+            memcpy((uint8_t *)m + d->off, p, s); memset((uint8_t *)m + d->off + s, 0, d->size - s);
+        }
+        else if (p && !memcmp(d->tag, "VDP ", 4) && v == 4 && s == VDP_ST_V4_SIZE) {   /* 8.0.72: 판 4 = 명령 엔진 확장 필드가 없던 VDP (앞부분만 같음) */
+            memcpy((uint8_t *)m + d->off, p, s); memset((uint8_t *)m + d->off + s, 0, d->size - s);
+            if (m->vdp.v9968) { m->vdp.reg[55] = 0xFF; m->vdp.reg[56] = 1; m->vdp.reg[57] = 0xFF; m->vdp.reg[58] = 7; }   /* 창 기본값 */
+        }
+        else if (p && !memcmp(d->tag, "VDP ", 4) && v == 3 && s == VDP_ST_V3_SIZE) {   /* 8.0.71: 판 3 = 256 KB VRAM 이 없던 VDP (위쪽 128 KB 는 비움) */
+            memcpy((uint8_t *)m + d->off, p, s); memset(m->vdp.vram_x, 0, sizeof m->vdp.vram_x);
+            if (m->vdp.v9968 && !m->vdp.il) m->vdp.vram_mask = vdp_evr(&m->vdp) ? 0x3FFFF : 0x1FFFF;
+        }
+        else if (p && !memcmp(d->tag, "VDP ", 4) && v == 2 && s == VDP_ST_V2_SIZE) {   /* 8.0.69: 판 2 = V9968 필드가 없던 VDP (앞부분만 같음, 뒤는 비움) */
+            memcpy((uint8_t *)m + d->off, p, s); memset((uint8_t *)m + d->off + s, 0, d->size - s); m->vdp.v9968 = 0; m->vdp.lock_ext = 0; m->vdp.pal_ptr = 0;
+        }
         else if (p && !memcmp(d->tag, "VDP ", 4) && v == 1 && s == VDP_ST_V1_SIZE) {   /* 판 1 = 팔레트가 밖에 있던 VDP (앞부분만 같음) */
             memcpy((uint8_t *)m + d->off, p, s); m->vdp.pal_58 = m->vdp.v9958; m->vdp.pal_nsnap = 1; vdp_default_palette(&m->vdp);
         }
@@ -300,12 +316,13 @@ int msx_st_load(MSX *m, const uint8_t *buf, uint32_t len, char *skipped, int ski
         }
         else skip_add(skipped, skiplen, d->tag);
     }
+    if (m->vdp.v9968 && !m->vdp.reg[55] && !m->vdp.reg[56] && !m->vdp.reg[57] && !m->vdp.reg[58]) { m->vdp.reg[55] = 0xFF; m->vdp.reg[56] = 1; m->vdp.reg[57] = 0xFF; m->vdp.reg[58] = 7; }   /* 8.0.72: 옛 판에는 창 레지스터가 없었음 */
     memcpy(m->mram, mr, mram_len);
     m->xram = L.xram; m->opll = L.opll; m->y8950 = L.y8950;   /* 칩은 이 기계 것 그대로 (레지스터는 OPLL·Y895 덩이로 되살림) */
     { const uint8_t *x = st_find(buf, len, "XRAM", &v, &s);
       if (x && m->xram && v == 1 && s <= MSX_MRAM_MAX) memcpy(m->xram, x, s); else m->xram_size = 0; }
     /* 포인터·설정 되살리기 */
-    m->v9 = L.v9;
+    m->v9 = L.v9; m->v2 = L.v2;
     msx_io_rebuild(m);
     m->cpu.ctx = L.cpu.ctx;
     m->cpu.mem_read = L.cpu.mem_read; m->cpu.mem_write = L.cpu.mem_write;
@@ -339,6 +356,7 @@ int msx_st_load(MSX *m, const uint8_t *buf, uint32_t len, char *skipped, int ski
     { uint8_t r[64]; const uint8_t *p = st_find(buf, len, "OPLL", &v, &s); if (p && v == 1 && s == 64) memcpy(r, p, 64); else memset(r, 0, 64); msx_state_fixup(m, r); }
     m->vsync_force = L.vsync_force;                         /* 주사 주파수는 설정값 그대로 */
     { uint8_t r[256]; const uint8_t *p = st_find(buf, len, "Y895", &v, &s); if (p && v == 1 && s == 256) memcpy(r, p, 256); else memset(r, 0, 256); msx_state_fixup_audio(m, r); }
+    msx_mvsnd_after_load(m);                                /* 8.0.55 */
     /* 따로 둔 메모리 (장치가 켜져 있을 때만) */
     { uint32_t ys = 0; uint8_t *yr = msx_y8950_ram(m, &ys); const uint8_t *p = st_find(buf, len, "YRAM", &v, &s);
       if (yr && p && v == 1 && s <= ys) memcpy(yr, p, s); }
@@ -347,6 +365,11 @@ int msx_st_load(MSX *m, const uint8_t *buf, uint32_t len, char *skipped, int ski
         if (!p || v != 1 || s > OPL4_RAM_SIZE) s = 0;
         if (s) memcpy(w, p, s);
         memset(w + s, 0, OPL4_RAM_SIZE - s);
+    }
+    if (m->v2) {                                            /* 8.0.94 두 번째 VDP: 상태에 없으면(카트리지 없이 저장) 그대로 둠 */
+        const uint8_t *p = st_find(buf, len, "V2D ", &v, &s);
+        if (p && v == 1 && s == (uint32_t)sizeof(VDP)) memcpy(m->v2, p, s);
+        else if (p) skip_add(skipped, skiplen, "V2D ");
     }
     if (m->v9) {
         const uint8_t *p = st_find(buf, len, "V9K ", &v, &s);

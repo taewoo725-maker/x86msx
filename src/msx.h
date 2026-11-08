@@ -31,8 +31,9 @@
 #define MSX_ROM_BIG      (16u << 20)  /* 4.0.129: ASCII16-X·Yamanooto 롬 상한 */
 #define MSX_IO_CHAIN     6            /* 포트 하나에 걸 수 있는 장치 수 */
 #define MSX_ROM_MAX      (2u << 20)   /* 3.4.4: 2 MiB (Game World 126 Games) */
-enum { MSX_CH_PSG, MSX_CH_PSG2, MSX_CH_SCC, MSX_CH_MM, MSX_CH_MA, MSX_CH_PCM, MSX_CH_MS, MSX_CH_SFG, MSX_CH_MIDI, MSX_CH_KEY, MSX_CH_IO, MSX_CH_N };   /* 차례 = 믹서 띠 차례 (칩 → 고정 KBD·I-O). 새 칩은 MSX_CH_MIDI 앞에 */   /* KEY = 키 클릭 (PSG 와 같은 소리줄, 음량만 따로) */   /* 3.6.7: PSG2 = Joyrex */   /* 3.4.5: MIDI = 소프트웨어 음원 */   /* 3.3.3 pan·lvl 번호 */
-#define MSX_CART_SLOTS   5          /* 3.6.7: 5칸 (슬롯 하나를 넷으로 나누면 1-0~1-3 + 다른 슬롯) */
+enum { MSX_CH_PSG, MSX_CH_PSG2, MSX_CH_SCC, MSX_CH_MM, MSX_CH_MA, MSX_CH_PCM, MSX_CH_MS, MSX_CH_SFG, MSX_CH_MMX, MSX_CH_MIDI, MSX_CH_KEY, MSX_CH_IO, MSX_CH_N };   /* 차례 = 믹서 띠 차례 (칩 → 고정 KBD·I-O). 새 칩은 MSX_CH_MIDI 앞에 */   /* KEY = 키 클릭 (PSG 와 같은 소리줄, 음량만 따로) */   /* 3.6.7: PSG2 = Joyrex */   /* 3.4.5: MIDI = 소프트웨어 음원 */   /* 3.3.3 pan·lvl 번호 */
+#define MSX_CART_SLOTS   8          /* 8.0.179: 8칸 (슬롯 1·2 를 둘 다 넷으로 나누면 1-0~1-3 + 2-0~2-3) — 3.6.7: 5칸 */
+#define MSX_PROF_EXT     5          /* 기종 데이터(prof.ext_slot)의 칸 수 = 확장하지 않을 때 쓰는 카트 자리 A~E */
 #define MSX_INT_CART     MSX_CART_SLOTS      /* 3.1.0: 기종 내장 장치를 카트리지처럼 (내장 PAC) */
 #define MSX_INT_N        3                   /* 3.6.8: 기종 내장 카트리지 자리 수 (PAC·SFG·IDE·SCC·FM-PAC …) */
 #define MSX_CART_ALL     (MSX_CART_SLOTS + MSX_INT_N)
@@ -140,6 +141,7 @@ typedef struct MSX {
     uint8_t sfg_kbd, sfg_vec;
     uint16_t ms_pos;
     int16_t ms_buf[1200];
+    int16_t ms_buf_l[1200], ms_buf_r[1200];   /* 8.0.232 MoonSound 좌우 (ms_buf 는 모노 합, 상태 저장 대상 아님) */
     Opl4 opl4;
     uint8_t pcm_last;                   /* 앞 프레임 끝의 DA 값 */
     /* 카세트 테이프 (.cas, BIOS 테이프 루틴 가로채기) */
@@ -171,7 +173,7 @@ typedef struct MSX {
     Cartridge cart[MSX_CART_ALL];     /* 카트리지 슬롯 1·2 (2.4에서 4개로) */
     int cart_slot[MSX_CART_ALL];      /* 연결된 기본 슬롯 (-1 = 없는 슬롯) */
     int cart_ss[MSX_CART_ALL];        /* 서브슬롯 (슬롯 확장기를 켰을 때) */
-    int expand;                         /* 카트리지 슬롯 확장: 0 없음, 1 슬롯 1, 2 슬롯 2 */
+    int expand;                         /* 카트리지 슬롯 확장: 0 없음, 1 슬롯 1, 2 슬롯 2, 3 둘 다 (8.0.179) */
 
     uint8_t primary;                    /* 포트 0xA8 */
     uint8_t subslot[4];                 /* 확장 슬롯의 0xFFFF 레지스터 */
@@ -203,6 +205,7 @@ typedef struct MSX {
     PSG psg;                            /* 이번 프레임 소리: psg.buf[0..psg.buf_n) */
     PSG psg2;                           /* 2.16: Joyrex PSG 카트리지 (포트 10h·11h 쓰기, 12h 읽기) */
     uint8_t joyrex;
+    VDP *v2;                                /* 8.0.94: V9968 카트리지 = 두 번째 VDP. 메모리는 프런트엔드가 줌, 0이면 없음 */
     V9990 *v9;                              /* 4.0.29: Gfx9000 (V9990). 메모리는 프런트엔드가 줌, 0이면 없음 */
 
     uint8_t chip_act;
@@ -228,6 +231,13 @@ typedef struct MSX {
     uint32_t irq_lines;                 /* 인터럽트선 (irqline.h, 비트 = IrqLine) */
     uint32_t sched_test_hits;           /* EV_TEST 처리 횟수 (tests/schedtest.c) */
 } MSX;
+/* 8.0.189: 조이스틱 포트를 읽는 순간 호출 (호스트가 패드 최신값을 m->joy[port]에 넣음). 없으면 프레임마다 넣은 값 */
+typedef void (*MsxJoyLiveFn)(MSX *m, int port);
+void msx_set_joy_live(MsxJoyLiveFn fn);
+/* 8.0.226: X86 Multimedia 카트리지가 없는데 프로그램(X86MV·X86MP3)이 소리 포트 2Ch~2Fh 를 건드림 → 호스트가 카트리지를 꽂을 기회.
+ * 호스트는 꽂았으면 1, 못 꽂았으면 0 을 돌려준다 (1 이면 이번 접근부터 카트리지가 받음). 호스트가 안 정했으면(0) 아무 일도 없음 */
+typedef int (*MsxMmProbeFn)(MSX *m);
+void msx_set_mm_probe(MsxMmProbeFn fn);
 void msx_net_event(MSX *m);                                /* 5.0.57 */
 
 #define MSX_ERR_ROM_MISSING  (-1)
@@ -259,6 +269,7 @@ void msx_run_frame(MSX *m);
 void msx_opll_regs(const MSX *m, uint8_t out[64]);
 void msx_state_fixup(MSX *m, const uint8_t opll_regs[64]);
 void msx_state_fixup_audio(MSX *m, const uint8_t regs[256]);
+void msx_mvsnd_after_load(MSX *m);          /* 8.0.55: 상태 불러오기 뒤 X86MV 소리 카트리지를 그 위치에서 STOP 으로 */
 void msx_reset_maps(MSX *m);
 /* PC 시계를 RTC에 (1980-01-01 0시부터 초). 2.14 */
 void msx_rtc_set(MSX *m, uint32_t secs);
@@ -291,13 +302,17 @@ void msx_cart_set_uart(MSX *m, int n, int uart);         /* 카트에 MIDI UART 
 int  msx_midi_in(MSX *m, const uint8_t *b, int n);      /* 3.4.4: MSX-MIDI 받기에 바이트 넣기 (넣은 수) */
 extern int msx_midi_int_vol;                 /* 3.7.0: 믹서 내장 MIDI 음량 0~100 (Note On 세기) */
 extern uint32_t msx_midi_int_bytes;           /* 3.7.0: 내장 MIDI로 보낸 바이트 수 */
+extern unsigned msx_midi_frame_max, msx_midi_burst_frames;   /* 8.0.163 진단: 한 프레임 최대 MIDI 바이트, 52바이트(실기 한도)를 넘은 프레임 수 */
+extern unsigned long msx_midi_busy_polls;        /* 8.0.163 진단: "보내기 준비 안 됨"을 읽은 횟수 */
 extern unsigned long msx_midi_drop;               /* 5.2.158 진단: 가득 차서 버린 MIDI 바이트 */
+void msx_v9968_enable(MSX *m, VDP *mem);        /* 8.0.94: V9968 카트리지 (두 번째 VDP, mem = 0이면 뺌) */
 void msx_v9990_enable(MSX *m, V9990 *mem);        /* 4.0.29: Gfx9000 카트리지 (mem = 0이면 뺌) */
 void msx_joyrex_enable(MSX *m, int on);              /* 2.16: Joyrex PSG 카트리지 */
 void msx_y8950_regs(const MSX *m, uint8_t out[256]);
 uint8_t *msx_y8950_ram(MSX *m, uint32_t *size);
 extern int msx_fw_turbor;                           /* 3.4.0: 1 = turbo R 펌웨어 롬(종류 27·68)을 붙임 (기종을 불러올 때 봄) */     /* 3.3.4: ADPCM 샘플 RAM (없으면 NULL) */
 uint32_t msx_rtc_secs(int year, int mon, int day, int hour, int min, int sec);
+uint32_t msx_rtc_time(const MSX *m);                    /* 8.0.43: MSX가 지금 보는 시각(1980-01-01부터 초). MSX에서 바꾼 만큼 포함 */
 /* PAL(50 Hz)이면 1 (2.14): TMS9929A 기종, 또는 V99x8 R#9 NT 비트. force: 0 자동, 1 60 Hz, 2 50 Hz */
 int msx_is_pal(const MSX *m);
 /* 기종(config.ini)이 정한 내장 장치가 이 기계에 있나 — 실행 중 코드(본체·프런트엔드)는 m->prof.* 를 직접 보지 않고 이것만 묻는다 (MDEV_*).

@@ -29,7 +29,7 @@ static char me_msgs[12][ME_MSG];
 static int me_nmsg;
 static uint8_t me_cfg[32768];
 
-static const char *const me_vdps[] = { "TMS99x8A", "TMS9929A", "V9938", "V9958" };
+static const char *const me_vdps[] = { "TMS99x8A", "TMS9929A", "V9938", "V9958", "V9968" };
 static const int me_vrams[] = { 16, 64, 128, 192 };
 static const uint32_t me_freqs[] = { 21477270, 10738635, 7159090, 5369317, 3579545, 2386363, 1431818, 859090, 429545, 214772 };
 static const char *const me_boards[] = { "MSX", "MSX-S3527", "MSX-S1985", "MSX-T9769B", "MSX-T9769C", "MSX-ForteII" };

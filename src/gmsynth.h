@@ -51,4 +51,6 @@ const char *gm_mt32_name(int slot);
 int  gm_voices(void);                           /* 울리는 목소리 수 */
 void gm_fx_set(int rev_pct, int cho_pct, int len_pct);   /* 공간 음향 (리버브·코러스 세기·잔향 길이 %, 0~200, 100 = 곡 그대로) */
 extern int gm_rev_pct, gm_cho_pct;
+void gm_mt32_reverb(int mode);              /* 8.0.68: MT-32 리버브 고정 (0 곡대로, 1 룸 2 홀 3 플레이트 4 탭딜레이) */
+void gm_mt32_real(int on);                  /* 8.0.68: MT-32 실기 DAC 방식 (0 깨끗하게, 1 실기대로) */
 #endif

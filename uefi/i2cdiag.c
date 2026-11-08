@@ -186,18 +186,37 @@ int i2c_diag_info(char (*lines)[64], int max)
 /* 3.8.8 ACPI에서 I2C 컨트롤러·터치패드 주소 찾기 + DesignWare I2C 읽기          */
 /* ================================================================== */
 typedef struct { char name[5]; int uid; uint32_t base; } DwCtl;
-typedef struct { uint16_t addr; uint32_t speed; char src[5]; int gpin, gpol; } I2cDev;
+typedef struct { uint16_t addr; uint32_t speed; char src[5]; int gpin, gpol; int touch; } I2cDev;   /* 8.0.201: touch = 터치패드 장치(ELAN…/PNP0C50) 자신의 I2C 주소 */
 static uint32_t gpio_base;
 static DwCtl ctls[6]; static int nctls;
-static I2cDev idevs[6]; static int nidevs;
+static I2cDev idevs[16]; static int nidevs;
+/* 8.0.200: 인텔(LPSS) I2C 컨트롤러는 ACPI 장치 이름(I2C0…)과 PCI 번호(_ADR = 장치<<16 | 기능)로 이어짐 */
+typedef struct { char name[5]; uint32_t adr; } AdrEnt;
+static AdrEnt adrs[48]; static int nadrs;
+static char intel_note[4][64]; static int n_intel_note;
+static int intel_cpu_flag;
 
 static int nm_ok(const uint8_t *p) { for (int i = 0; i < 4; i++) if (!((p[i] >= 'A' && p[i] <= 'Z') || (p[i] >= '0' && p[i] <= '9') || p[i] == '_')) return 0; return 1; }
 
+/* 8.0.201: Name(_HID, ...) 값이 터치패드 ID 인가 (문자열 "ELAN900C" 또는 EISA ID PNP0C50) */
+static int hid_value_is_touch(const uint8_t *p)
+{
+    if (p[0] == 0x0D) { char sv[9]; int k = 0; while (k < 8 && p[1 + k]) { sv[k] = (char)p[1 + k]; k++; } sv[k] = 0; return is_touch(sv); }
+    if (p[0] == 0x0C) return rd32(p + 1) == 0x500CD041u;
+    return 0;
+}
 static void scan_aml2(const uint8_t *t)
 {
     uint32_t len = rd32(t + 4);
     if (len < 44 || len > 0x1000000) return;
+    uint32_t last_hid = 0; int last_hid_touch = 0;      /* 가장 가까이 앞에 나온 _HID 의 위치와 터치패드 여부 */
     for (uint32_t i = 40; i + 24 < len; i++) {
+        if (t[i] == '_' && t[i + 1] == 'H' && t[i + 2] == 'I' && t[i + 3] == 'D' && i + 12 < len) { last_hid = i; last_hid_touch = hid_value_is_touch(t + i + 4); }
+        /* 8.0.200: Name(_ADR, 0x00150001) — 앞 4바이트(PkgLen 바로 뒤)가 장치 이름 */
+        if (t[i] == '_' && t[i + 1] == 'A' && t[i + 2] == 'D' && t[i + 3] == 'R' && t[i + 4] == 0x0C && i > 6 && t[i - 1] == 0x08 && nm_ok(t + i - 5) && nadrs < 48) {
+            AdrEnt *a = &adrs[nadrs++];
+            cp_(a->name, t + i - 5, 4); a->name[4] = 0; a->adr = rd32(t + i + 5);
+        }
         /* 장치: Name(_HID, "AMDI001x") */
         if (t[i] == '_' && t[i + 1] == 'H' && t[i + 2] == 'I' && t[i + 3] == 'D' && t[i + 4] == 0x0D && !memcmp_(t + i + 5, "AMDI001", 7) && nctls < 6) {
             DwCtl *c = &ctls[nctls];
@@ -219,7 +238,7 @@ static void scan_aml2(const uint8_t *t)
             }
         }
         /* I2cSerialBusV2: 8E len(2) rev(1) srcidx(1) type=1 flags(1) tflags(2) trev(1) tlen(2) speed(4) addr(2) ... 원본 이름 */
-        if (t[i] == 0x8E && t[i + 3] == 0x01 && t[i + 5] == 0x01 && nidevs < 6) {
+        if (t[i] == 0x8E && t[i + 3] == 0x01 && t[i + 5] == 0x01 && nidevs < 16) {
             uint32_t dl = (uint32_t)t[i + 1] | ((uint32_t)t[i + 2] << 8);
             uint32_t tl = (uint32_t)t[i + 10] | ((uint32_t)t[i + 11] << 8);
             if (dl < 14 || dl > 80 || tl < 6 || tl > dl) continue;
@@ -231,6 +250,7 @@ static void scan_aml2(const uint8_t *t)
             if (src[n]) continue;
             I2cDev *d = &idevs[nidevs];
             d->addr = addr; d->speed = sp; d->src[0] = '?'; d->src[1] = 0; d->gpin = -1; d->gpol = 1;
+            d->touch = last_hid && last_hid_touch && i - last_hid < 1200;   /* 8.0.201: 이 장치 _HID 가 터치패드이고 바로 뒤에 나온 I2C 연결이면 터치패드 주소 */
             /* 같은 _CRS 근처의 GpioInt(0x8C): 8C len(2) rev type=0 gflags(2) iflags(2) cfg(1) drive(2) debounce(2) pintable-off(2) ... */
             for (int dir = 0; dir < 2 && d->gpin < 0; dir++)
                 for (int k = 1; k < 200; k++) {
@@ -275,6 +295,69 @@ static void scan_acpi2(void)
             uint64_t d = (fl >= 148 && rd64(t + 140)) ? rd64(t + 140) : (fl >= 44 ? rd32(t + 40) : 0);
             if (d) scan_aml2((const uint8_t *)(uintptr_t)d);
         }
+    }
+}
+
+/* --- 8.0.200 인텔 LPSS I2C: PCI 설정 공간(CF8/CFC)에서 BAR0 를 찾아 컨트롤러 목록에 올림 --- */
+static uint32_t cf_rd(int b, int d, int f, int off)
+{
+    uint32_t a = 0x80000000u | ((uint32_t)b << 16) | ((uint32_t)d << 11) | ((uint32_t)f << 8) | (uint32_t)(off & 0xFC), v;
+    __asm__ volatile("outl %0,%w1" : : "a"(a), "Nd"((uint16_t)0xCF8));
+    __asm__ volatile("inl %w1,%0" : "=a"(v) : "Nd"((uint16_t)0xCFC));
+    return v;
+}
+static void cf_wr(int b, int d, int f, int off, uint32_t v)
+{
+    uint32_t a = 0x80000000u | ((uint32_t)b << 16) | ((uint32_t)d << 11) | ((uint32_t)f << 8) | (uint32_t)(off & 0xFC);
+    __asm__ volatile("outl %0,%w1" : : "a"(a), "Nd"((uint16_t)0xCF8));
+    __asm__ volatile("outl %0,%w1" : : "a"(v), "Nd"((uint16_t)0xCFC));
+}
+static int is_intel_cpu(void)
+{
+    uint32_t a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
+    return b == 0x756E6547u && d == 0x49656E69u && c == 0x6C65746Eu;
+}
+static void intel_note_add(const char *name, int dev, int fn, uint32_t id, uint32_t bar_lo, uint32_t bar_hi, uint32_t cmd, const char *what)
+{
+    if (n_intel_note >= 4) return;
+    char *q = cat(intel_note[n_intel_note], "HID I2C pci "); q = cat(q, name); q = cat(q, " "); q = hex(q, (uint32_t)dev, 2); *q++ = '.'; q = dec(q, (uint32_t)fn);
+    q = cat(q, " "); q = hex(q, id >> 16, 4); q = cat(q, " bar "); if (bar_hi) q = hex(q, bar_hi, 8); q = hex(q, bar_lo & ~0xFu, 8);
+    q = cat(q, " c "); q = hex(q, cmd & 0xFFFF, 4); q = cat(q, " "); q = cat(q, what); *q = 0; n_intel_note++;
+}
+static void intel_attach(void)
+{
+    intel_cpu_flag = 1;
+    for (int d = 0; d < nidevs && nctls < 6; d++) {
+        if (!idevs[d].touch || idevs[d].src[0] == '?') continue;         /* 8.0.201: 터치패드 장치가 달린 컨트롤러만 (다른 I2C 장치 주소는 건드리지 않음) */
+        int dup = 0; for (int c = 0; c < nctls; c++) if (!scmp(ctls[c].name, idevs[d].src)) dup = 1;
+        for (int k2 = 0; k2 < d; k2++) if (idevs[k2].touch && !scmp(idevs[k2].src, idevs[d].src)) dup = 1;
+        if (dup) continue;
+        int dv = 0, fn = 0, got = 0;
+        for (int i = 0; i < nadrs && !got; i++) if (!scmp(adrs[i].name, idevs[d].src) && (adrs[i].adr >> 16) && (adrs[i].adr >> 16) < 32) { dv = (int)((adrs[i].adr >> 16) & 0x1F); fn = (int)(adrs[i].adr & 7); got = 1; }
+        if (!got) {   /* _ADR 를 못 찾으면 인텔 PCH 의 정해진 배치: I2C0~3 = 15.0~15.3, I2C4~5 = 19.0~19.1 */
+            const char *nm = idevs[d].src;
+            if (nm[0] == 'I' && nm[1] == '2' && nm[2] == 'C' && nm[3] >= '0' && nm[3] <= '5') { int n = nm[3] - '0'; dv = n < 4 ? 0x15 : 0x19; fn = n < 4 ? n : n - 4; got = 2; }
+        }
+        if (!got) { intel_note_add(idevs[d].src, 0, 0, 0, 0, 0, 0, "no _ADR"); continue; }
+        uint32_t id = cf_rd(0, dv, fn, 0);
+        if ((id & 0xFFFF) != 0x8086) { intel_note_add(idevs[d].src, dv, fn, id, 0, 0, 0, "not Intel"); continue; }
+        if ((cf_rd(0, dv, fn, 8) >> 16) != 0x0C80) { intel_note_add(idevs[d].src, dv, fn, id, 0, 0, 0, "class not 0C80"); continue; }
+        uint32_t lo = cf_rd(0, dv, fn, 0x10), hi = (lo & 6) == 4 ? cf_rd(0, dv, fn, 0x14) : 0;
+        uint32_t cmd = cf_rd(0, dv, fn, 4);
+        if (!(lo & ~0xFu) || hi) { intel_note_add(idevs[d].src, dv, fn, id, lo, hi, cmd, hi ? "bar>4G" : "no bar"); continue; }
+        if (!(cmd & 2)) { cf_wr(0, dv, fn, 4, (cmd & 0xFFFFu) | 2); cmd = cf_rd(0, dv, fn, 4); }       /* 메모리 영역 켜기 (상태 비트는 0 을 써서 건드리지 않음) */
+        {   /* 전원 상태 D3 이면 D0 로: 기능 목록에서 전원 관리(ID 1)를 찾아 PMCSR 아래 2비트를 0 으로 */
+            uint32_t cp = cf_rd(0, dv, fn, 0x34) & 0xFC;
+            for (int g = 0; g < 16 && cp >= 0x40; g++) {
+                uint32_t h = cf_rd(0, dv, fn, (int)cp);
+                if ((h & 0xFF) == 1) { uint32_t pm = cf_rd(0, dv, fn, (int)cp + 4); if (pm & 3) { cf_wr(0, dv, fn, (int)cp + 4, pm & ~3u & 0xFFFFu); BS->Stall(10000); } break; }
+                cp = (h >> 8) & 0xFC;
+            }
+        }
+        DwCtl *c = &ctls[nctls++];
+        cp_(c->name, idevs[d].src, 5); c->uid = -1; c->base = lo & ~0xFu;
+        intel_note_add(c->name, dv, fn, id, lo, hi, cmd, got == 2 ? "ok(fixed map)" : "ok");
     }
 }
 
@@ -367,9 +450,11 @@ static int hid_probe(void)
         }
         dw = (volatile uint32_t *)(uintptr_t)ctls[c].base;
         tp_comp = rg(0xFC);
+        if (intel_cpu_flag && tp_comp != 0x44570140u) { wg(0x204, 0); us(100); wg(0x204, 3); us(1000); tp_comp = rg(0xFC); }   /* 8.0.200: 인텔 LPSS 리셋 풀기 (레지스터 0x204, 리눅스 intel-lpss 와 같음) — DesignWare 로 안 보일 때만 */
         if (tp_comp == 0xFFFFFFFFu || tp_comp == 0) { scpy(tp_err, "no response at controller address"); continue; }
         if (tp_comp != 0x44570140u) { scpy(tp_err, "not a DesignWare I2C (no write)"); continue; }   /* 3.9.2: 확인 전에는 쓰지 않음 */
         for (int d = 0; d < nidevs; d++) {
+            if (intel_cpu_flag && !idevs[d].touch) continue;     /* 8.0.201: 인텔은 터치패드 주소만 (EEPROM 등 다른 장치에 쓰기를 보내지 않음) */
             if (scmp(idevs[d].src, ctls[c].name) && idevs[0].src[0] != '?') continue;
             if (dw_setup(idevs[d].addr)) { scpy(tp_err, "controller enable timeout"); continue; }
             int bad = dw_xfer(rq, 2, hid_desc, 30);
@@ -509,12 +594,19 @@ void i2c_tp_init(void)
 {
     if (tp_inited) return;
     tp_inited = 1;
-    {   /* 3.9.2: AMD 컨트롤러에서만 시험됨. 다른 CPU(인텔 등)는 건드리지 않음 */
+    {   /* 3.9.2: AMD 컨트롤러에서 시험됨. 8.0.200: 인텔(LPSS)도 시험. 그 밖의 CPU 는 건드리지 않음 */
         uint32_t a, b, c, d;
         __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
-        if (!(b == 0x68747541u && d == 0x69746E65u && c == 0x444D4163u)) { scpy(tp_err, "skipped: not AMD CPU"); tp_state = -1; return; }
+        int amd = b == 0x68747541u && d == 0x69746E65u && c == 0x444D4163u;
+        if (!amd && !is_intel_cpu()) { scpy(tp_err, "skipped: not AMD/Intel CPU"); tp_state = -1; return; }
     }
+    if (is_intel_cpu()) { scpy(tp_err, "Intel I2C touchpad not supported"); tp_state = -1; return; }   /* 8.0.220: 인텔 PC 는 건드리지 않음 (터치패드는 PS/2 로 동작) */
     scan_acpi2();
+    if (is_intel_cpu()) {
+        int any_touch = 0; for (int d = 0; d < nidevs; d++) if (idevs[d].touch) any_touch = 1;
+        if (!any_touch) { scpy(tp_err, "ACPI: touchpad I2C address not found (other devices not probed)"); tp_state = -1; return; }
+        intel_attach();
+    }
     if (nctls && nidevs) { if (!hid_probe() && !tp_err[0]) scpy(tp_err, "probe failed"); if (!tp_state) tp_state = -1; }
     else scpy(tp_err, "ACPI: no controller/device found");
     if (tp_state == 1) parse_rdesc();
@@ -557,8 +649,14 @@ int i2c_diag_info2(char (*lines)[64], int max)
         char *q = cat(lines[n], "HID I2C ctl "); q = cat(q, ctls[c].name); q = cat(q, " uid "); q = dec(q, (uint32_t)(ctls[c].uid < 0 ? 0 : ctls[c].uid));
         q = cat(q, " @"); q = hex(q, ctls[c].base, 8); *q = 0; n++;
     }
+    if (nadrs && n < max) {   /* 8.0.201: ACPI _ADR (장치<<16 | 기능) — I2C 이름이 어느 PCI 번호인지 */
+        char *q = cat(lines[n], "HID I2C adr "); int shown = 0;
+        for (int i = 0; i < nadrs && shown < 4 && (UINTN)(q - lines[n]) < 44; i++) if (adrs[i].name[0] == 'I' && adrs[i].name[1] == '2' && adrs[i].name[2] == 'C') { q = cat(q, adrs[i].name); *q++ = '='; q = hex(q, adrs[i].adr, 8); *q++ = ' '; shown++; }
+        if (!shown) q = cat(q, "no I2Cn names"); *q = 0; n++;
+    }
+    for (int k = 0; k < n_intel_note && n < max; k++) { cp_(lines[n], intel_note[k], 64); lines[n][63] = 0; n++; }   /* 8.0.200 */
     for (int d = 0; d < nidevs && n < max; d++) {
-        char *q = cat(lines[n], "HID I2C dev addr "); q = hex(q, idevs[d].addr, 2); q = cat(q, " on "); q = cat(q, idevs[d].src); q = cat(q, " "); q = dec(q, idevs[d].speed / 1000); q = cat(q, "kHz"); *q = 0; n++;
+        char *q = cat(lines[n], "HID I2C dev addr "); q = hex(q, idevs[d].addr, 2); q = cat(q, " on "); q = cat(q, idevs[d].src); q = cat(q, " "); q = dec(q, idevs[d].speed / 1000); q = cat(q, "kHz"); if (idevs[d].touch) q = cat(q, " TP"); *q = 0; n++;
     }
     if (tp_state == 1) {
         if (n < max) { char *q = cat(lines[n], "HID I2C DW id "); q = hex(q, tp_comp, 8); q = cat(q, " HID ver "); q = hex(q, h_ver, 4); *q = 0; n++; }

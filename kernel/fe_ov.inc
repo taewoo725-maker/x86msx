@@ -39,12 +39,12 @@ static int ob_at(uint32_t x, uint32_t y)
 }
 
 /* ---- 미디어 판에 들어갈 장치 ---- */
-enum { MD_SLOT1, MD_SLOT2, MD_SLOT3, MD_SLOT4, MD_SLOT5, MD_DISKA, MD_DISKB, MD_HD, MD_TAPE, MD_N };   /* 3.7.3: 하드 디스크 → 카세트 (맨 아래, 앞에 줄) */
+enum { MD_SLOT1, MD_SLOT2, MD_SLOT3, MD_SLOT4, MD_SLOT5, MD_SLOT6, MD_SLOT7, MD_SLOT8, MD_DISKA, MD_DISKB, MD_HD, MD_TAPE, MD_N };   /* 3.7.3: 하드 디스크 → 카세트 (맨 아래, 앞에 줄) */
 static int md_has(int k)
 {
     if (k <= MD_SLOT2) return 1;
     if (k <= MD_SLOT4) return slot_expand || M->cart_slot[k] >= 0;      /* 3.3.1: 기종의 C·D */
-    if (k == MD_SLOT5) return M->cart_slot[4] >= 0;                     /* 3.6.7 */
+    if (k >= MD_SLOT5 && k <= MD_SLOT8) return M->cart_slot[k] >= 0;    /* 3.6.7, 8.0.181: 칸 5~8 */
     if (k == MD_DISKA) return disk_drives() >= 1;
     if (k == MD_DISKB) return disk_drives() >= 2;
     return 1;                                                            /* 카세트, 3.7.3: 하드 디스크도 늘 (가상 하드 C~H 메뉴) */
@@ -58,7 +58,7 @@ static int md_busy(int k)
 }
 static const char *md_name(int k)
 {
-    if (k <= MD_SLOT5) return cart_name[k][0] ? cart_name[k] : 0;
+    if (k <= MD_SLOT8) return cart_name[k][0] ? cart_name[k] : 0;
     if (k <= MD_DISKB) return disk_size[k - MD_DISKA] && disk_name[k - MD_DISKA][0] ? disk_name[k - MD_DISKA] : 0;
     if (k == MD_TAPE) return M->tape && tape_name[0] ? tape_name : 0;
     if (hd_secs && hd_name[0]) return hd_name;
@@ -67,10 +67,10 @@ static const char *md_name(int k)
     for (int i = 0; i < 6; i++) if (vhd_dir[i][0]) { char dl[5] = { (char)('C' + i), ':', ' ', 0, 0 }; copy_str(vn, sizeof vn, dl); str_append(vn, sizeof vn, vhd_dir[i]); return vn; }
     return 0;
 }
-static int md_icon(int k) { return k <= MD_SLOT5 ? ICON_CART : k <= MD_DISKB ? ICON_FDD : k == MD_TAPE ? ICON_CAS : ICON_HD; }
-static const int md_insert[MD_N] = { A_CART1_INSERT, A_CART2_INSERT, A_CART3_INSERT, A_CART4_INSERT, A_CART5_INSERT, A_DISKA_INSERT, A_DISKB_INSERT, A_HD_INSERT, A_TAPE_INSERT };
-static const int md_eject[MD_N] = { A_CART1_EJECT, A_CART2_EJECT, A_CART3_EJECT, A_CART4_EJECT, A_CART5_EJECT, A_DISKA_EJECT, A_DISKB_EJECT, A_HD_EJECT, A_TAPE_EJECT };
-static const Menu *const md_menu[MD_N] = { &m_cart1, &m_cart2, &m_cart3, &m_cart4, &m_cart5, &m_diska, &m_diskb, &m_hd, &m_tape };
+static int md_icon(int k) { return k <= MD_SLOT8 ? ICON_CART : k <= MD_DISKB ? ICON_FDD : k == MD_TAPE ? ICON_CAS : ICON_HD; }
+static const int md_insert[MD_N] = { A_CART1_INSERT, A_CART2_INSERT, A_CART3_INSERT, A_CART4_INSERT, A_CART5_INSERT, A_CART6_INSERT, A_CART7_INSERT, A_CART8_INSERT, A_DISKA_INSERT, A_DISKB_INSERT, A_HD_INSERT, A_TAPE_INSERT };
+static const int md_eject[MD_N] = { A_CART1_EJECT, A_CART2_EJECT, A_CART3_EJECT, A_CART4_EJECT, A_CART5_EJECT, A_CART6_EJECT, A_CART7_EJECT, A_CART8_EJECT, A_DISKA_EJECT, A_DISKB_EJECT, A_HD_EJECT, A_TAPE_EJECT };
+static const Menu *const md_menu[MD_N] = { &m_cart1, &m_cart2, &m_cart3, &m_cart4, &m_cart5, &m_cart6, &m_cart7, &m_cart8, &m_diska, &m_diskb, &m_hd, &m_tape };
 
 /* ---- 자리 ---- */
 #define RP_CH (SLH + LH + 20 * S)
@@ -312,7 +312,7 @@ static void rp_draw(void)
         uint32_t kw = key ? chip_w(key) : 0;
         if (kw + 30 * S > tw) { key = 0; kw = 0; }
         char lb[80] = "";
-        if (k <= MD_SLOT5) {
+        if (k <= MD_SLOT8) {
             copy_str(lb, sizeof lb, T(S_OV_SLOT)); str_append(lb, sizeof lb, " "); num_append(lb, sizeof lb, (uint32_t)k + 1, 0, ' ');
             if (M->cart[k].present) { const char *mt = cart_special[k] ? 0 : cart_mapper_name((MapperType)M->cart[k].mapper); if (mt && mt[0]) { str_append(lb, sizeof lb, " · "); str_append(lb, sizeof lb, mt); } }
         } else if (k <= MD_DISKB) {
@@ -378,7 +378,7 @@ static void ov_check(void)
         OVH(md_has(k)); OVH(md_busy(k));
         const char *n = md_name(k);
         if (n) for (const char *q = n; *q; q++) OVH(*q);
-        if (k <= MD_SLOT5) OVH(M->cart[k].mapper);
+        if (k <= MD_SLOT8) OVH(M->cart[k].mapper);
     }
     OVH(M->tape ? M->tape_pos / 256 : 0); OVH(disk_wp[0]); OVH(disk_wp[1]);
     OVH(monitor_kind); OVH(scanlines != 0); OVH(joy_mode[0]); OVH(joy_mode[1]); OVH(mouse_port);

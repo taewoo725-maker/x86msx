@@ -21,6 +21,9 @@ const MsxStatusDecl msx_status_decl[MS_N] = {
     [MS_SLOT3] = { "SLOT3", "CART",  0,        "SLOT3" },
     [MS_SLOT4] = { "SLOT4", "CART",  0,        "SLOT4" },
     [MS_SLOT5] = { "SLOT5", "CART",  0,        "SLOT5" },
+    [MS_SLOT6] = { "SLOT6", "CART",  0,        "SLOT6" },   /* 8.0.181: 카트리지 8칸 */
+    [MS_SLOT7] = { "SLOT7", "CART",  0,        "SLOT7" },
+    [MS_SLOT8] = { "SLOT8", "CART",  0,        "SLOT8" },
     [MS_CPU]   = { "CPU",   "Z80",   "R800",   "CPU"   },
     [MS_V9990] = { "V9990", "V9990", 0,        "V9990" },
     [MS_NET]   = { "NET",   "NET",   0,        "NET"   },     /* 네트워크 카드. 연결됐나(주소를 받았나)는 호스트가 아는 것이라 fe 가 더함 */
@@ -38,7 +41,7 @@ void msx_status(MSX *m, uint8_t st[MS_N], uint8_t alt[MS_N])
     {   int ide = 0;                                                    /* 하드 디스크: IDE·SCSI 카트리지가 있어야 */
         for (int n = 0; n < MSX_CART_ALL; n++) if (m->cart[n].present && CART_IS_IDE(m->cart[n].mapper)) ide = 1;
         st[MS_HD] = ide ? SS_OFF : SS_NONE; }
-    for (int k = 0; k < 5; k++) st[MS_SLOT1 + k] = m->cart[k].present ? SS_ON : m->cart_slot[k] < 0 ? SS_NONE : SS_OFF;
+    for (int k = 0; k < MSX_CART_SLOTS; k++) st[MS_SLOT1 + k] = m->cart[k].present ? SS_ON : m->cart_slot[k] < 0 ? SS_NONE : SS_OFF;
     st[MS_CPU] = SS_ON; alt[MS_CPU] = m->cpu.r800 != 0;
     st[MS_V9990] = !m->v9 ? SS_NONE : v9990_visible(m->v9) ? SS_ON : SS_OFF;
     st[MS_NET] = m->net.enabled ? SS_ON : SS_NONE;                     /* 네트워크 카트(UNAPI)가 꽂혀 있음 */

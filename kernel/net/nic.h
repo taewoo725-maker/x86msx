@@ -32,5 +32,4 @@ int  nic_pci_find(uint16_t ven, uint16_t dev, int *b, int *d, int *f);
 extern const Nic nic_rtw;                /* 5.0.157 UEFI 1번 Lenovo V14-ARE 무선 10EC:C822 (uefi/rtwdet.c) */
 extern const Nic nic_r8152;              /* 5.2.110 UEFI USB 유선 Realtek RTL8152/8153 (uefi/usbnic_r8152.c) */
 extern const Nic nic_asix;               /* 5.2.117 UEFI USB 유선 ASIX AX88772/AX88179 (uefi/usbnic_asix.c, 미시험) */
-extern const Nic nic_bcm57785;           /* 5번 Acer Aspire V5-171 유선 14E4:16B5 */
 #endif

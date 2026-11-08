@@ -64,6 +64,13 @@ int main(int argc, char **argv)
     msx_midi_in(&m, note, 1);
     run_cycles(3000);
     f += expect("RxE off: no RxRDY", (msx_io_read(&m, 0xE9) >> 1) & 1, 0); t++;
+    /* 8.0.163: 소프트웨어 음원 보내기는 8배 빠름 (143클럭/바이트). 큐가 차면 실기 속도(1146클럭)로 되돌림 */
+    msx_io_write(&m, 0xE9, 0x05);                       /* TxEN */
+    run_cycles(60000);                                  /* 앞서 보낸 것이 다 나가게 */
+    msx_io_write(&m, 0xE8, 0x90); msx_io_write(&m, 0xE8, 0x3C);   /* 두 바이트를 연달아 */
+    f += expect("TxRDY busy right after 2nd byte", msx_io_read(&m, 0xE9) & 1, 0); t++;
+    m.cpu.cycles += 200;                                /* 8배 속도면 143 클럭 뒤 준비됨 (실기 속도면 아직) */
+    f += expect("TxRDY ready after 200 clocks (x8)", msx_io_read(&m, 0xE9) & 1, 1); t++;
     printf("miditest: %d/%d passed\n", t - f, t);
     return f != 0;
 }
